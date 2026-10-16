@@ -1,5 +1,5 @@
 import { type FormEvent, useState, useRef, useEffect } from 'react';
-import { Paperclip, ArrowUp, FileCode, X, UploadCloud, ChevronUp } from 'lucide-react';
+import { Paperclip, ArrowUp, FileCode, X, UploadCloud, ChevronUp, Square } from 'lucide-react';
 import { MODELS } from '../constants';
 import { prepareImageFile, IMAGE_MODE_ORDER, imageModeLabel, imageModeHint, DEFAULT_IMAGE_MODE, type AttachedImage, type ImageMode } from '../lib/imageAttach';
 
@@ -20,6 +20,8 @@ interface CommandBarProps {
   input: string;
   loading: boolean;
   onSend: (e: FormEvent) => void;
+  /** T2: istek sürerken gönder düğmesi Durdur'a döner ve fetch'i iptal eder. */
+  onStop?: () => void;
   setInput: (value: string) => void;
   setTargetModel: (model: string) => void;
   targetModel: string;
@@ -31,6 +33,7 @@ export function CommandBar({
   input,
   loading,
   onSend,
+  onStop,
   setInput,
   setTargetModel,
   targetModel,
@@ -343,15 +346,26 @@ export function CommandBar({
               />
             </button>
 
-            {/* Send arrow button */}
-            <button
-              type="submit"
-              disabled={loading || (!input.trim() && images.length === 0)}
-              className="flex items-center justify-center w-6 h-6 bg-obsidian-text text-obsidian-bg rounded-md cursor-pointer disabled:opacity-20 disabled:cursor-not-allowed hover:bg-obsidian-text/90 transition-all"
-              title="Send Command"
-            >
-              <ArrowUp size={12} strokeWidth={2.5} />
-            </button>
+            {/* Send arrow — while a request is in flight it turns into Stop */}
+            {loading && onStop ? (
+              <button
+                type="button"
+                onClick={onStop}
+                className="flex items-center justify-center w-6 h-6 bg-[#D14D41] hover:bg-[#E0685C] text-white rounded-md cursor-pointer transition-all"
+                title="Stop request"
+              >
+                <Square size={9} strokeWidth={0} fill="currentColor" />
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={loading || (!input.trim() && images.length === 0)}
+                className="flex items-center justify-center w-6 h-6 bg-obsidian-text text-obsidian-bg rounded-md cursor-pointer disabled:opacity-20 disabled:cursor-not-allowed hover:bg-obsidian-text/90 transition-all"
+                title="Send Command"
+              >
+                <ArrowUp size={12} strokeWidth={2.5} />
+              </button>
+            )}
           </div>
         </div>
       </form>

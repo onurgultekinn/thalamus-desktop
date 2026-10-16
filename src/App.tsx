@@ -191,6 +191,8 @@ export default function App() {
   };
   const [loading, setLoading] = useState<boolean>(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  // T2: süren AI isteğini iptal etmek için (Stop düğmesi).
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const [chats, setChats] = useState<ChatItem[]>(() => {
     try {
@@ -350,6 +352,20 @@ export default function App() {
     const nowTime = ts();
     let currentId = activeChatId;
 
+    // T2: aktif isteğin AbortSignal'i; Stop düğmesi bunu iptal eder.
+    const currentAbort = new AbortController();
+    abortControllerRef.current = currentAbort;
+    const signal = currentAbort.signal;
+
+    /** İstek iptal mi geldi: kullanıcı Stop (abort) mi, 180s timeout mu? */
+    const abortKind = (): 'stop' | 'timeout' | null => {
+      if (!signal.aborted) return null;
+      const reason = signal.reason;
+      return reason instanceof Error && String((reason as Error).message).includes('TIMEOUT')
+        ? 'timeout'
+        : 'stop';
+    };
+
     if (!currentId || chats.length === 0) {
       currentId = 'chat_' + Date.now();
       const generatedTitle = userText.length > 22 ? userText.slice(0, 22) + '...' : userText;
@@ -437,7 +453,7 @@ export default function App() {
           const res = await aiChat([
             ...history,
             userMessage(userText.trim() || 'Describe this image in detail.', images.map((i) => ({ url: i.url, detail: i.detail }))),
-          ]);
+          ], [], null, signal);
           applyMessages(prev => [...prev, {
             role: 'assistant',
             content: res.content,
@@ -447,14 +463,21 @@ export default function App() {
           }]);
         }
       } catch (err) {
+        // T2: kullanıcı Stop'a bastıysa hata mesajı yazılmaz; dürüst not düşülür.
+        const kind = abortKind();
         applyMessages(prev => [...prev, {
           role: 'assistant',
-          content: `⚠️ **Vision request failed:** ${err instanceof Error ? err.message : String(err)}`,
+          content: kind === 'stop'
+            ? 'Request stopped.'
+            : kind === 'timeout'
+              ? '⚠️ **Request timed out** after 180 s — no response arrived.'
+              : `⚠️ **Vision request failed:** ${err instanceof Error ? err.message : String(err)}`,
           timestamp: ts(),
-          modelName: 'Vision model (request failed)',
+          modelName: kind ? 'Vision model (request aborted)' : 'Vision model (request failed)',
         }]);
       } finally {
         setLoading(false);
+        abortControllerRef.current = null;
       }
       return;
     }
@@ -494,7 +517,7 @@ export default function App() {
           },
           ...history,
           userMessage(userText),
-        ]);
+        ], [], null, signal);
         applyMessages(prev => [...prev, {
           role: 'assistant',
           content: res.content,
@@ -503,15 +526,26 @@ export default function App() {
         }]);
       }
     } catch (err) {
+      const kind = abortKind();
       applyMessages(prev => [...prev, {
         role: 'assistant',
-        content: `⚠️ **Request failed:** ${err instanceof Error ? err.message : String(err)}`,
+        content: kind === 'stop'
+          ? 'Request stopped.'
+          : kind === 'timeout'
+            ? '⚠️ **Request timed out** after 180 s — no response arrived.'
+            : `⚠️ **Request failed:** ${err instanceof Error ? err.message : String(err)}`,
         timestamp: ts(),
         modelName: LOCAL_ENGINE_STAMP,
       }]);
     } finally {
       setLoading(false);
+      abortControllerRef.current = null;
     }
+  };
+
+  /** T2: süren isteği durdurur; fetch AbortError fırlatır, mesaj "Request stopped." yazılır. */
+  const handleStopRequest = () => {
+    if (abortControllerRef.current) abortControllerRef.current.abort();
   };
 
   const handleSend = async (e: FormEvent) => {
@@ -650,6 +684,7 @@ export default function App() {
                   input={input}
                   loading={loading}
                   onSend={handleSend}
+                  onStop={handleStopRequest}
                   setInput={setInput}
                   setTargetModel={(m) => {
                     setTargetModel(m);

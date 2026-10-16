@@ -142,26 +142,40 @@ export function userMessage(text: string, images: AiImageInput[] = []): AiMessag
 export async function aiChat(
   messages: AiMessage[],
   codeBlocks: CodeBlock[] = [],
-  provider?: ActiveProvider | null
+  provider?: ActiveProvider | null,
+  signal?: AbortSignal
 ): Promise<AiChatResponse> {
   const p = provider ?? (await getActiveProvider());
   if (!p) throw new Error('API_KEY_MISSING');
 
-  const res = await fetch(`${API_BASE}/api/ai/chat`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      provider: p.id,
-      api_key: p.key,
-      model: p.model,
-      base_url: p.baseUrl || undefined,
-      messages,
-      code_blocks: codeBlocks,
-    }),
-  });
-  if (!res.ok) {
-    const detail = await res.text().catch(() => '');
-    throw new Error(`HTTP ${res.status} ${detail}`.trim());
+  // Backend'de 120s transport timeout var; buradaki 180s üst sınır, asılı
+  // isteklerin arayüzü sonsuz kilitlememesi için istemci tarafı güvencesi.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new Error('TIMEOUT_180S')), 180_000);
+  const relayAbort = () => controller.abort();
+  signal?.addEventListener('abort', relayAbort, { once: true });
+
+  try {
+    const res = await fetch(`${API_BASE}/api/ai/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        provider: p.id,
+        api_key: p.key,
+        model: p.model,
+        base_url: p.baseUrl || undefined,
+        messages,
+        code_blocks: codeBlocks,
+      }),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      throw new Error(`HTTP ${res.status} ${detail}`.trim());
+    }
+    return (await res.json()) as AiChatResponse;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', relayAbort);
   }
-  return (await res.json()) as AiChatResponse;
 }
