@@ -16,6 +16,7 @@ import { API_BASE } from './services/ThalamusClient';
 import { aiChat, userMessage, getActiveProvider } from './services/aiClient';
 import { DEFAULT_MODEL_NAME, MODEL_PRICING } from './constants';
 import { getWorkspaceName, getWorkspaceRoot, openProject, pruneRecentProjects, rememberProject } from './lib/workspace';
+import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import type { Message, ChatItem, User } from './types';
 export type { Message, MessageMetrics, ChatItem } from './types';
 import './App.css';
@@ -69,6 +70,37 @@ export default function App() {
     let savedTheme: string | null = 'dark';
     try { savedTheme = localStorage.getItem('tlm_theme'); } catch {}
     applyTheme(savedTheme === 'nord-red' ? 'nord-red' : 'dark');
+  }, []);
+
+  // T1 close-guard: Rust CloseRequested'i önler ve bu olayı iletir; kirli
+  // editör tamponu varsa kullanıcıya sorulur, aksi hâlde destroy ile kapatılır.
+  useEffect(() => {
+    const win = getCurrentWebviewWindow();
+    let off: (() => void) | undefined;
+    let disposed = false;
+    win.listen('close-requested', () => {
+      let dirtyFiles: string[] = [];
+      try {
+        const map = JSON.parse(localStorage.getItem('thalamus_dirty_buffers_v1') || '{}');
+        dirtyFiles = Object.keys(map).filter((k) => typeof (map as Record<string, unknown>)[k] === 'string');
+      } catch {}
+      if (dirtyFiles.length === 0) {
+        void win.destroy();
+        return;
+      }
+      const names = dirtyFiles.map((f) => f.split('/').pop()).join(', ');
+      const proceed = window.confirm(
+        `${dirtyFiles.length} file(s) have unsaved changes: ${names}. Close anyway and lose them? (Tip: Ctrl+S saves.)`
+      );
+      if (proceed) void win.destroy();
+    }).then((unlisten) => {
+      if (disposed) unlisten();
+      else off = unlisten;
+    });
+    return () => {
+      disposed = true;
+      off?.();
+    };
   }, []);
 
 

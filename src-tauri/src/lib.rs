@@ -751,6 +751,14 @@ pub fn run() {
             workspace_root,
             backend_status,
         })
+        // T1 close-guard: pencere X / Alt+F4 kapatmayı sorunsuz kapatır;
+        // webview'daki kirli-editör kontrolü destroy() ile asıl kapanışı yapar.
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.emit("close-requested", ());
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             start_terminal,
             write_terminal,
