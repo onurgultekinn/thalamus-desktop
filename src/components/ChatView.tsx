@@ -176,7 +176,8 @@ export function ChatView({
                     <span>{msg.role === 'user' ? (userName || 'Anonymous User') : 'Thalamus Engine'}</span>
                   </div>
                   <div className="msg-header-right">
-                    <span className="msg-model-name">{msg.modelName || targetModel}</span>
+                    {/* D1: modelName yoksa pazarlama modeli uydurma — motoru soyle */}
+                    <span className="msg-model-name">{msg.modelName || 'Local Compression Engine'}</span>
                     <span className="dot-separator">·</span>
                     <span>
                       {msg.metrics?.executionTimeMs

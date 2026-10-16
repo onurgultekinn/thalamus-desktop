@@ -131,6 +131,8 @@ export function SettingsModal({
   const [keysLoaded, setKeysLoaded] = useState<boolean>(false);
   const keysStatusRef = useRef<'loading' | 'ok' | 'error'>('loading');
   const loadedKeysRef = useRef<Record<string, string>>({});
+  // D10: modalin acilis anindaki tema (Cancel'da geri alinacak deger).
+  const themeAtOpenRef = useRef<'dark' | 'nord-red'>('dark');
   const [baseUrls, setBaseUrls] = useState<Record<string, string>>({});
   const [activeProvider, setActiveProvider] = useState<string>('openai');
   const [visibleProvider, setVisibleProvider] = useState<string | null>(null);
@@ -325,7 +327,7 @@ export function SettingsModal({
 
   // D10: tema dügmesi anlik onizleme uygular; kaydetmeden kapatirken (Cancel,
   // X, overlay) modalin ACILISTAKI temasina donulur. Cancel gercekten iptal.
-  const themeAtOpenRef = useRef<'dark' | 'nord-red'>('dark');
+  // (themeAtOpenRef hook kurali geregi diğer hook'larla birlikte tepede.)
   const requestClose = () => {
     if (theme !== themeAtOpenRef.current) {
       setTheme(themeAtOpenRef.current);
