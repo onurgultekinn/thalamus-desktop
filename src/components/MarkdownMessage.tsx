@@ -82,7 +82,7 @@ export const MarkdownMessage: React.FC<MarkdownMessageProps> = React.memo(({ con
   );
 
   return (
-    <div className="relative text-zinc-300 text-[13px] leading-relaxed word-break-words">
+    <div className="relative text-zinc-300 text-[13px] leading-relaxed break-words min-w-0">
       <ReactMarkdown
         components={{
           h1({ children }) {

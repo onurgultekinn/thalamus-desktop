@@ -758,6 +758,10 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
 
   useEffect(() => {
     const handleKeyDownGlobal = (e: KeyboardEvent) => {
+      // T3: focus terminaldeyse Ctrl+S/Ctrl+R editör kısayolu olarak yutulmaz —
+      // xterm'in PowerShell'e giden Control+S/R (Ctrl+R = geçmiş arama) korunur.
+      const inTerminal = e.target instanceof HTMLElement && !!e.target.closest('.xterm');
+      if (inTerminal) return;
       if ((e.ctrlKey || e.metaKey) && e.key === 's') {
         e.preventDefault();
         handleSaveActiveFile();
@@ -1026,7 +1030,8 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
                   type="button"
                   aria-label={`Close ${fileName}`}
                   onClick={(e) => handleCloseTab(e, fileName)}
-                  className="hover:text-[#D14D41] p-1 -m-0.5 rounded cursor-pointer"
+                  title="Close tab"
+                  className="w-[18px] h-[18px] flex items-center justify-center flex-shrink-0 rounded hover:text-[#D14D41] hover:bg-[#34332F]/40 cursor-pointer transition-colors"
                 >
                   <X size={14} />
                 </button>
