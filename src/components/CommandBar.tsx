@@ -285,16 +285,19 @@ export function CommandBar({
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Model selection dropdown button */}
+            {/* D1/D8: bu secici bir MALIYET TAHMIN referansidir. Metin
+                sayfagi model CAGIRMAZ (yerel sikistirma motoru); ≈ ve title
+                ile bu durustce belirtilir. */}
             <button
               type="button"
+              title="Cost-estimate reference only. Text chat runs on the local compression engine and calls no model API; this choice only changes the ≈ cost figures."
               onClick={() => {
                 setIsModelMenuOpen(!isModelMenuOpen);
                 setIsFileMenuOpen(false);
               }}
               className="flex items-center gap-1.5 bg-obsidian-button/40 border border-obsidian-border px-2.5 py-1 rounded-md text-obsidian-text text-[11px] cursor-pointer hover:bg-obsidian-button transition-colors font-medium"
             >
-              <span>{targetModel}</span>
+              <span>≈ {targetModel}</span>
               <ChevronUp 
                 size={11} 
                 className={`text-obsidian-muted transition-transform duration-150 ${isModelMenuOpen ? 'rotate-180' : ''}`} 

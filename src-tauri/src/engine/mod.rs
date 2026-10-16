@@ -119,6 +119,11 @@ mod tests {
         let prompt = r#"bu json'u bozma: {"a":1,"b":2}"#;
         let forced = process_with_metrics(prompt, &bpe(), true);
         assert_ne!(forced.processed_prompt, prompt);
+        // D2: veto_override altinda kayipsizlik DOGRULANMISTIR — bayrak
+        // yanlis yakilmasin ("verified lossless" rozetinin tek kaynagi).
+        assert!(!forced.lossless_verified);
+        let normal = process_with_metrics(prompt, &bpe(), false);
+        assert!(normal.lossless_verified);
     }
 
     #[test]

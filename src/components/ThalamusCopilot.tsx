@@ -261,7 +261,16 @@ export function ThalamusCopilot({
       : [];
     const images = pendingImagesRef.current.map((i) => ({ url: i.url, detail: i.detail }));
     clearPendingImages();
-    return aiChat([userMessage(prompt, images)], codeBlocks);
+    // D3: konusma DURUMU gonderilir (son 10 gercek mesaj) — copilot artik
+    // "hafizasiz" degil; "Thinking..." placeholder'i ve bos mesajlar elenir.
+    const history = messages
+      .filter(m => m.text.trim().length > 0 && m.text !== 'Thinking...')
+      .slice(-10)
+      .map(m => ({
+        role: (m.sender === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
+        content: m.text,
+      }));
+    return aiChat([...history, userMessage(prompt, images)], codeBlocks);
   };
 
   const doSend = (raw: string) => {
@@ -270,6 +279,12 @@ export function ThalamusCopilot({
 
     const userText = raw.trim();
     const contextInfo = selectedFiles.length > 0 ? ` [Reference: ${selectedFiles.join(', ')}]` : '';
+    // D4: @referansi SUS donanin otesi — modele dosya adlari verilir ve
+    // read_file araciyla gercekten acabilecekleri soylenir (backend araclari
+    // workspace icinde dosya okuyabiliyor).
+    const referenceNote = selectedFiles.length > 0
+      ? `\nReferenced files (workspace-relative paths — open their contents with the read_file tool when needed): ${selectedFiles.join(', ')}`
+      : '';
 
     // Slash command expansion: /explain, /review, /refactor, /tests
     const firstTok = userText.split(/\s+/)[0];
@@ -307,10 +322,12 @@ export function ThalamusCopilot({
     let systemPrompt = "";
     if (isAgent) {
       systemPrompt = inPlanMode
-        ? `Agent Mode (PLAN MODE). Active file: ${activeFile}\n\nTask: ${aiText}\n\nProduce ONLY a detailed PLAN; do NOT edit code (do not write a SEARCH/REPLACE block). Steps, functions to touch, risks and a verification suggestion.`
-        : `Agent Mode. Active file: ${activeFile}\n\nUser request: ${aiText}\n\nApply your changes as SEARCH/REPLACE blocks (format is provided to you).`;
+        ? `Agent Mode (PLAN MODE). Active file: ${activeFile}${referenceNote}\n\nTask: ${aiText}\n\nProduce ONLY a detailed PLAN; do NOT edit code (do not write a SEARCH/REPLACE block). Steps, functions to touch, risks and a verification suggestion.`
+        : `Agent Mode. Active file: ${activeFile}${referenceNote}\n\nUser request: ${aiText}\n\nApply your changes as SEARCH/REPLACE blocks (format is provided to you).`;
     } else {
-      systemPrompt = `You are Thalamus Copilot, an AI assistant. Help the user analyze or understand their code. Answer in English.\nActive file: ${activeFile}\n\nUser question: ${aiText}`;
+      // D5: "Answer in English" kaldirildi — kullanicinin diline saygi
+      // (Türkce yazana Türkce yanit) birinci kural.
+      systemPrompt = `You are Thalamus Copilot, an AI assistant. Help the user analyze or understand their code. Always answer in the same language the user writes in (Turkish user → answer in Turkish).\nActive file: ${activeFile}${referenceNote}\n\nUser question: ${aiText}`;
     }
 
     callRealAI(systemPrompt)

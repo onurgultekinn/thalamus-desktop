@@ -34,6 +34,13 @@ export interface CompressionMetrics {
   savings_percentage: number;
   execution_time_ms: number;
   /**
+   * D2: true yalnızca normal yolda (motor her segmenti kayipsizlik
+   * dogrulamasindan gecirdi). `veto_override` ile üretilen ciktilarda false —
+   * UI "verified lossless" rozetini buna göre yakar. Eski backend'lerden
+   * alan gelmezse (undefined) normal yol varsayilir.
+   */
+  lossless_verified?: boolean;
+  /**
    * True when the backend is unreachable. In this case the result is not real
    * engine output but a safe raw-text passthrough — the UI must honestly
    * inform the user of this (a silent illusion of success is forbidden).

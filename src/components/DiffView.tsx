@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Copy, Check } from 'lucide-react';
+import { Copy, Check, AlertTriangle } from 'lucide-react';
 import { SyntaxHighlighter, vscDarkPlus } from '../lib/codeHighlight';
 import { MODELS } from '../constants';
 
@@ -11,6 +11,8 @@ export interface DiffCodeData {
   savingsPercentage?: number;
   /** Engine compression time (ms) — real measurement */
   engineTimeMs?: number;
+  /** D2: motor kayipsizligi gercekten dogruladi mi (veto override: false) */
+  losslessVerified?: boolean;
 }
 
 interface DiffViewProps {
@@ -18,9 +20,9 @@ interface DiffViewProps {
   diffData?: DiffCodeData;
   /** Analysis title shown in the top path bar (e.g. active chat name) */
   title?: string;
-  /** Model the user actually sends prompts to — drives the cost tiles */
+  /** D1/D8: maliyet TAHMIN referansi — text chat calls no model API */
   modelName?: string;
-  /** USD per token for that model (live pricing when available) */
+  /** ≈ USD per token for that model (rough input price) */
   pricePerToken?: number;
 }
 
@@ -152,9 +154,9 @@ function CodePane({ label, dotClass, code, lang, metric, tsvHint, scrollRef, onS
   );
 }
 
-/** USD formatting for per-call costs (values are fractions of a cent) */
+/** D8: ≈ — birim fiyat kabaca bir referanstir, fatura degil. */
 function fmtUsd(v: number): string {
-  return `$${v >= 1 ? v.toFixed(2) : v.toFixed(4)}`;
+  return `≈$${v >= 1 ? v.toFixed(2) : v.toFixed(4)}`;
 }
 
 export const DiffView: React.FC<DiffViewProps> = ({ onCloseDiff, diffData, title, modelName, pricePerToken }) => {
@@ -350,12 +352,22 @@ export const DiffView: React.FC<DiffViewProps> = ({ onCloseDiff, diffData, title
               {engineTimeMs !== undefined ? `${engineTimeMs} ms` : '—'}
             </span>
             {hasData && hasChange ? (
-              <span
-                title="Engine verifies losslessness by comparing the expansion against the original exactly"
-                className="flex items-center gap-1 truncate font-mono text-[11px] text-[#3AA99F]"
-              >
-                <Check size={11} /> verified lossless (engine)
-              </span>
+              diffData?.losslessVerified === false ? (
+                // D2: veto_override dogrulamayi atadi — rozet YALAN SOYLEMEZ.
+                <span
+                  title="veto_override forced the structural change; the engine did not verify losslessness for this output."
+                  className="flex items-center gap-1 truncate font-mono text-[11px] text-[#D14D41]"
+                >
+                  <AlertTriangle size={11} /> lossless check skipped (veto override)
+                </span>
+              ) : (
+                <span
+                  title="Engine verifies losslessness by comparing the expansion against the original exactly"
+                  className="flex items-center gap-1 truncate font-mono text-[11px] text-[#3AA99F]"
+                >
+                  <Check size={11} /> verified lossless (engine)
+                </span>
+              )
             ) : (
               <span className="truncate font-mono text-[11px] text-[#575654]">
                 {hasData ? 'no compression applied' : 'engine idle'}

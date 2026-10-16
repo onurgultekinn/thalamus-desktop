@@ -20,13 +20,18 @@ import type { Message, ChatItem, User } from './types';
 export type { Message, MessageMetrics, ChatItem } from './types';
 import './App.css';
 
-const getDefaultMessages = (modelName: string): Message[] => {
+// D1: metin sohbeti model ÇAĞIRMAZ — yerel sıkıştırma motoru çalışır.
+// Mesaj rozetleri pazarlama modeli adı (Claude/GPT…) değil, gerçekte
+// kullanılanı yazar.
+const LOCAL_ENGINE_STAMP = 'Local Compression Engine';
+
+const getDefaultMessages = (): Message[] => {
   return [
     {
       role: 'assistant',
       content: 'Thalamus AI Assistant is ready. Ask questions about your code or projects.',
       timestamp: ts(),
-      modelName
+      modelName: LOCAL_ENGINE_STAMP
     }
   ];
 };
@@ -197,12 +202,14 @@ export default function App() {
       try {
         setMessages(JSON.parse(savedMsg));
       } catch {
-        setMessages(getDefaultMessages(targetModel));
+        setMessages(getDefaultMessages());
       }
     } else {
-      setMessages(getDefaultMessages(targetModel));
+      setMessages(getDefaultMessages());
     }
-  }, [activeChatId, targetModel]);
+    // D1: varsayilan mesaj artik modele bagli degil; secici degisikleti
+    // acik sohbeti sifirlamamali.
+  }, [activeChatId]);
 
   // Save messages whenever they change. The stored copy is capped (UI keeps
   // everything in memory) and quota failures degrade to a toast instead of
@@ -253,7 +260,7 @@ export default function App() {
         role: 'assistant',
         content: 'Thalamus AI Assistant is ready. You can ask questions about your project or code snippets.',
         timestamp: ts(),
-        modelName: targetModel
+        modelName: LOCAL_ENGINE_STAMP
       }
     ]);
   };
@@ -310,13 +317,16 @@ export default function App() {
 
     const unitPrice = modelPricing[targetModel] || 0.000003;
     const approxTokens = Math.max(1, Math.ceil(userText.length / 4));
-    const userCost = '$' + (approxTokens * unitPrice).toFixed(6);
+    // D8: birim fiyatlar kabaca degerlerdir; maliyet tahminidir, makbuz degil.
+    const userCost = '≈$' + (approxTokens * unitPrice).toFixed(6);
 
+    // D1: kim isledi rozeti — metin yerel motorda, görsel seçili sağlayıcıda.
+    const pipelineStamp = pendingImages.length > 0 ? 'Vision model' : LOCAL_ENGINE_STAMP;
     const userMsg: Message = {
       role: 'user',
       content: userText.trim() || (pendingImages.length ? `[${pendingImages.length} image${pendingImages.length > 1 ? 's' : ''}]` : userText),
       timestamp: nowTime,
-      modelName: targetModel,
+      modelName: pipelineStamp,
       metrics: {
         originalTokens: approxTokens,
         compressedTokens: approxTokens,
@@ -362,15 +372,30 @@ export default function App() {
             role: 'assistant',
             content: `No model key is set, so the image was measured on this device instead:\n\n${fallback}\n\nAdd a provider key in Settings to let a vision model look at the image.`,
             timestamp: ts(),
-            modelName: targetModel,
+            modelName: 'Local device measurement',
           }]);
         } else {
-          const res = await aiChat([userMessage(userText.trim() || 'Describe this image in detail.', images.map((i) => ({ url: i.url, detail: i.detail })))]);
+          // D3/D14: son 8 mesaj baglam gonderilir; regenerate'te yeniden
+          // sorulan soru ve yerine uretilecek eski yanit baglama ALINMAZ.
+          let historySrc = messages;
+          if (isRegenerate) {
+            const lastUserIdx = messages.map(m => m.role).lastIndexOf('user');
+            if (lastUserIdx !== -1) historySrc = messages.slice(0, lastUserIdx);
+          }
+          const history = historySrc
+            .filter(m => typeof m.content === 'string' && m.content.trim().length > 0)
+            .slice(-8)
+            .map(m => ({ role: m.role, content: m.content as string }));
+          const res = await aiChat([
+            ...history,
+            userMessage(userText.trim() || 'Describe this image in detail.', images.map((i) => ({ url: i.url, detail: i.detail }))),
+          ]);
           applyMessages(prev => [...prev, {
             role: 'assistant',
             content: res.content,
             timestamp: ts(),
-            modelName: targetModel,
+            // D1: gercekten cagrilan saglayici + model yazilir.
+            modelName: `${provider.name} · ${provider.model}`,
           }]);
         }
       } catch (err) {
@@ -378,7 +403,7 @@ export default function App() {
           role: 'assistant',
           content: `⚠️ **Vision request failed:** ${err instanceof Error ? err.message : String(err)}`,
           timestamp: ts(),
-          modelName: targetModel,
+          modelName: 'Vision model (request failed)',
         }]);
       } finally {
         setLoading(false);
@@ -410,8 +435,8 @@ export default function App() {
       }
 
       // Real price and savings calculation for the selected model
-      const realCost = '$' + (metrics.compressed_tokens * unitPrice).toFixed(6);
-      const savedCost = '+$' + (metrics.saved_tokens * unitPrice).toFixed(6);
+      const realCost = '≈$' + (metrics.compressed_tokens * unitPrice).toFixed(6);
+      const savedCost = '≈+$' + (metrics.saved_tokens * unitPrice).toFixed(6);
 
       // Update the user message's approximate token count with the real count
       applyMessages(prev => {
@@ -424,7 +449,7 @@ export default function App() {
               ...updated[lastUserIdx].metrics!,
               originalTokens: metrics.original_tokens,
               compressedTokens: metrics.compressed_tokens,
-              cost: '$' + (metrics.compressed_tokens * unitPrice).toFixed(6),
+              cost: '≈$' + (metrics.compressed_tokens * unitPrice).toFixed(6),
             }
           };
         }
@@ -443,7 +468,7 @@ export default function App() {
         role: 'assistant',
         content: responseText,
         timestamp: ts(),
-        modelName: targetModel,
+        modelName: LOCAL_ENGINE_STAMP,
         originalCodeSnippet: userText,
         compressedCodeSnippet: metrics.processed_prompt,
         metrics: {
@@ -452,6 +477,7 @@ export default function App() {
           savingsPercentage: metrics.savings_percentage,
           executionTimeMs: metrics.execution_time_ms,
           classId: metrics.is_compressed ? 1 : 0,
+          losslessVerified: metrics.lossless_verified !== false,
           cost: realCost,
           financialSavings: savedCost
         }
@@ -466,7 +492,7 @@ export default function App() {
           role: 'assistant',
           content: '⚠️ **Thalamus Compression Engine Error:** Rust backend could not be reached.',
           timestamp: nowTime,
-          modelName: targetModel
+          modelName: LOCAL_ENGINE_STAMP
         }
       ]);
     } finally {
@@ -595,7 +621,8 @@ export default function App() {
                       originalTokens: msg.metrics?.originalTokens,
                       compressedTokens: msg.metrics?.compressedTokens,
                       savingsPercentage: msg.metrics?.savingsPercentage,
-                      engineTimeMs: msg.metrics?.executionTimeMs
+                      engineTimeMs: msg.metrics?.executionTimeMs,
+                      losslessVerified: msg.metrics?.losslessVerified
                     });
                     setCurrentView('diff');
                   }}

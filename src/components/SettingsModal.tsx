@@ -182,7 +182,9 @@ export function SettingsModal({
     }
     setBaseUrls(loadedBases);
     setLivePricing(localStorage.getItem('tlm_online_pricing') === 'true');
-    setTheme((localStorage.getItem('tlm_theme') as 'dark' | 'nord-red') || 'dark');
+    const loadedTheme = (localStorage.getItem('tlm_theme') as 'dark' | 'nord-red') || 'dark';
+    themeAtOpenRef.current = loadedTheme;
+    setTheme(loadedTheme);
     setDefaultModel(localStorage.getItem('tlm_default_model') || DEFAULT_MODEL_NAME);
     setStartView(localStorage.getItem('tlm_start_view') === 'project' ? 'project' : 'chat');
     setActiveProvider(localStorage.getItem(activeProviderStorageKey) || 'openai');
@@ -321,9 +323,24 @@ export function SettingsModal({
 
   const section = SECTIONS.find(s => s.id === activeSection) || SECTIONS[0];
 
+  // D10: tema dügmesi anlik onizleme uygular; kaydetmeden kapatirken (Cancel,
+  // X, overlay) modalin ACILISTAKI temasina donulur. Cancel gercekten iptal.
+  const themeAtOpenRef = useRef<'dark' | 'nord-red'>('dark');
+  const requestClose = () => {
+    if (theme !== themeAtOpenRef.current) {
+      setTheme(themeAtOpenRef.current);
+      try { localStorage.setItem('tlm_theme', themeAtOpenRef.current); } catch {}
+      document.documentElement.setAttribute(
+        'data-theme',
+        themeAtOpenRef.current === 'nord-red' ? 'nord-red' : 'dark'
+      );
+    }
+    onClose();
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
-      <div className="absolute inset-0" onClick={onClose} />
+      <div className="absolute inset-0" onClick={requestClose} />
 
       <div className="relative flex h-[560px] w-[680px] max-w-[94vw] overflow-hidden rounded-lg border border-white/[0.08] bg-[#100F0F] shadow-2xl font-sans text-xs">
 
@@ -351,7 +368,7 @@ export function SettingsModal({
             <span className="text-[14px] font-semibold tracking-tight text-[#F2F0E5]">{section.label}</span>
             <button
               type="button"
-              onClick={onClose}
+              onClick={requestClose}
               aria-label="Close settings"
               className="flex h-6 w-6 items-center justify-center rounded text-[#575654] transition-colors hover:bg-white/[0.06] hover:text-[#CECDC3] cursor-pointer"
             >
@@ -641,7 +658,7 @@ export function SettingsModal({
           <footer className="flex flex-shrink-0 items-center justify-end gap-2 border-t border-white/[0.06] px-6 py-3">
             <button
               type="button"
-              onClick={onClose}
+              onClick={requestClose}
               className="rounded-md border border-white/[0.08] px-3.5 py-1.5 text-[11.5px] text-[#87857F] transition-colors hover:border-white/[0.14] hover:text-[#CECDC3] cursor-pointer"
             >
               Cancel

@@ -9,6 +9,12 @@ export interface MessageMetrics {
   classId: number;
   cost: string;
   financialSavings: string;
+  /**
+   * D2: motor kayipsizlik dogrulamasini gercekten yapti mi?
+   * veto_override ile zorlanan ciktilarda false. Eski kayitlarda
+   * undefined olabilir (normal yol varsayilir).
+   */
+  losslessVerified?: boolean;
 }
 
 export interface Message {

@@ -666,13 +666,23 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
     if (!window.confirm(`Delete "${activeTab}"? It will be moved to the recycle bin.`)) return;
 
     try {
-      await invoke('delete_entry', { path: activeTab });
+      // D9: Rust tarafı hangi yolun KULLANILDIĞINI döner; UI ona göre
+      // konuşur — kalıcı silme olduysa "çöp kutusuna taşındı" denmez.
+      const mode = await invoke<string>('delete_entry', { path: activeTab });
+      const deletedFile = activeTab;
       const updatedTabs = openTabs.filter(t => t !== activeTab);
       setOpenTabs(updatedTabs);
       if (updatedTabs.length > 0) setActiveTab(updatedTabs[updatedTabs.length - 1]);
       else setActiveTab('');
+      setFileContents(prev => { const n = { ...prev }; delete n[deletedFile]; return n; });
+      setSavedContents(prev => { const n = { ...prev }; delete n[deletedFile]; return n; });
+      clearDirtyBuffer(deletedFile);
       await loadTree();
-      showToast('File Deleted', `${activeTab} moved to the recycle bin.`, 'success');
+      if (mode === 'recycled') {
+        showToast('File Deleted', `${deletedFile} moved to the recycle bin.`, 'success');
+      } else {
+        showToast('File Permanently Deleted', `${deletedFile} was NOT sent to the recycle bin (${mode}). It cannot be restored from the app.`, 'error');
+      }
     } catch (err) {
       console.error('Delete error:', err);
       showToast('Delete Error', `Could not delete ${activeTab}.`, 'error');

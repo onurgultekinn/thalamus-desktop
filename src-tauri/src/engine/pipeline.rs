@@ -29,6 +29,11 @@ pub struct CompressionMetrics {
     pub saved_tokens: usize,
     pub savings_percentage: f64,
     pub execution_time_ms: f64,
+    /// D2: normal yolda her sıkıştırma segment-düzeyi lossless doğrulamasından
+    /// geçer; `veto_override: true` ise doğrulamayı atlar ve yapı zorla
+    /// değişebilir. Bu bayrak UI'nın "verified lossless" rozetini yalnızca
+    /// GERÇEKTEN doğrulanmış çıktıda yakması içindir — yalan rozet yok.
+    pub lossless_verified: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -370,5 +375,8 @@ pub fn process_with_metrics(
         saved_tokens,
         savings_percentage,
         execution_time_ms,
+        // Normal yol yalnızca doğrulanmış sıkıştırmayı yayar; veto_override
+        // doğrulamayı atlarcasına yapıyı zorlar → dürüstçe `false`.
+        lossless_verified: !veto_override,
     }
 }

@@ -374,10 +374,27 @@ fn move_entry(from: String, to: String, state: State<'_, AppState>) -> Result<()
     moved.map_err(|e| format!("Taşıma başarısız: {}", e))
 }
 
+/// D9: canonicalize Windows'ta `\\?\` verbatim ön-eki üretir; VisualBasic
+/// FileIO bu öneki desteklemez ve sessizce patlayarak delete_entry'yi kalıcı
+/// silmeye düşürüyordu (kullanıcıya "çöp kutusuna taşındı" denirken dosya
+/// tamamen siliniyordu). Çöp kutusu çağrısı önceden önek sökülür.
+#[cfg(windows)]
+fn strip_verbatim_prefix(path: &Path) -> PathBuf {
+    let s = path.to_string_lossy();
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        PathBuf::from(format!(r"\\{}", rest))
+    } else if let Some(rest) = s.strip_prefix(r"\\?\") {
+        PathBuf::from(rest)
+    } else {
+        path.to_path_buf()
+    }
+}
+
 /// Öğeyi OS çöp kutusuna gönderir (Windows: PowerShell + VisualBasic
 /// FileIO). Crate bağımlılığı olmadan recycle-bin desteği sağlar.
 #[cfg(windows)]
 fn send_to_recycle_bin(path: &Path) -> Result<(), String> {
+    let path = strip_verbatim_prefix(path);
     // Tek tırnakları PowerShell literal'i için escape'le
     let ps_path = path.to_string_lossy().replace('\'', "''");
     let api = if path.is_dir() {
@@ -407,8 +424,12 @@ fn send_to_recycle_bin(_path: &Path) -> Result<(), String> {
 
 /// Öğeyi çöp kutusuna gönderir; çöp kutusu kullanılamazsa kalıcı silmeye
 /// düşer ve hatada her iki sebebi de bildirir.
+///
+/// D9 (dürüstlük): başarıda kullanılan yolu bildirir — "recycled" veya
+/// "permanently_deleted". UI buna göre konuşur; kalıcı silme yaşandıysa
+/// "çöp kutusuna taşındı" YALANI söylenmez.
 #[tauri::command]
-fn delete_entry(path: String, state: State<'_, AppState>) -> Result<(), String> {
+fn delete_entry(path: String, state: State<'_, AppState>) -> Result<String, String> {
     let base = workspace_base(&state);
     let safe_path = is_safe_path(&path, &base)?;
 
@@ -417,19 +438,23 @@ fn delete_entry(path: String, state: State<'_, AppState>) -> Result<(), String> 
     }
 
     match send_to_recycle_bin(&safe_path) {
-        Ok(()) => Ok(()),
+        Ok(()) => Ok("recycled".to_string()),
         Err(trash_err) => {
             let res = if safe_path.is_dir() {
                 fs::remove_dir_all(&safe_path)
             } else {
                 fs::remove_file(&safe_path)
             };
-            res.map_err(|e| {
-                format!(
+            match res {
+                Ok(()) => Ok(format!(
+                    "permanently_deleted (çöp kutusu kullanılamadı: {})",
+                    trash_err
+                )),
+                Err(e) => Err(format!(
                     "Silme başarısız (çöp kutusu: {}; kalıcı silme: {})",
                     trash_err, e
-                )
-            })
+                )),
+            }
         }
     }
 }
