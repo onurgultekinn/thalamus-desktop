@@ -486,7 +486,7 @@ export default function App() {
           // ilk cumle atilir, yalniz aksiyon/aciklama satiri kalir.
           applyMessages(prev => [...prev, {
             role: 'assistant',
-            content: `**[${x.code}] ${x.title}**\n\n${splitExplanation(x.explanation).rest ?? x.explanation}\n\n*For more info, check the wiki · ${x.code}*`,
+            content: `**[${x.code}] ${x.title}**\n\n${splitExplanation(x.explanation).rest ?? x.explanation}\n\n*For more info, check the wiki*`,
             timestamp: ts(),
             modelName: 'Vision model (request failed)',
           }]);
@@ -556,7 +556,7 @@ export default function App() {
           // mesaj olurdu. Baslik + aksiyon; tekrar eden ilk cumle atilir.
           applyMessages(prev => [...prev, {
             role: 'assistant',
-            content: `**[${x.code}] ${x.title}**\n\n${splitExplanation(x.explanation).rest ?? x.explanation}\n\n*For more info, check the wiki · ${x.code}*`,
+            content: `**[${x.code}] ${x.title}**\n\n${splitExplanation(x.explanation).rest ?? x.explanation}\n\n*For more info, check the wiki*`,
             timestamp: ts(),
             modelName: LOCAL_ENGINE_STAMP,
           }]);

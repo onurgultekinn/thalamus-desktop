@@ -129,14 +129,14 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                     className="text-[10px] font-mono leading-[15px] mt-0.5 pt-1.5 border-t border-[#2E2C29] text-[#8A867E] hover:text-[#CFCAC2] hover:underline cursor-pointer w-fit"
                     title={bodyDetail ? `${bodyDetail}\nFor more info, check the wiki (${code})` : `For more info, check the wiki (${code})`}
                   >
-                    For more info, check the wiki <span className="text-[#6F6C66]">· {code}</span> ↗
+                    For more info, check the wiki ↗
                   </a>
                 ) : (
                   <span
                     className="text-[10px] text-[#7E7A73] font-mono leading-[15px] mt-0.5 pt-1.5 border-t border-[#2E2C29] cursor-help w-fit"
                     title={bodyDetail ? `${bodyDetail}\nFor more info, check the wiki (${code}) — not published yet` : `For more info, check the wiki (${code}) — not published yet`}
                   >
-                    For more info, check the wiki <span className="text-[#5F5C57]">· {code}</span>
+                    For more info, check the wiki
                   </span>
                 )
               )}
