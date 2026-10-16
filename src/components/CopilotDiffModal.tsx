@@ -5,12 +5,11 @@ import {
   X,
   Maximize2,
   Minimize2,
-  Cpu,
-  BarChart2,
   CheckCircle2,
   HelpCircle
 } from 'lucide-react';
 import type { ActionPayload, Message } from './ThalamusCopilot';
+import { computeLineDiff, diffStats } from '../lib/diff';
 
 type ResizeHandle = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
 
@@ -188,13 +187,9 @@ export function CopilotDiffModal({
 
   const orig = payload.originalCodeSnippet || "";
   const opt = payload.codeSnippet || "";
-  const origToks = Math.max(1, Math.round(orig.length / 4.1));
-  const optToks = Math.max(1, Math.round(opt.length / 4.1));
-  const diffToks = Math.max(0, origToks - optToks);
-  const pct = origToks > 0 ? Math.round((diffToks / origToks) * 100) : 0;
-  const removedLines = Math.max(0, orig.split('\n').length - opt.split('\n').length);
-  const addedLines = Math.max(0, opt.split('\n').length - orig.split('\n').length);
-  const changedLines = addedLines + removedLines;
+  // Gerçek satır difi: uydurma token tahminleri yok; yalnızca LCS sonucu.
+  const lines = computeLineDiff(orig, opt);
+  const stats = diffStats(lines);
 
   return (
     <div
@@ -224,13 +219,14 @@ export function CopilotDiffModal({
         </div>
 
         <div className="flex items-center gap-3">
-          {!isMaximized && (
-            <div className="hidden sm:flex items-center gap-2 text-[10.5px]">
-              <span className="text-[#A8A49E] bg-[#282726] border border-[#34332F] px-2 py-0.5 rounded font-mono">
-                ≈{origToks} → ≈{optToks} (-%{pct})
-              </span>
-            </div>
-          )}
+          <div className="hidden sm:flex items-center gap-2 text-[10.5px]">
+            <span className="text-[#D14D41] bg-[#282726] border border-[#34332F] px-2 py-0.5 rounded font-mono">
+              -{stats.removed}
+            </span>
+            <span className="text-[#3AA99F] bg-[#282726] border border-[#34332F] px-2 py-0.5 rounded font-mono">
+              +{stats.added}
+            </span>
+          </div>
 
           {/* HINT ICON AND VERTICAL LINE */}
           <div className="flex items-center gap-2">
@@ -274,14 +270,28 @@ export function CopilotDiffModal({
         <div className="flex-1 flex flex-col min-h-0 bg-[#100F0F] relative">
 
           {payload.originalCodeSnippet && payload.codeSnippet ? (
-            <div className="flex-1 grid grid-cols-2 gap-4 p-4 overflow-auto pretty-scrollbar bg-[#100F0F]">
-              <div className="flex flex-col gap-2 h-full min-h-0">
-                <div className="text-[10px] text-red-400 font-bold uppercase border-b border-red-500/20 pb-1">Original Code ({activeFile})</div>
-                <pre className="flex-1 bg-[#231D1A] border border-red-950/40 p-3 rounded text-[11px] overflow-auto pretty-scrollbar text-red-300 font-mono whitespace-pre">{payload.originalCodeSnippet}</pre>
+            <div className="flex-1 flex flex-col min-h-0 bg-[#100F0F]">
+              <div className="px-4 pt-3 pb-1 text-[10px] text-[#A8A49E] font-bold uppercase border-b border-[#282726]">
+                Suggested change — {activeFile} · <span className="text-[#3AA99F]">+{stats.added}</span> <span className="text-[#D14D41]">-{stats.removed}</span>
               </div>
-              <div className="flex flex-col gap-2 h-full min-h-0">
-                <div className="text-[10px] text-green-400 font-bold uppercase border-b border-green-500/20 pb-1">Suggested Code (Optimized)</div>
-                <pre className="flex-1 bg-[#1A201C] border border-green-950/40 p-3 rounded text-[11px] overflow-auto pretty-scrollbar text-green-300 font-mono whitespace-pre">{payload.codeSnippet}</pre>
+              <div className="flex-1 overflow-auto pretty-scrollbar p-0 font-mono text-[11px] leading-[1.55]">
+                {lines.map((l, idx) => (
+                  <div
+                    key={idx}
+                    className={`flex ${
+                      l.type === 'removed' ? 'bg-[#3b181a]/50 border-l-2 border-[#D14D41]'
+                      : l.type === 'added' ? 'bg-[#1e2f22]/60 border-l-2 border-[#3AA99F]'
+                      : 'border-l-2 border-transparent'
+                    }`}
+                  >
+                    <span className="w-10 flex-shrink-0 text-right pr-2 text-[#575654] select-none">
+                      {l.type === 'removed' ? '-' : l.type === 'added' ? '+' : ' '}
+                    </span>
+                    <span className="whitespace-pre-wrap break-all pr-3">
+                      {l.text || ' '}
+                    </span>
+                  </div>
+                ))}
               </div>
             </div>
           ) : (
@@ -294,11 +304,11 @@ export function CopilotDiffModal({
           <div className="px-3.5 py-2 bg-[#1C1B1A] border-t border-[#282726] flex items-center justify-between flex-shrink-0">
             <div className="flex items-center gap-2 text-[10.5px]">
               <span className="text-[#A8A49E] bg-[#282726] border border-[#34332F] px-2.5 py-0.5 rounded font-mono">
-                {changedLines} Lines Changed
+                {stats.changed} Lines Changed
               </span>
-              {removedLines > 0 && (
+              {opt.length > 0 && (
                 <span className="text-[#A8A49E] bg-[#282726] border border-[#34332F] px-2.5 py-0.5 rounded font-mono">
-                  -{removedLines} Lines Removed
+                  {opt.length} B
                 </span>
               )}
             </div>
@@ -324,103 +334,35 @@ export function CopilotDiffModal({
         /* SECTION 2: FULLSCREEN MODE */
         <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-[#100F0F]">
 
-          {/* Top comparison panels */}
-          <div className="h-[55%] grid grid-cols-2 bg-[#100F0F] border-b border-[#282726] flex-shrink-0 relative overflow-hidden">
-            <div className="flex flex-col h-full overflow-hidden border-r border-[#282726]">
-              <div className="px-3 py-2 bg-[#1C1B1A] text-[#A8A49E] text-[11px] border-b border-[#282726] flex items-center justify-between flex-shrink-0">
-                <span className="font-semibold text-[#D14D41] flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-[#D14D41]" />
-                  Original Code
-                </span>
-                <div className="flex items-center gap-2 text-[10.5px]">
-                  <span className="text-[#D14D41] bg-[#3b181a]/40 border border-[#824449]/30 px-2 py-0.5 rounded font-mono">{origToks} Tokens</span>
-                  <span className="text-[#D14D41] bg-[#3b181a]/40 border border-[#824449]/30 px-2 py-0.5 rounded font-mono">{orig.length} B</span>
-                </div>
-              </div>
-              <div className="flex-1 overflow-auto p-3 text-[12px] leading-[1.65] pretty-scrollbar bg-[#100F0F]">
-                <pre className="text-[#F2F0E5] whitespace-pre font-mono">
-                  {payload.originalCodeSnippet || payload.codeSnippet}
-                </pre>
+          {/* Deciding unified diff (fullscreen) */}
+          <div className="flex-1 flex flex-col min-h-0 bg-[#100F0F]">
+            <div className="px-3 py-2 bg-[#1C1B1A] text-[#A8A49E] text-[11px] border-b border-[#282726] flex items-center justify-between flex-shrink-0">
+              <span className="font-semibold text-[#CECDC3] flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-[#3AA99F]" />
+                Suggested change — {payload.targetFile}
+              </span>
+              <div className="flex items-center gap-2 text-[10.5px]">
+                <span className="text-[#D14D41] bg-[#3b181a]/40 border border-[#824449]/30 px-2 py-0.5 rounded font-mono">-{stats.removed}</span>
+                <span className="text-[#3AA99F] bg-[#1e3a2b]/40 border border-[#2d5a45]/30 px-2 py-0.5 rounded font-mono">+{stats.added}</span>
+                <span className="text-[#A8A49E] bg-[#282726] border border-[#34332F] px-2 py-0.5 rounded font-mono">{orig.length} B → {opt.length} B</span>
               </div>
             </div>
-
-            <div className="flex flex-col h-full overflow-hidden">
-              <div className="px-3 py-2 bg-[#1C1B1A] text-[#A8A49E] text-[11px] border-b border-[#282726] flex items-center justify-between flex-shrink-0">
-                <span className="font-semibold text-[#3AA99F] flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-[#3AA99F]" />
-                  Optimized Output (JSON)
-                </span>
-                <div className="flex items-center gap-2 text-[10.5px]">
-                  <span className="text-[#A8A49E] bg-[#282726] border border-[#34332F] px-2 py-0.5 rounded font-mono">≈{origToks} → ≈{optToks} (-%{pct})</span>
-                  <span className="text-[#A8A49E] bg-[#282726] border border-[#34332F] px-2 py-0.5 rounded font-mono">{opt.length} B</span>
-                </div>
-              </div>
-              <div className="flex-1 overflow-auto p-3 text-[12px] leading-[1.65] pretty-scrollbar bg-[#100F0F]">
-                <pre className="text-[#879A39] whitespace-pre font-mono">
-                  {payload.codeSnippet}
-                </pre>
-              </div>
-            </div>
-          </div>
-
-          {/* Bottom Dashboard Panels */}
-          <div className="flex-1 grid grid-cols-[2fr_3fr] overflow-hidden bg-[#100F0F] p-3 gap-3 min-h-0">
-            <div className="bg-[#1C1B1A] border border-[#282726] rounded-lg flex flex-col overflow-hidden">
-              <div className="px-3.5 py-2 bg-[#282726]/60 border-b border-[#282726] text-[12px] font-semibold text-[#F2F0E5] flex items-center justify-between flex-shrink-0">
-                <span className="flex items-center gap-1.5"><Cpu size={14} className="text-[#3AA99F]" /> WHAT DID WE CHANGE IN THE CODE?</span>
-              </div>
-              <div className="flex-1 overflow-y-auto p-2.5 flex flex-col gap-2 text-[12px] leading-relaxed pretty-scrollbar">
-                <div className="bg-[#100F0F] p-2.5 rounded-md border border-[#204a37]/30 flex items-start justify-between gap-3">
-                  <div className="flex flex-col gap-0.5">
-                    <span className="font-semibold text-[#F2F0E5] text-[12px] flex items-center gap-1.5">
-                      <span className="text-[#3AA99F]">✓</span> Suggested Change Applied
-                    </span>
-                    <span className="text-[11px] text-[#A8A49E]">
-                      {removedLines} line(s) removed, {addedLines} line(s) added for {payload.targetFile}. Review the diff before applying.
-                    </span>
-                  </div>
-                  <span className="text-[11px] text-[#3AA99F] bg-[#1e3a2b]/60 border border-[#2d5a45]/50 px-2 py-0.5 rounded font-mono font-bold flex-shrink-0">
-                    -{pct}%
+            <div className="flex-1 overflow-auto pretty-scrollbar font-mono text-[11.5px] leading-[1.55]">
+              {lines.map((l, idx) => (
+                <div
+                  key={idx}
+                  className={`flex ${
+                    l.type === 'removed' ? 'bg-[#3b181a]/50 border-l-2 border-[#D14D41]'
+                      : l.type === 'added' ? 'bg-[#1e2f22]/60 border-l-2 border-[#3AA99F]'
+                      : 'border-l-2 border-transparent'
+                  }`}
+                >
+                  <span className="w-10 flex-shrink-0 text-right pr-2 text-[#575654] select-none">
+                    {l.type === 'removed' ? '-' : l.type === 'added' ? '+' : ' '}
                   </span>
+                  <span className="whitespace-pre-wrap break-all pr-3">{l.text || ' '}</span>
                 </div>
-              </div>
-            </div>
-
-            <div className="bg-[#1C1B1A] border border-[#282726] rounded-lg flex flex-col overflow-hidden">
-              <div className="px-3.5 py-2 bg-[#282726]/60 border-b border-[#282726] text-[12px] font-semibold text-[#F2F0E5] flex items-center justify-between flex-shrink-0">
-                <span className="flex items-center gap-1.5"><BarChart2 size={14} className="text-[#4385BE]" /> PERFORMANCE AND COST REPORT</span>
-              </div>
-              <div className="flex-1 p-2.5 grid grid-cols-3 gap-2.5 overflow-hidden items-stretch">
-                <div className="bg-[#100F0F] border border-[#282726] rounded-md p-2 flex flex-col justify-between h-full">
-                  <div>
-                    <span className="text-[10.5px] font-bold text-[#F2F0E5] block">1. SAVINGS</span>
-                    <span className="text-[9.5px] text-[#A8A49E] block mt-0.5">Reduction rates</span>
-                  </div>
-                  <div className="bg-[#1e3a2b]/40 border border-[#2d5a45]/50 rounded p-1 text-center">
-                    <span className="text-[9.5px] text-[#3AA99F] font-bold block">-{pct}% saved</span>
-                  </div>
-                </div>
-
-                <div className="bg-[#100F0F] border border-[#282726] rounded-md p-2 flex flex-col justify-between h-full">
-                  <div>
-                    <span className="text-[10.5px] font-bold text-[#F2F0E5] block">2. LINE CHANGES</span>
-                    <span className="text-[9.5px] text-[#A8A49E] block mt-0.5">Added / removed</span>
-                  </div>
-                  <div className="bg-[#282726]/40 border border-[#4385BE]/50 rounded p-1 text-center">
-                    <span className="text-[9.5px] text-[#4385BE] font-bold block">{changedLines} lines</span>
-                  </div>
-                </div>
-
-                <div className="bg-[#100F0F] border border-[#282726] rounded-md p-2 flex flex-col justify-between h-full">
-                  <div>
-                    <span className="text-[10.5px] font-bold text-[#F2F0E5] block">3. PAYLOAD &amp; SIZE</span>
-                    <span className="text-[9.5px] text-[#A8A49E] block mt-0.5">Text length</span>
-                  </div>
-                  <div className="bg-[#282726]/40 border border-[#4385BE]/50 rounded p-1 text-center">
-                    <span className="text-[9.5px] text-[#CECDC3] font-bold block">{opt.length} B</span>
-                  </div>
-                </div>
-              </div>
+              ))}
             </div>
           </div>
 
@@ -428,15 +370,7 @@ export function CopilotDiffModal({
           <div className="px-3.5 py-2 bg-[#1C1B1A] border-t border-[#282726] flex items-center justify-between flex-shrink-0">
             <div className="flex items-center gap-2 text-[10.5px]">
               <span className="text-[#A8A49E] bg-[#282726] border border-[#34332F] px-2.5 py-0.5 rounded font-mono">
-                Optimization Complete
-              </span>
-              <span className="text-[#A8A49E] bg-[#282726] border border-[#34332F] px-2.5 py-0.5 rounded font-mono">
-                {(() => {
-                  const origL = orig.split('\n').length;
-                  const optL = opt.split('\n').length;
-                  const diffL = origL - optL;
-                  return diffL > 0 ? `-${diffL} Lines Removed` : diffL < 0 ? `+${Math.abs(diffL)} Lines Added` : 'Same Line Count';
-                })()}
+                {stats.changed} Lines Changed
               </span>
             </div>
 
