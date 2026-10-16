@@ -12,6 +12,7 @@ import {
   activeProviderStorageKey,
 } from '../lib/providers';
 import { getStoredKey, setStoredKey, clearStoredKeys } from '../lib/secrets';
+import { getWorkspaceRoot } from '../lib/workspace';
 
 export type SettingsTab = 'profile' | 'providers' | 'appearance' | 'general';
 
@@ -272,6 +273,19 @@ export function SettingsModal({
     localStorage.setItem('tlm_default_model', defaultModel);
     localStorage.setItem('tlm_start_view', startView);
 
+    // Ayarlar: workspace yolu ÖNCE doğrulanır; bozuk yol hiçbir config'e
+    // yazılmaz (eski akış, hatadan sonra bozuk kaydis bırakıyordu).
+    let validatedRoot: string | null = null;
+    if (workspaceRoot.trim()) {
+      try {
+        const info = await invoke<{ root: string }>('set_workspace_root', { path: workspaceRoot.trim() });
+        if (info?.root) validatedRoot = info.root;
+      } catch (e) {
+        console.error('Could not set workspace root:', e);
+        showToast('Workspace Error', 'The given path is not a valid folder — the previous workspace is kept.', 'error');
+      }
+    }
+
     const config = {
       appearance: {
         fontSize: `${fontSize}px`,
@@ -279,26 +293,13 @@ export function SettingsModal({
         tabSize: Number(tabSize),
       },
       onlinePricing: livePricing,
-      workspace_root: workspaceRoot.trim(),
+      workspace_root: validatedRoot ?? getWorkspaceRoot() ?? '',
     };
     localStorage.setItem('thalamus_config', JSON.stringify(config));
 
     try {
       await invoke('thalamus_save_config', { configJson: JSON.stringify(config, null, 2) });
     } catch {}
-
-    if (workspaceRoot.trim()) {
-      try {
-        const info = await invoke<{ root: string }>('set_workspace_root', { path: workspaceRoot.trim() });
-        if (info?.root) {
-          config.workspace_root = info.root;
-          localStorage.setItem('thalamus_config', JSON.stringify(config));
-        }
-      } catch (e) {
-        console.error('Could not set workspace root:', e);
-        showToast('Workspace Error', 'The given path is not a valid folder.', 'error');
-      }
-    }
 
     if (user && onUpdateUser) {
       onUpdateUser({
