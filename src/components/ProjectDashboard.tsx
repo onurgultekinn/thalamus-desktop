@@ -126,6 +126,9 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
   // File contents are SEPARATE from the tree state: instead of re-walking the
   // whole tree on every keystroke, only the single key in this map is updated.
   const [fileContents, setFileContents] = useState<Record<string, string>>({});
+  // V1: diske yazilan son icerigin anlik goruntusu. fileContents bundan
+  // farkliysa dosya "dirty"dir (kaydedilmemis degisiklik var).
+  const [savedContents, setSavedContents] = useState<Record<string, string>>({});
   const [workspaceName, setWorkspaceName] = useState<string>(() => getWorkspaceName());
   const lineNumbersRef = useRef<HTMLDivElement>(null);
   const editorTextareaRef = useRef<HTMLTextAreaElement>(null);
@@ -199,9 +202,85 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
     return () => { cancelled = true; clearInterval(id); };
   }, []);
 
-  // Writes the file content into the content map (lazy loading on open)
+  // V1: kaydedilmemis tamponlari calisma oturumlari arasinda tasiyan anahtar.
+  // Gorunum degisiminde (ProjectDashboard unmount) veya uygulama kapanirken
+  // editor icerigi kaybolmasin; dosya acilinca disk yerine bu tampon donerse
+  // kullanıcı DÜRÜSTÇE bilgilendirilir.
+  const DIRTY_BUFFER_KEY = 'thalamus_dirty_buffers_v1';
+
+  const isDirty = (file: string) => {
+    const cur = fileContents[file];
+    if (cur === undefined) return false;
+    const saved = savedContents[file];
+    return saved === undefined || cur !== saved;
+  };
+
+  const clearDirtyBuffer = (file: string) => {
+    try {
+      const map = JSON.parse(localStorage.getItem(DIRTY_BUFFER_KEY) || '{}');
+      if (map[file] !== undefined) {
+        delete map[file];
+        localStorage.setItem(DIRTY_BUFFER_KEY, JSON.stringify(map));
+      }
+    } catch {}
+  };
+
+  // Tamponlari her degisiklikte localStorage'a yansit; kaydedilen dosyalardan
+  // sonra temizle.
+  useEffect(() => {
+    try {
+      const map: Record<string, string> = JSON.parse(localStorage.getItem(DIRTY_BUFFER_KEY) || '{}');
+      let changed = false;
+      for (const f of Object.keys(fileContents)) {
+        if (isDirty(f)) {
+          if (map[f] !== fileContents[f]) {
+            map[f] = fileContents[f];
+            changed = true;
+          }
+        } else if (map[f] !== undefined) {
+          delete map[f];
+          changed = true;
+        }
+      }
+      if (changed) localStorage.setItem(DIRTY_BUFFER_KEY, JSON.stringify(map));
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fileContents, savedContents]);
+
+  // V1: kaydedilmemis is varken pencere/app kapanirken tarayici uyarisi.
+  useEffect(() => {
+    const anyDirty = Object.keys(fileContents).some(isDirty);
+    if (!anyDirty) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fileContents, savedContents]);
+
+  // Writes the file content into the content map (lazy loading on open).
+  // V1: disk icerigi snapshot'a alinir; kaydedilmemis tampon varsa o dondurulur.
   const storeFileContent = (file: string, code: string) => {
-    setFileContents(prev => (prev[file] === code ? prev : { ...prev, [file]: code }));
+    setSavedContents(prev => (prev[file] === code ? prev : { ...prev, [file]: code }));
+    let effective = code;
+    let restored = false;
+    try {
+      const map = JSON.parse(localStorage.getItem(DIRTY_BUFFER_KEY) || '{}');
+      if (typeof map[file] === 'string' && map[file] !== code) {
+        effective = map[file];
+        restored = true;
+      }
+    } catch {}
+    setFileContents(prev => (prev[file] === effective ? prev : { ...prev, [file]: effective }));
+    if (restored) {
+      showToast(
+        'Unsaved edits restored',
+        `${file}: your last unsaved editor changes were restored instead of the disk copy. Save to write them to disk, or close the tab to discard.`,
+        'info'
+      );
+    }
   };
 
   const handleTextareaScroll = () => {
@@ -467,6 +546,25 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
 
   const handleCloseTab = (e: React.MouseEvent, fileName: string) => {
     e.stopPropagation();
+    // V1: kaydedilmemis degisiklik varsa kullaniciyi onayla uyandır;
+    // "kapat" denirse tampon ve bellek kopyasi atilir (kaybolur, ama bilerek).
+    if (isDirty(fileName)) {
+      const name = fileName.split('/').pop();
+      if (!window.confirm(`"${name}" has unsaved changes. Close anyway and lose them? (Tip: Ctrl+S saves.)`)) {
+        return;
+      }
+      setFileContents(prev => {
+        const next = { ...prev };
+        delete next[fileName];
+        return next;
+      });
+      setSavedContents(prev => {
+        const next = { ...prev };
+        delete next[fileName];
+        return next;
+      });
+      clearDirtyBuffer(fileName);
+    }
     const updatedTabs = openTabs.filter(t => t !== fileName);
     setOpenTabs(updatedTabs);
     if (activeTab === fileName && updatedTabs.length > 0) {
@@ -488,6 +586,23 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
         console.error('Could not read file:', err);
         showToast('Read Error', `Could not read ${node.id}.`, 'error');
       }
+    } else if (!isDirty(node.id)) {
+      // V1: disk kopyasi AI araclari/baska bir kanalla degismis olabilir.
+      // Kaydedilmemis duzenleme yoksa sessizce taze kopyayi getir; kullanci
+      // istek sirasinda yazmaya basladiysa editor ezilmez (imza karsilastirmasi).
+      const savedAtClick = savedContents[node.id];
+      const bufferAtClick = fileContents[node.id];
+      invoke<string>('thalamus_read_file', { path: node.id })
+        .then(code => {
+          if (code === savedAtClick) return;
+          setFileContents(prev => {
+            const cur = prev[node.id];
+            if (cur !== bufferAtClick) return prev; // kullanci yazdi — dokunma
+            return { ...prev, [node.id]: code };
+          });
+          setSavedContents(prev => (prev[node.id] === code ? prev : { ...prev, [node.id]: code }));
+        })
+        .catch(() => {});
     }
     if (!openTabs.includes(node.id)) {
       setOpenTabs([...openTabs, node.id]);
@@ -501,18 +616,27 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
     if (fileCode !== undefined) {
       try {
         await invoke('thalamus_write_file', { path: activeTab, content: fileCode });
+        setSavedContents(prev => ({ ...prev, [activeTab]: fileCode }));
       } catch (e) {
         console.error("Could not save file to disk:", e);
+        showToast('Save Failed', `${activeTab} was not saved — running the DISK copy, which may differ from the editor.`, 'error');
       }
     }
 
+    // V1 (C-dizi): bosluklu/yol tureten isimler komutu kirmasın diye tırnakla.
+    const quoted = `"${activeTab.replace(/"/g, '\\"')}"`;
     const cmd = activeTab.endsWith('.py')
-      ? `python ${activeTab}`
+      ? `python ${quoted}`
       : activeTab.endsWith('.rs')
         ? `cargo run`
-        : `Get-Content ${activeTab}`;
+        : `Get-Content ${quoted}`;
 
-    invoke('write_terminal', { data: cmd + '\r' }).catch(console.error);
+    // Calisma gercekten gorulebilsin: terminal katlamaysa ac, sonra yaz.
+    // (Katli terminalde gonderilen komut gorunmez "sessiz islem" olurdu.)
+    setIsTerminalOpen(true);
+    setTimeout(() => {
+      invoke('write_terminal', { data: cmd + '\r' }).catch(console.error);
+    }, 150);
   };
 
   const handleSaveActiveFile = async () => {
@@ -524,6 +648,7 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
     if (fileCode !== undefined) {
       try {
         await invoke('thalamus_write_file', { path: activeTab, content: fileCode });
+        setSavedContents(prev => ({ ...prev, [activeTab]: fileCode }));
         showToast('File Saved', `${activeTab} successfully saved to disk.`, 'success');
       } catch (e) {
         console.error("Could not save file to disk:", e);
@@ -792,7 +917,14 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
               >
                 <FileCode size={13} className={isActive ? 'text-[#3AA99F]' : 'text-[#87857F]'} />
                 <span>{fileName.split('/').pop()}</span>
-                <button 
+                {/* V1: kaydedilmemis degisiklik gostergesi (VS Code tarzı nokta) */}
+                {isDirty(fileName) && (
+                  <span
+                    className="w-2 h-2 rounded-full bg-[#dcb67a] flex-shrink-0"
+                    title="Unsaved changes"
+                  />
+                )}
+                <button
                   type="button"
                   onClick={(e) => handleCloseTab(e, fileName)}
                   className="hover:text-[#D14D41] p-0.5 rounded cursor-pointer"
