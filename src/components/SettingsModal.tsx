@@ -454,17 +454,28 @@ export function SettingsModal({
                   <select
                     value={activeProvider}
                     onChange={e => {
+                      // Unavailable providers (e.g. Anthropic until the proxy
+                      // speaks /v1/messages) must not be selected — silently
+                      // ignoring the change keeps the previous choice intact.
+                      const target = API_PROVIDERS.find(x => x.id === e.target.value);
+                      if (target && target.available === false) return;
                       setActiveProvider(e.target.value);
                       setVisibleProvider(null);
                     }}
                     className={selectCls}
                   >
                     {API_PROVIDERS.map(x => (
-                      <option key={x.id} value={x.id}>
-                        {x.name} — {FAMILY_LABEL[x.family]}
+                      <option key={x.id} value={x.id} disabled={x.available === false}>
+                        {x.name}
+                        {x.available === false ? ' — coming soon' : ` — ${FAMILY_LABEL[x.family]}`}
                       </option>
                     ))}
                   </select>
+                  {p.available === false && (
+                    <p className="text-[11px] text-amber-300/90">
+                      {p.name} is listed but not wired yet: the local proxy only speaks the OpenAI chat/completions format. Choose an OpenAI-compatible provider until then.
+                    </p>
+                  )}
                   <p className="text-[11px] text-[#87857F]">
                     {configuredCount} of {API_PROVIDERS.length} have a key saved. Keys are stored in the OS credential vault — never in plain text.
                   </p>

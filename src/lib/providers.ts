@@ -33,6 +33,8 @@ export interface ApiProvider {
   defaultModel?: string;
   /** Brand identity color, used as the provider's visual mark. */
   color: string;
+  /** false = listed but not selectable until the backend supports it. */
+  available?: boolean;
 }
 
 export const API_PROVIDERS: ApiProvider[] = [
@@ -54,7 +56,7 @@ export const API_PROVIDERS: ApiProvider[] = [
   { id: 'deepbricks', name: 'DeepBricks',    family: 'openai', keyPlaceholder: 'sk-...',            apiEndpoint: 'https://api.deepbricks.ai/v1',             defaultModel: 'gpt-4o-mini',            docsUrl: 'https://deepbricks.ai/',                    color: '#0891b2' },
 
   // ── Anthropic format (backend proxy does not speak /v1/messages yet) ──
-  { id: 'anthropic',  name: 'Claude (Anthropic)', family: 'anthropic', keyPlaceholder: 'sk-ant-...', docsUrl: 'https://console.anthropic.com/settings/keys', color: '#d97757' },
+  { id: 'anthropic',  name: 'Claude (Anthropic)', family: 'anthropic', keyPlaceholder: 'sk-ant-...', docsUrl: 'https://console.anthropic.com/settings/keys', color: '#d97757', available: false },
 
   // ── Local / self-hosted (no key, user-settable endpoint) ───────────
   { id: 'ollama',    name: 'Ollama',       family: 'local', keyPlaceholder: 'optional', defaultBaseUrl: 'http://localhost:11434/v1', needsBaseUrl: true, defaultModel: 'llama3.1', color: '#D0A215' },
