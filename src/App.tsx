@@ -184,10 +184,10 @@ export default function App() {
       if (ok) {
         showToast('Engine Active', `Local engine is running · ${API_BASE} · ~${ms}ms`, 'success');
       } else {
-        showToast('Engine Offline', `Could not reach the engine · ${API_BASE}. Is the backend running?`, 'error');
+        showToast('Engine Offline', `Could not reach the engine at ${API_BASE}. Restart the app via thalamus_baslat.bat — terminal, explorer and chat need it.`, 'error', undefined, '[503] health check failed');
       }
     } catch {
-      showToast('Engine Offline', `Could not reach the engine · ${API_BASE}`, 'error');
+      showToast('Engine Offline', `Could not reach the engine at ${API_BASE}. Restart the app via thalamus_baslat.bat.`, 'error', undefined, '[503] health check failed');
     }
   };
   const [loading, setLoading] = useState<boolean>(false);

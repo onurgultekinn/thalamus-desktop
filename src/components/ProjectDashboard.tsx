@@ -447,7 +447,8 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
       }
     } catch (err) {
       console.error('Could not create entry:', err);
-      showToast('Create Error', 'Could not write the file/folder to disk.', 'error');
+      const x = explainError(err, 'Create');
+      showToast('Create Error', `Could not write "${trimmedName}" to disk. ${x.explanation}`, 'error', undefined, `[${x.code}] ${x.detail ?? String(err)}]`);
     }
 
     setNewItemName('');
@@ -623,7 +624,8 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
       }
     } catch (err) {
       console.error('Move error:', err);
-      showToast('Move Error', 'Could not move the entry.', 'error');
+      const x = explainError(err, 'Move');
+      showToast('Move Error', `Could not move the entry — nothing changed. ${x.explanation}`, 'error', undefined, `[${x.code}] ${x.detail ?? String(err)}]`);
     }
 
     setPendingMove(null);
@@ -675,7 +677,8 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
       showToast('Renamed', `${node.name} → ${newName}`, 'success');
     } catch (err) {
       console.error('Rename error:', err);
-      showToast('Rename Error', `Could not rename ${node.id}.`, 'error');
+      const x = explainError(err, 'Rename');
+      showToast('Rename Error', `Could not rename ${node.id} — the editor and buffers were not touched. ${x.explanation}`, 'error', undefined, `[${x.code}] ${x.detail ?? String(err)}]`);
     }
   };
 
@@ -770,7 +773,8 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
         setSavedContents(prev => ({ ...prev, [activeTab]: fileCode }));
       } catch (e) {
         console.error("Could not save file to disk:", e);
-        showToast('Save Failed', `${activeTab} was not saved — running the DISK copy, which may differ from the editor.`, 'error');
+        const x = explainError(e, 'Save');
+        showToast('Save Failed', `${activeTab} was not saved — running the DISK copy, which may differ from the editor. ${x.explanation}`, 'error', undefined, `[${x.code}] ${x.detail ?? String(e)}]`);
       }
     }
 
@@ -811,8 +815,9 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
         setSavedContents(prev => ({ ...prev, [activeTab]: fileCode }));
         showToast('File Saved', `${activeTab} successfully saved to disk.`, 'success');
       } catch (e) {
-        console.error("Could not save file to disk:", e);
-        showToast('Save Error', `An error occurred while saving ${activeTab}.`, 'error');
+        console.error('Save error:', e);
+        const x = explainError(e, 'Save');
+        showToast('Save Error', `${activeTab} could not be written to disk — the editor content is still there, nothing is lost. ${x.explanation}`, 'error', undefined, `[${x.code}] ${x.detail ?? String(e)}]`);
       }
     }
   };
@@ -850,7 +855,8 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
       }
     } catch (err) {
       console.error('Delete error:', err);
-      showToast('Delete Error', `Could not delete ${node.id}.`, 'error');
+      const x = explainError(err, 'Delete');
+      showToast('Delete Error', `Could not delete ${node.id} — the entry is still on disk. ${x.explanation}`, 'error', undefined, `[${x.code}] ${x.detail ?? String(err)}]`);
     }
   };
 

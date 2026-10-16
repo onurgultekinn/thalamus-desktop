@@ -13,6 +13,7 @@ import {
 } from '../lib/providers';
 import { getStoredKey, setStoredKey, clearStoredKeys } from '../lib/secrets';
 import { getWorkspaceRoot } from '../lib/workspace';
+import { explainError } from '../lib/errors';
 
 export type SettingsTab = 'profile' | 'providers' | 'appearance' | 'general';
 
@@ -177,7 +178,7 @@ export function SettingsModal({
         // Anahtarlar okunamadı: inputlar BOŞ kalır ama bu "sil" demek değildir.
         keysStatusRef.current = 'error';
         setKeysLoaded(true);
-        showToast('Key Load Failed', 'Stored API keys could not be read. Saving will NOT touch them.', 'error');
+        showToast('Key Load Failed', 'Stored API keys could not be read. Saving will NOT touch them. Restart the app if this repeats — the vault may be locked.', 'error', undefined, '[500] secrets vault read failed');
       });
     const loadedBases: Record<string, string> = {};
     for (const p of API_PROVIDERS) {
@@ -282,7 +283,8 @@ export function SettingsModal({
         if (info?.root) validatedRoot = info.root;
       } catch (e) {
         console.error('Could not set workspace root:', e);
-        showToast('Workspace Error', 'The given path is not a valid folder — the previous workspace is kept.', 'error');
+        const x = explainError(e, 'Workspace');
+        showToast('Workspace Error', `"${workspaceRoot.trim()}" is not a valid folder — the previous workspace is kept. ${x.explanation}`, 'error', undefined, `[${x.code}] ${x.detail ?? String(e)}]`);
       }
     }
 
