@@ -1,4 +1,4 @@
-import { useState, useEffect, type ReactNode, type ChangeEvent } from 'react';
+import { useState, useEffect, useRef, type ReactNode, type ChangeEvent } from 'react';
 import { X, Eye, EyeOff, Save, UserRound, Upload, Trash2 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useToast } from './Toast';
@@ -124,6 +124,13 @@ export function SettingsModal({
 
   // Providers
   const [keys, setKeys] = useState<Record<string, string>>({});
+  // V4: vault anahtarlari async yuklenir. Yuklenme bitmeden kaydetmek, bos
+  // kalan inputlar yuzunden vault'taki anahtarlari SILERDI (yaris kosulu —
+  // denetim M10/V4). Save, yukleme bitene kadar kilitli; yukleme hatasinda
+  // anahtar yazimi hic yapilmaz (mevcut anahtarlar korunur).
+  const [keysLoaded, setKeysLoaded] = useState<boolean>(false);
+  const keysStatusRef = useRef<'loading' | 'ok' | 'error'>('loading');
+  const loadedKeysRef = useRef<Record<string, string>>({});
   const [baseUrls, setBaseUrls] = useState<Record<string, string>>({});
   const [activeProvider, setActiveProvider] = useState<string>('openai');
   const [visibleProvider, setVisibleProvider] = useState<string | null>(null);
@@ -147,14 +154,28 @@ export function SettingsModal({
   useEffect(() => {
     if (!isOpen) return;
     let cancelled = false;
+    // V4: her açılışta anahtar yükleme durumu sıfırlanır; Save yüklenene kadar kilitli.
+    keysStatusRef.current = 'loading';
+    setKeysLoaded(false);
+    loadedKeysRef.current = {};
     // Keys are read asynchronously from the OS vault (desktop) or localStorage
     // (browser); legacy localStorage entries in the vault are migrated automatically.
     Promise.all(API_PROVIDERS.map(async (p) => [p.id, await getStoredKey(p.id)] as const))
       .then((entries) => {
         if (cancelled) return;
-        setKeys(Object.fromEntries(entries));
+        const map = Object.fromEntries(entries);
+        setKeys(map);
+        loadedKeysRef.current = map;
+        keysStatusRef.current = 'ok';
+        setKeysLoaded(true);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (cancelled) return;
+        // Anahtarlar okunamadı: inputlar BOŞ kalır ama bu "sil" demek değildir.
+        keysStatusRef.current = 'error';
+        setKeysLoaded(true);
+        showToast('Key Load Failed', 'Stored API keys could not be read. Saving will NOT touch them.', 'error');
+      });
     const loadedBases: Record<string, string> = {};
     for (const p of API_PROVIDERS) {
       loadedBases[p.id] = localStorage.getItem(baseStorageKey(p.id)) || p.defaultBaseUrl || '';
@@ -210,12 +231,28 @@ export function SettingsModal({
   }
 
   async function handleSave() {
-    // Keys are written to the OS vault; a provider left empty is removed.
-    await Promise.all(
-      API_PROVIDERS.map((provider) =>
-        setStoredKey(provider.id, (keys[provider.id] || '').trim())
-      )
-    );
+    // V4: anahtarlar henuz yuklenmediyse kaydetme anahtarlara DOKUNMAZ —
+    // bos input yuzunden vault silinmesi (V4 yaris kosulu) artik imkansiz.
+    if (keysStatusRef.current === 'loading') {
+      showToast('Not Ready', 'API keys are still loading from the vault — try again in a moment.', 'info');
+      return;
+    }
+    if (keysStatusRef.current === 'ok') {
+      // Yalnizca kullaniciyi gercekten degistirdigi anahtarlari yaz.
+      const changed = API_PROVIDERS.filter(
+        p => (keys[p.id] || '').trim() !== (loadedKeysRef.current[p.id] || '').trim()
+      );
+      const removed = changed.filter(p => !(keys[p.id] || '').trim());
+      if (removed.length > 0) {
+        const names = removed.map(p => p.name).join(', ');
+        if (!window.confirm(`Remove the stored API key(s) for ${names}? Existing keys stay unless you confirm.`)) {
+          return;
+        }
+      }
+      await Promise.all(
+        changed.map(p => setStoredKey(p.id, (keys[p.id] || '').trim()))
+      );
+    }
     localStorage.setItem(activeProviderStorageKey, activeProvider);
 
     for (const provider of API_PROVIDERS) {
@@ -612,10 +649,12 @@ export function SettingsModal({
             <button
               type="button"
               onClick={handleSave}
-              className="flex items-center gap-1.5 rounded-md bg-[#3AA99F] px-4 py-1.5 text-[11.5px] font-semibold text-[#071310] transition-colors hover:bg-[#45B8AD] cursor-pointer"
+              disabled={!keysLoaded}
+              title={keysLoaded ? undefined : 'API keys are still loading from the vault…'}
+              className="flex items-center gap-1.5 rounded-md bg-[#3AA99F] px-4 py-1.5 text-[11.5px] font-semibold text-[#071310] transition-colors hover:bg-[#45B8AD] cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <Save size={12} />
-              Save
+              {keysLoaded ? 'Save' : 'Loading keys…'}
             </button>
           </footer>
         </div>
