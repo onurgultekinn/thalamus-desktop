@@ -228,6 +228,8 @@ export default function App() {
   // Perf: acilista okunan sohbetin hemen geri yazilmasini engelleyen isaret
   // (bkz. kalicilik efektindeki loadedChatRef).
   const loadedChatRef = useRef<string | null>(null);
+  /** Sohbet gecisi olcumunun baslangici (dev perf logu icin). */
+  const switchT0Ref = useRef<number>(0);
 
   // Load messages whenever activeChatId changes
   useEffect(() => {
@@ -550,31 +552,42 @@ export default function App() {
           modelName: `${provider.name} · ${provider.model}`,
         }]);
       }
-      } catch (err) {
-        const kind = abortKind();
-        if (kind) {
-          applyMessages(prev => [...prev, {
-            role: 'assistant',
-            content: kind === 'stop' ? 'Request stopped.' : '**Request timed out** after 180 s — no response arrived.',
-            timestamp: ts(),
-            modelName: LOCAL_ENGINE_STAMP,
-          }]);
-        } else {
-          const x = explainError(err, 'Assistant request');
-          // Sohbet balonu zaten hatayi gosteriyor: ayrica toast acmak cift
-          // mesaj olurdu. Baslik + aksiyon; tekrar eden ilk cumle atilir.
-          applyMessages(prev => [...prev, {
-            role: 'assistant',
-            content: `**[${x.code}] ${x.title}**\n\n${splitExplanation(x.explanation).rest ?? x.explanation}\n\n*For more info, check the wiki*`,
-            timestamp: ts(),
-            modelName: LOCAL_ENGINE_STAMP,
-          }]);
-        }
-      } finally {
-        setLoading(false);
-        abortControllerRef.current = null;
+  } catch (err) {
+      const kind = abortKind();
+      if (kind) {
+        applyMessages(prev => [...prev, {
+          role: 'assistant',
+          content: kind === 'stop' ? 'Request stopped.' : '**Request timed out** after 180 s — no response arrived.',
+          timestamp: ts(),
+          modelName: LOCAL_ENGINE_STAMP,
+        }]);
+      } else {
+        const x = explainError(err, 'Assistant request');
+        // Sohbet balonu zaten hatayi gosteriyor: ayrica toast acmak cift
+        // mesaj olurdu. Baslik + aksiyon; tekrar eden ilk cumle atilir.
+        applyMessages(prev => [...prev, {
+          role: 'assistant',
+          content: `**[${x.code}] ${x.title}**\n\n${splitExplanation(x.explanation).rest ?? x.explanation}\n\n*For more info, check the wiki*`,
+          timestamp: ts(),
+          modelName: LOCAL_ENGINE_STAMP,
+        }]);
       }
-  };
+    } finally {
+      setLoading(false);
+      abortControllerRef.current = null;
+    }
+};
+
+  /**
+   * Dev olcumu: sohbet gecisi kac ms suruyor ve kac mesaj render edildi.
+   * Prod build'de gorunmez; konsola sadece DEV'de yazar.
+   */
+  useEffect(() => {
+    if (!import.meta.env.DEV || !switchT0Ref.current) return;
+    const ms = Math.round(performance.now() - switchT0Ref.current);
+    switchT0Ref.current = 0;
+    console.log(`[perf] chat switch → ${ms}ms (${messages.length} messages)`);
+  }, [messages]);
 
   /** T2: süren isteği durdurur; fetch AbortError fırlatır, mesaj "Request stopped." yazılır. */
   const handleStopRequest = () => {
@@ -698,6 +711,7 @@ export default function App() {
           chats={chats}
           activeChatId={activeChatId}
           onSelectChat={(id) => {
+            if (import.meta.env.DEV) switchT0Ref.current = performance.now();
             setActiveChatId(id);
             setCurrentView('chat');
           }}

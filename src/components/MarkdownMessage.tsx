@@ -7,6 +7,97 @@ interface MarkdownMessageProps {
 }
 
 /**
+ * Prism, bloğu mount anında senkron tokenize eder: uzun bir kod bloğu içeren
+ * sohbete geçerken bu tek başına saniyeler alabilir (içerik küçük olsa bile).
+ * Bu yüzden renklendirme artık tembel:
+ *  - Küçük/orta blok: hemen düz metin görünür, renkler tarayıcı boşta kalınca
+ *    (idle) uygulanır — geçiş anında, bloklar renksiz de olsa okunur.
+ *  - Çok büyük blok: varsayılan düz metin kalır; isteyen "Highlight" der.
+ */
+const IDLE_HIGHLIGHT_MAX_CHARS = 12_000;
+const PLAIN_VIEW_MAX_CHARS = 40_000;
+
+const CodeBlock: React.FC<{ lang: string; code: string }> = React.memo(({ lang, code }) => {
+  const [highlighted, setHighlighted] = React.useState(false);
+  const [forced, setForced] = React.useState(false);
+  const tooBigToAutoHighlight = code.length > IDLE_HIGHLIGHT_MAX_CHARS;
+  const canHighlight = code.length <= PLAIN_VIEW_MAX_CHARS;
+
+  React.useEffect(() => {
+    if (tooBigToAutoHighlight) return; // varsayilan: duz metin, kullanici secer
+    let cancelled = false;
+    // Gecisi bloklamamak icin renk isi bosta yapilir.
+    const schedule = (cb: () => void) =>
+      typeof window.requestIdleCallback === 'function'
+        ? window.requestIdleCallback(() => cb(), { timeout: 400 })
+        : window.setTimeout(cb, 0);
+    schedule(() => {
+      if (cancelled) return;
+      const t0 = performance.now();
+      setHighlighted(true);
+      const ms = performance.now() - t0;
+      if (import.meta.env.DEV && ms > 50) {
+        console.warn(`[perf] prism highlight (${lang || 'text'}, ${code.length} chars) took ${Math.round(ms)}ms`);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [code, lang, tooBigToAutoHighlight]);
+
+  const showHighlight = highlighted || forced;
+
+  return (
+    <>
+      {lang && showHighlight ? (
+        <SyntaxHighlighter
+          style={vscDarkPlus as unknown as Record<string, React.CSSProperties>}
+          language={lang}
+          PreTag="div"
+          showLineNumbers={true}
+          wrapLines={true}
+          lineProps={{ className: 'vscode-line-row' }}
+          lineNumberStyle={{
+            minWidth: '28px',
+            paddingRight: '12px',
+            color: '#575654',
+            textAlign: 'right',
+            userSelect: 'none',
+            display: 'inline-block',
+          }}
+          customStyle={{
+            margin: 0,
+            padding: '0.75rem 0.85rem 0.75rem 0.5rem',
+            background: '#100F0F',
+            fontFamily: "'Cascadia Code', 'Ubuntu Sans Mono', Consolas, monospace",
+            fontSize: '0.8rem',
+            lineHeight: '1.6'
+          }}
+        >
+          {code}
+        </SyntaxHighlighter>
+      ) : (
+        /* Dil etiketsiz ``` blokları inline pikap stiline düşmemeli; düz
+           monospace blok olarak kalır (satır sonu korunur). */
+        <div className="relative">
+          <pre className="m-0 px-3 py-2.5 font-mono text-[0.8rem] leading-[1.6] text-zinc-200 whitespace-pre overflow-x-auto pretty-scrollbar">
+            {code}
+          </pre>
+          {lang && canHighlight && !showHighlight && tooBigToAutoHighlight && (
+            <button
+              type="button"
+              onClick={() => setForced(true)}
+              className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded bg-[#282726] border border-zinc-800 text-[10px] text-zinc-400 hover:text-zinc-100 cursor-pointer"
+              title="Large block: colors are off by default for speed"
+            >
+              Highlight
+            </button>
+          )}
+        </div>
+      )}
+    </>
+  );
+});
+
+/**
  * Markdown message body. `memo`: when a new message is added to the chat, old
  * messages (and their Prism highlight passes) don't re-run — a big difference
  * per keystroke in long chats.
@@ -44,40 +135,8 @@ export const MarkdownMessage: React.FC<MarkdownMessageProps> = React.memo(({ con
         </button>
       </div>
 
-      {lang ? (
-        <SyntaxHighlighter
-          style={vscDarkPlus as unknown as Record<string, React.CSSProperties>}
-          language={lang}
-          PreTag="div"
-          showLineNumbers={true}
-          wrapLines={true}
-          lineProps={{ className: 'vscode-line-row' }}
-          lineNumberStyle={{
-            minWidth: '28px',
-            paddingRight: '12px',
-            color: '#575654',
-            textAlign: 'right',
-            userSelect: 'none',
-            display: 'inline-block',
-          }}
-          customStyle={{
-            margin: 0,
-            padding: '0.75rem 0.85rem 0.75rem 0.5rem',
-            background: '#100F0F',
-            fontFamily: "'Cascadia Code', 'Ubuntu Sans Mono', Consolas, monospace",
-            fontSize: '0.8rem',
-            lineHeight: '1.6'
-          }}
-        >
-          {codeString}
-        </SyntaxHighlighter>
-      ) : (
-        /* Dil etiketsiz ``` blokları inline pikap stiline düşmemeli; düz
-           monospace blok olarak kalır (satır sonu korunur). */
-        <div className="whitespace-pre-wrap px-3 py-2.5 font-mono text-[0.8rem] leading-[1.6] text-zinc-200">
-          {codeString}
-        </div>
-      )}
+      {/* Renklendirme CodeBlock icinde tembel: gecis aninda duz metin gorunur. */}
+      <CodeBlock lang={lang} code={codeString} />
     </div>
   );
 
