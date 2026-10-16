@@ -77,6 +77,16 @@ export function ThalamusCopilot({
   onApplyCode,
   onOpenTerminal
 }: ThalamusCopilotProps) {
+  // Görünen ad yerel profilden alınır; profil yoksa ChatView ile aynı nötr
+  // etiket ('Anonymous User') kullanılır — sabit koda gömülü kimlik yalanı yok.
+  const userName = (() => {
+    try {
+      const u = JSON.parse(localStorage.getItem('thalamus_user') || 'null') as { name?: string } | null;
+      return u?.name?.trim() || 'Anonymous User';
+    } catch {
+      return 'Anonymous User';
+    }
+  })();
   const [mode, setMode] = useState<'chat' | 'agent'>('chat');
   const [input, setInput] = useState("");
   const [executedActions, setExecutedActions] = useState<Record<string, boolean>>({});
@@ -584,7 +594,7 @@ export function ThalamusCopilot({
             <div className="flex items-center gap-1 text-[9.5px] text-[#87857F] px-1 font-mono">
               {msg.sender === 'user' && <User size={9} className="text-[#4385BE]" />}
               <span className="text-[#A8A49E] font-medium">
-                {msg.sender === 'user' ? 'Anonymous User' : 'Thalamus'}
+                {msg.sender === 'user' ? userName : 'Thalamus'}
               </span>
               <span>•</span>
               <span>{msg.timestamp}</span>
