@@ -37,6 +37,21 @@ export interface ExplainedError {
   detail?: string;
 }
 
+/**
+ * Support wiki base URL. Empty until the wiki is published.
+ * Once it exists, set this to e.g.
+ *   'https://github.com/onurgultekinn/thalamus-desktop/wiki/errors/'
+ * and every `wiki > <code>` link in the UI goes live — one page per code
+ * (…/wiki/errors/415). No other code change is needed.
+ */
+export const WIKI_BASE_URL = '';
+
+/** Link target for an error code, or null while the wiki is unpublished. */
+export function wikiUrlFor(code: string): string | null {
+  if (!WIKI_BASE_URL) return null;
+  return `${WIKI_BASE_URL}${code}`;
+}
+
 const trimDetail = (s: string, max = 200): string => s.replace(/\s+/g, ' ').trim().slice(0, max);
 
 /**

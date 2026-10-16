@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
 import { X } from 'lucide-react';
+import { wikiUrlFor } from '../lib/errors';
 
 export type ToastType = 'success' | 'error' | 'info';
 
@@ -125,14 +126,26 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                 </span>
               )}
 
-              {/* Alt satır: yalnız kısa referans. Ham teknik metin tooltip'te durur. */}
+              {/* Alt satır: kısa referans; wiki yayınlanınca tıklanabilir köprü olur. */}
               {toast.type === 'error' && code && (
-                <span
-                  className="text-[10px] text-[#7E7A73] font-mono leading-[15px] mt-0.5 pt-1.5 border-t border-[#2E2C29] cursor-help"
-                  title={bodyDetail ?? undefined}
-                >
-                  wiki › {code}
-                </span>
+                wikiUrlFor(code) ? (
+                  <a
+                    href={wikiUrlFor(code) as string}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[10px] font-mono leading-[15px] mt-0.5 pt-1.5 border-t border-[#2E2C29] text-[#8A867E] hover:text-[#CFCAC2] hover:underline cursor-pointer w-fit"
+                    title={bodyDetail ? `${bodyDetail}\nFor more info, open the wiki guide for error ${code}` : `For more info, open the wiki guide for error ${code}`}
+                  >
+                    wiki › {code} ↗
+                  </a>
+                ) : (
+                  <span
+                    className="text-[10px] text-[#7E7A73] font-mono leading-[15px] mt-0.5 pt-1.5 border-t border-[#2E2C29] cursor-help w-fit"
+                    title={bodyDetail ? `${bodyDetail}\nFor more info, open the wiki guide for error ${code} (not published yet)` : `For more info, open the wiki guide for error ${code} (not published yet)`}
+                  >
+                    wiki › {code}
+                  </span>
+                )
               )}
 
               {/* Kalan süre çubuğu: kırık beyaz, alttan iner. */}
