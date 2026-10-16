@@ -1,10 +1,10 @@
 ﻿/**
  * Single error translator: every user-visible failure goes through this so the
- * UI speaks in one voice â€” a stable error CODE, a short title, a plain-language
+ * UI speaks in one voice - a stable error CODE, a short title, a plain-language
  * explanation, and the raw technical payload kept out of the way (dim detail
  * line / tooltip).
  *
- * ## Error code registry (stable â€” wiki-ready)
+ * ## Error code registry (stable - wiki-ready)
  * Codes follow standard HTTP status semantics so every developer/user already
  * knows them. Local (non-network) conditions reuse the closest HTTP meaning;
  * the table below doubles as the seed for the support wiki. A code is never
@@ -32,29 +32,45 @@ export interface ExplainedError {
   title: string;
   /** Human explanation: what happened + what the user can do about it. */
   explanation: string;
-  /** Raw technical string (status, provider message). Dim detail line/tip. */
+  /** Clean technical line (status + provider short message). No JSON dump. */
   detail?: string;
 }
 
-const trimDetail = (s: string, max = 220): string => s.replace(/\s+/g, ' ').trim().slice(0, max);
+const trimDetail = (s: string, max = 200): string => s.replace(/\s+/g, ' ').trim().slice(0, max);
+
+/**
+ * Pulls the provider's short error message out of the HTTP payload. Bodies
+ * arrive as `401 Unauthorized: { "message": "Incorrect API key ..." , ... }`
+ * or SSE/proxy fragments. We prefer the clean `"message"` value and hide the
+ * JSON envelope from the user.
+ */
+function providerShortMessage(body: string): string | undefined {
+  const m = body.match(/"message"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+  if (m && m[1]) {
+    // Unescape the JSON string bounds we captured.
+    let msg = m[1].replace(/\\n/g, ' ').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+    msg = trimDetail(msg);
+    if (msg) return msg;
+  }
+  return undefined;
+}
 
 export function explainError(err: unknown, context?: string): ExplainedError {
   const raw = err instanceof Error ? err.message : String(err ?? 'unknown error');
 
-  // User pressed Stop â€” no alarm tone.
+  // User pressed Stop - no alarm tone.
   if (err instanceof DOMException && err.name === 'AbortError') {
     return {
       code: '499',
-      title: context ? `Stopped â€” ${context}` : 'Request stopped',
-      explanation: 'You stopped the request. Partial state only applies if the UI says so.',
-      detail: undefined,
+      title: context ? `Stopped - ${context}` : 'Request stopped',
+      explanation: 'You stopped the request. Partial output is kept only where the UI says so.',
     };
   }
   if (typeof raw === 'string' && raw.includes('TIMEOUT')) {
     return {
       code: '408',
       title: 'Request timed out',
-      explanation: 'No answer arrived within 180 s. The provider may be slow or overloaded â€” try again, or switch providers in Settings â†’ Providers.',
+      explanation: 'No answer arrived within 180 s. The provider may be slow or overloaded. Try again, or switch providers in Settings > Providers.',
       detail: trimDetail(raw),
     };
   }
@@ -62,7 +78,7 @@ export function explainError(err: unknown, context?: string): ExplainedError {
     return {
       code: '401',
       title: 'No API key configured',
-      explanation: 'Add a provider key in Settings â†’ Providers; chat answers, vision and summarization need it.',
+      explanation: 'Add a provider key in Settings > Providers; chat answers, vision and summarization need it.',
     };
   }
 
@@ -70,52 +86,59 @@ export function explainError(err: unknown, context?: string): ExplainedError {
   const http = raw.match(/^HTTP (\d{3})\b([\s\S]*)$/);
   if (http) {
     const status = Number(http[1]);
-    const body = trimDetail(http[2]);
-    if (status === 401) {
+    const bodyText = http[2];
+    const short = providerShortMessage(bodyText);
+
+    // Providers often wrap a 401 inside a 502/500 proxy response. If the body
+    // clearly identifies an auth problem, label the TRUE cause, not the shell.
+    const bodySaysAuth = /incorrect\s+api\s+key|invalid\s+api\s+key|invalid_request_error|invalid_api_key|authentication/i.test(bodyText);
+    const effectiveStatus = status >= 500 && bodySaysAuth ? 401 : status;
+
+    if (effectiveStatus === 401) {
       return {
         code: '401',
         title: 'API key rejected',
-        explanation: 'The provider rejected the API key. Check or re-enter it in Settings â†’ Providers.',
-        detail: body,
+        explanation: 'The provider rejected your API key. Open Settings > Providers and re-enter a valid key for this model.',
+        detail: short ?? trimDetail(bodyText),
       };
     }
-    if (status === 402 || status === 403) {
+    if (effectiveStatus === 402 || effectiveStatus === 403) {
       return {
-        code: (String(status)),
+        code: String(effectiveStatus),
         title: 'Access / billing problem',
-        explanation: 'The provider denied the call â€” usually an empty balance, an expired plan or key restrictions on the provider dashboard.',
-        detail: body,
+        explanation: 'The provider denied the call - usually an empty balance, an expired plan or key restrictions on the provider dashboard.',
+        detail: short ?? trimDetail(bodyText),
       };
     }
-    if (status === 404) {
+    if (effectiveStatus === 404) {
       return {
         code: '404',
         title: 'Model or endpoint not found',
-        explanation: 'The provider could not find the model or endpoint used. If a custom Base URL is set in Settings â†’ Providers, verify it (e.g. wrong path / wrong model name).',
-        detail: body,
+        explanation: 'The provider could not find the model or endpoint used. If a custom Base URL is set in Settings > Providers, verify it (wrong path or wrong model name).',
+        detail: short ?? trimDetail(bodyText),
       };
     }
-    if (status === 429) {
+    if (effectiveStatus === 429) {
       return {
         code: '429',
         title: 'Too many requests',
         explanation: 'The provider hit a rate or usage limit. Wait a moment and try again.',
-        detail: body,
+        detail: short ?? trimDetail(bodyText),
       };
     }
-    if (status >= 500) {
+    if (effectiveStatus >= 500) {
       return {
-        code: (String(status)),
+        code: String(status),
         title: 'Provider error',
-        explanation: `The provider is temporarily unavailable (HTTP ${status}). It is usually a temporary server-side issue â€” try again in a moment.`,
-        detail: body,
+        explanation: 'The provider itself failed mid-answer. It is usually a temporary server-side issue - try again in a moment.',
+        detail: short ?? trimDetail(bodyText),
       };
     }
     return {
-      code: (String(status)),
+      code: String(status),
       title: `Request failed (HTTP ${status})`,
       explanation: 'The provider answered with an unexpected error.',
-      detail: body,
+      detail: short ?? trimDetail(bodyText),
     };
   }
 
@@ -133,7 +156,7 @@ export function explainError(err: unknown, context?: string): ExplainedError {
   return {
     code: '500',
     title: context ? `${context} failed` : 'Operation failed',
-    explanation: 'This operation failed unexpectedly. If it keeps happening, check Settings â†’ Providers (key / Base URL) and try a different provider.',
+    explanation: 'This operation failed unexpectedly. If it keeps happening, check Settings > Providers (key / Base URL) and try a different provider.',
     detail: trimDetail(raw),
   };
 }

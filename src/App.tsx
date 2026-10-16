@@ -480,15 +480,16 @@ export default function App() {
             timestamp: ts(),
             modelName: 'Vision model (request aborted)',
           }]);
-        } else {
-          const x = explainError(err, 'Vision request');
-          applyMessages(prev => [...prev, {
-            role: 'assistant',
-            content: `⚠️ **[${x.code}] ${x.title}**\n\n${x.explanation}${x.detail ? `\n\n${x.detail}` : ''}`,
-            timestamp: ts(),
-            modelName: 'Vision model (request failed)',
-          }]);
-        }
+      } else {
+        const x = explainError(err, 'Assistant request');
+        applyMessages(prev => [...prev, {
+          role: 'assistant',
+          content: `⚠️ **[${x.code}] ${x.title}**\n\n${x.explanation}\n\n📖 wiki › ${x.code}`,
+          timestamp: ts(),
+          modelName: LOCAL_ENGINE_STAMP,
+        }]);
+        showToast(x.title, x.explanation, 'error', undefined, `[${x.code}] ${x.detail ?? x.explanation}`);
+      }
       } finally {
         setLoading(false);
         abortControllerRef.current = null;
@@ -539,26 +540,26 @@ export default function App() {
           modelName: `${provider.name} · ${provider.model}`,
         }]);
       }
-    } catch (err) {
-      const kind = abortKind();
-      if (kind) {
-        applyMessages(prev => [...prev, {
-          role: 'assistant',
-          content: kind === 'stop' ? 'Request stopped.' : '⚠️ **Request timed out** after 180 s — no response arrived.',
-          timestamp: ts(),
-          modelName: LOCAL_ENGINE_STAMP,
-        }]);
-      } else {
-        const x = explainError(err, 'Assistant request');
-        applyMessages(prev => [...prev, {
-          role: 'assistant',
-          content: `⚠️ **[${x.code}] ${x.title}**\n\n${x.explanation}${x.detail ? `\n\n${x.detail}` : ''}`,
-          timestamp: ts(),
-          modelName: LOCAL_ENGINE_STAMP,
-        }]);
-        showToast(x.title, x.explanation, 'error', undefined, `[${x.code}] ${x.detail ?? x.explanation}`);
-      }
-    } finally {
+      } catch (err) {
+        const kind = abortKind();
+        if (kind) {
+          applyMessages(prev => [...prev, {
+            role: 'assistant',
+            content: kind === 'stop' ? 'Request stopped.' : '⚠️ **Request timed out** after 180 s — no response arrived.',
+            timestamp: ts(),
+            modelName: LOCAL_ENGINE_STAMP,
+          }]);
+        } else {
+          const x = explainError(err, 'Vision request');
+          // Sohbet balonu ham JSON dump'i göstermez; kod + başlık + açıklama yeter.
+          applyMessages(prev => [...prev, {
+            role: 'assistant',
+            content: `⚠️ **[${x.code}] ${x.title}**\n\n${x.explanation}\n\n📖 wiki › ${x.code}`,
+            timestamp: ts(),
+            modelName: 'Vision model (request failed)',
+          }]);
+        }
+      } finally {
       setLoading(false);
       abortControllerRef.current = null;
     }
