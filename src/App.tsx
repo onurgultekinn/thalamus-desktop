@@ -15,7 +15,7 @@ import { useToast } from './components/Toast';
 import { API_BASE } from './services/ThalamusClient';
 import { aiChat, userMessage, getActiveProvider } from './services/aiClient';
 import { DEFAULT_MODEL_NAME, MODEL_PRICING } from './constants';
-import { getWorkspaceName, getWorkspaceRoot, openProject, rememberProject } from './lib/workspace';
+import { getWorkspaceName, getWorkspaceRoot, openProject, pruneRecentProjects, rememberProject } from './lib/workspace';
 import type { Message, ChatItem, User } from './types';
 export type { Message, MessageMetrics, ChatItem } from './types';
 import './App.css';
@@ -504,10 +504,25 @@ export default function App() {
       rememberProject(root);
       setWorkspaceVersion(v => v + 1);
     }
+    // C9: diskte artik olmayan proje girdilerini listedan dusur.
+    pruneRecentProjects()
+      .then(kept => {
+        const root2 = getWorkspaceRoot();
+        if (root2 && !kept.some(p => p.root === root2)) rememberProject(root2);
+        setWorkspaceVersion(v => v + 1);
+      })
+      .catch(() => {});
   }, []);
 
   const handleOpenProject = async (root: string) => {
-    await openProject(root);
+    // V6: backend klasörü kabul etmezse (silinmis/tasinmis) durust toast;
+    // hayalet girdi son kullanilanlardan duser, gorunum degistirilmez.
+    const result = await openProject(root);
+    if (!result.ok) {
+      showToast('Project Unavailable', `Could not open ${root}: ${result.error ?? 'unknown error'}. It was removed from the recent list.`, 'error');
+      setWorkspaceVersion(v => v + 1);
+      return;
+    }
     setWorkspaceVersion(v => v + 1);
     setCurrentView('project');
   };

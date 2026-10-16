@@ -102,28 +102,86 @@ export function rememberProject(root: string, name?: string): RecentProject[] {
   return next;
 }
 
+/**
+ * C9: son kullanilanlardan artik diskte olmayan klasorleri duser.
+ * Denetim yapilamiyorsa (tarayici, komut hatasi) YANLISLIKLA hicbir sey
+ * silinmez — liste aynen doner.
+ */
+export async function pruneRecentProjects(): Promise<RecentProject[]> {
+  const list = listRecentProjects();
+  if (!inTauriDesktop() || list.length === 0) return list;
+  const alive = await Promise.all(
+    list.map(async (p) => {
+      try {
+        return (await invoke<boolean>('path_is_dir', { path: p.root })) ? p : null;
+      } catch {
+        return p; // denetlenemedi -> silme
+      }
+    })
+  );
+  const kept = alive.filter((p): p is RecentProject => p !== null);
+  if (kept.length !== list.length) {
+    try { localStorage.setItem(RECENT_KEY, JSON.stringify(kept)); } catch {}
+  }
+  return kept;
+}
+
 export function forgetProject(root: string): RecentProject[] {
   const next = listRecentProjects().filter((p) => p.root !== root);
   try { localStorage.setItem(RECENT_KEY, JSON.stringify(next)); } catch {}
   return next;
 }
 
+export interface OpenProjectResult {
+  ok: boolean;
+  /** Hata mesajı (yalnızca masaüstünde backend reddettiyse gerçek hatadır). */
+  error?: string;
+  /** Gerçekten uygulanmış kök (başarıda). */
+  root?: string;
+}
+
+function inTauriDesktop(): boolean {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+}
+
 /**
- * Opens a project by switching the active workspace root. The root is saved
- * locally first so the UI switches even without the native backend, then the
- * backend is asked to adopt it (its canonical path wins when available).
+ * Opens a project by switching the active workspace root.
+ *
+ * V6: masaüstünde backend'in BAŞARISI dogrulanir. Silinmis/tasinmis bir
+ * klasör için backend reddederse: yerel secim geri alinir, hayalet girdi
+ * son kullanilanlardan düsürülür ve cagiran DURUST sekilde bilgilendirilir.
+ * (Eskiden hata yutuluyor, UI ölü proje etiketiyle baska bir kökün agacını
+ * göstermeye devam ediyordu — denetim M3/V6.)
+ * Tarayici önizlemesinde native backend yoktur; yerel gecersiz kalir.
  */
-export async function openProject(root: string): Promise<void> {
-  if (!root) return;
+export async function openProject(root: string): Promise<OpenProjectResult> {
+  if (!root) return { ok: false, error: 'Proje yolu boş.' };
+  const previous = getWorkspaceRoot();
   saveWorkspaceRoot(root);
   rememberProject(root);
+  if (!inTauriDesktop()) {
+    // Browser preview: no native backend — the local switch stands, but the
+    // caller is told honestly that the backend did not verify it.
+    return { ok: true, root };
+  }
   try {
     const info = await invoke<WorkspaceInfo>('set_workspace_root', { path: root });
     if (info?.root) {
       saveWorkspaceRoot(info.root);
       rememberProject(info.root, info.name);
+      return { ok: true, root: info.root };
     }
-  } catch {
-    // Backend unavailable (e.g. browser preview) — the local switch stands.
+    throw new Error('Backend kökü onaylamadı.');
+  } catch (e) {
+    // Masaüstü ve backend reddetti: yolu geri al + hayalet girdiyi düsür.
+    if (previous) {
+      saveWorkspaceRoot(previous);
+    } else {
+      const cfg = readConfig();
+      delete cfg.workspace_root;
+      localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg));
+    }
+    forgetProject(root);
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
 }

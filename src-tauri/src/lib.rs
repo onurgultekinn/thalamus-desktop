@@ -467,6 +467,13 @@ fn set_workspace_root(path: String, state: State<'_, AppState>) -> Result<Worksp
     Ok(build_workspace_info(Path::new(&root_str)))
 }
 
+/// C9: son kullanılan projeler listesindeki klasörlerin hâlâ var olup
+/// olmadığını denetlemek için kullanılır (yalnızca var/yok bildirir).
+#[tauri::command]
+fn path_is_dir(path: String) -> bool {
+    Path::new(&path).is_dir()
+}
+
 #[tauri::command]
 fn get_workspace_info(state: State<'_, AppState>) -> Result<WorkspaceInfo, String> {
     let root = state.workspace_root.read().unwrap_or_else(|e| e.into_inner()).clone();
@@ -728,6 +735,7 @@ pub fn run() {
             delete_entry,
             set_workspace_root,
             get_workspace_info,
+            path_is_dir,
             thalamus_save_config,
             thalamus_load_config,
             secret_set,
