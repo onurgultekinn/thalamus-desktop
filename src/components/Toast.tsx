@@ -126,7 +126,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                 </span>
               )}
 
-              {/* Alt satır: kısa referans; wiki yayınlanınca tıklanabilir köprü olur. */}
+              {/* Alt satır: tek cümlelik yol gösterici; wiki yayınlanınca tıklanabilir olur. */}
               {toast.type === 'error' && code && (
                 wikiUrlFor(code) ? (
                   <a
@@ -134,16 +134,16 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-[10px] font-mono leading-[15px] mt-0.5 pt-1.5 border-t border-[#2E2C29] text-[#8A867E] hover:text-[#CFCAC2] hover:underline cursor-pointer w-fit"
-                    title={bodyDetail ? `${bodyDetail}\nFor more info, open the wiki guide for error ${code}` : `For more info, open the wiki guide for error ${code}`}
+                    title={bodyDetail ? `${bodyDetail}\nFor more info, check the wiki (${code})` : `For more info, check the wiki (${code})`}
                   >
-                    wiki › {code} ↗
+                    For more info, check the wiki <span className="text-[#6F6C66]">· {code}</span> ↗
                   </a>
                 ) : (
                   <span
                     className="text-[10px] text-[#7E7A73] font-mono leading-[15px] mt-0.5 pt-1.5 border-t border-[#2E2C29] cursor-help w-fit"
-                    title={bodyDetail ? `${bodyDetail}\nFor more info, open the wiki guide for error ${code} (not published yet)` : `For more info, open the wiki guide for error ${code} (not published yet)`}
+                    title={bodyDetail ? `${bodyDetail}\nFor more info, check the wiki (${code}) — not published yet` : `For more info, check the wiki (${code}) — not published yet`}
                   >
-                    wiki › {code}
+                    For more info, check the wiki <span className="text-[#5F5C57]">· {code}</span>
                   </span>
                 )
               )}

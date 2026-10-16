@@ -485,7 +485,7 @@ export default function App() {
           // Ham JSON dump gösterilmez: kod + başlık + açıklama + wiki yeter.
           applyMessages(prev => [...prev, {
             role: 'assistant',
-            content: `**[${x.code}] ${x.title}**\n\n${x.explanation}\n\n*wiki › ${x.code}*`,
+            content: `**[${x.code}] ${x.title}**\n\n${x.explanation}\n\n*For more info, check the wiki · ${x.code}*`,
             timestamp: ts(),
             modelName: 'Vision model (request failed)',
           }]);
@@ -555,7 +555,7 @@ export default function App() {
           // mesaj olurdu. Toast yalnız sohbet dışı işlemler için kalır.
           applyMessages(prev => [...prev, {
             role: 'assistant',
-            content: `**[${x.code}] ${x.title}**\n\n${x.explanation}\n\n*wiki › ${x.code}*`,
+            content: `**[${x.code}] ${x.title}**\n\n${x.explanation}\n\n*For more info, check the wiki · ${x.code}*`,
             timestamp: ts(),
             modelName: LOCAL_ENGINE_STAMP,
           }]);
