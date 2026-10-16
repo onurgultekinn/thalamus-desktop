@@ -26,8 +26,8 @@ const MIN_FREQ: usize = 3;
 /// 1 token eden nadir iki harfli işaretçiler (kaynakta kelime olarak geçmesi
 /// beklenmeyenler). Kod içi çakışma shrink içinde ölçülerek elenir.
 const MARKER_POOL: [&str; 24] = [
-    "qx", "qz", "qj", "xq", "zx", "jz", "vq", "wq", "kq", "qk", "xj", "jx", "vx", "xv", "wz",
-    "zw", "kv", "vk", "jq", "qv", "xw", "wx", "jk", "kj",
+    "qx", "qz", "qj", "xq", "zx", "jz", "vq", "wq", "kq", "qk", "xj", "jx", "vx", "xv", "wz", "zw",
+    "kv", "vk", "jq", "qv", "xw", "wx", "jk", "kj",
 ];
 
 pub fn shrink(code: &str, bpe: &CoreBPE) -> Option<ShrinkOutput> {
@@ -211,7 +211,10 @@ mod tests {
 
         println!("orijinal : {} token", before);
         println!("çıktı    : {} token", after);
-        println!("kazanç   : %{:.1}", 100.0 * (before - after) as f64 / before as f64);
+        println!(
+            "kazanç   : %{:.1}",
+            100.0 * (before - after) as f64 / before as f64
+        );
         assert!(after < before);
     }
 
@@ -231,35 +234,46 @@ mod tests {
             })
             .collect();
         let outline_tok = count(&b, &outline.join("\n"));
-        println!("A) şema/outline      : {} token (%{:.0} — tam kodun) → tasarruf %{:.0}",
+        println!(
+            "A) şema/outline      : {} token (%{:.0} — tam kodun) → tasarruf %{:.0}",
             outline_tok,
             100.0 * outline_tok as f64 / before as f64,
-            100.0 * (1.0 - outline_tok as f64 / before as f64));
+            100.0 * (1.0 - outline_tok as f64 / before as f64)
+        );
 
         // B) SKELETON: kontrol akışı hattı (yapı anahtar kelimeleri)
         let skeleton: Vec<&str> = SAMPLE
             .lines()
             .filter(|l| {
                 let t = l.trim_start();
-                ["def ", "class ", "for ", "while ", "if ", "return ", "with ", "raise ", "self."]
-                    .iter()
-                    .any(|k| t.starts_with(k))
+                [
+                    "def ", "class ", "for ", "while ", "if ", "return ", "with ", "raise ",
+                    "self.",
+                ]
+                .iter()
+                .any(|k| t.starts_with(k))
             })
             .collect();
         let skeleton_tok = count(&b, &skeleton.join("\n"));
-        println!("B) iskelet           : {} token (%{:.0}) → tasarruf %{:.0}",
+        println!(
+            "B) iskelet           : {} token (%{:.0}) → tasarruf %{:.0}",
             skeleton_tok,
             100.0 * skeleton_tok as f64 / before as f64,
-            100.0 * (1.0 - skeleton_tok as f64 / before as f64));
+            100.0 * (1.0 - skeleton_tok as f64 / before as f64)
+        );
 
         // C) Karakter bileşimi: ağırlık nerede?
         let mut ws = 0usize;
         let mut punct = 0usize;
         let mut alnum = 0usize;
         for c in SAMPLE.chars() {
-            if c.is_whitespace() { ws += 1; }
-            else if c.is_ascii_alphanumeric() || c == '_' { alnum += 1; }
-            else { punct += 1; }
+            if c.is_whitespace() {
+                ws += 1;
+            } else if c.is_ascii_alphanumeric() || c == '_' {
+                alnum += 1;
+            } else {
+                punct += 1;
+            }
         }
         let total = ws + punct + alnum;
         println!("C) karakter bileşimi : boşluk %{:.0}, isim/rakam %{:.0}, noktalama %{:.0} ({} karakter, yoğunluk {:.1} kar/token)",
@@ -297,13 +311,22 @@ mod tests {
             Ok(c) => {
                 let after = count(&b, &c);
                 let diff = before as i64 - after as i64;
-                println!("@T sıkıştırılmış    : {} token ({} {} token)",
+                println!(
+                    "@T sıkıştırılmış    : {} token ({} {} token)",
                     after,
                     if diff >= 0 { "kazanç" } else { "KAYIP" },
-                    diff.abs());
-                println!("SONUÇ: kaynak kod {} token vs @T {} token → {}",
-                    before, after,
-                    if after < before { "@T kazandı (beklenmedik!)" } else { "kaynak kod daha küçük — hipotez ölçüyle reddedildi" });
+                    diff.abs()
+                );
+                println!(
+                    "SONUÇ: kaynak kod {} token vs @T {} token → {}",
+                    before,
+                    after,
+                    if after < before {
+                        "@T kazandı (beklenmedik!)"
+                    } else {
+                        "kaynak kod daha küçük — hipotez ölçüyle reddedildi"
+                    }
+                );
             }
             Err(e) => println!("@T reddetti: {}", e),
         }

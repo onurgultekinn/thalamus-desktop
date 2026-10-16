@@ -11,16 +11,20 @@
 
 use serde_json::{json, Value};
 
-
-use crate::engine::{edits, schema, MINIMAL_DECODER_INSTRUCTION};
 use crate::engine::pipeline::process_with_metrics;
+use crate::engine::{edits, schema, MINIMAL_DECODER_INSTRUCTION};
 
 use super::{tools, BackendState};
 use axum::extract::State;
 
 /// Sağlayıcı HTTP taşıması — testlerde stub'lanır.
 pub trait Transport: Send + Sync {
-    fn post_json(&self, url: &str, headers: &[(String, String)], body: &Value) -> Result<Value, String>;
+    fn post_json(
+        &self,
+        url: &str,
+        headers: &[(String, String)],
+        body: &Value,
+    ) -> Result<Value, String>;
 }
 
 pub struct HttpTransport;
@@ -30,7 +34,12 @@ pub struct HttpTransport;
 static HTTP_CLIENT: std::sync::OnceLock<reqwest::blocking::Client> = std::sync::OnceLock::new();
 
 impl Transport for HttpTransport {
-    fn post_json(&self, url: &str, headers: &[(String, String)], body: &Value) -> Result<Value, String> {
+    fn post_json(
+        &self,
+        url: &str,
+        headers: &[(String, String)],
+        body: &Value,
+    ) -> Result<Value, String> {
         let client = HTTP_CLIENT.get_or_init(|| {
             reqwest::blocking::Client::builder()
                 .timeout(std::time::Duration::from_secs(120))
@@ -78,7 +87,7 @@ fn provider_url(provider: &str, base_url: Option<&str>) -> Result<String, String
         _ => base_url
             .filter(|s| !s.trim().is_empty())
             .map(|s| format!("{}/chat/completions", s.trim_end_matches('/')))
-            .ok_or_else(|| format!("bilinmeyen sağlayıcı '{}' ve base_url yok", provider)),
+            .ok_or_else(|| format!("unknown provider '{}' and no base_url", provider)),
     }
 }
 
@@ -98,7 +107,10 @@ fn is_local_endpoint(url: &str) -> bool {
     } else {
         authority.split(':').next().unwrap_or(authority)
     };
-    matches!(host.to_ascii_lowercase().as_str(), "localhost" | "127.0.0.1" | "::1")
+    matches!(
+        host.to_ascii_lowercase().as_str(),
+        "localhost" | "127.0.0.1" | "::1"
+    )
 }
 
 /// Kod bağlamı: gövde yerine ŞEMA gönderilir (bağlam tasarrufu);
@@ -109,8 +121,8 @@ fn build_code_context(blocks: &[(String, String, String)]) -> Option<String> {
         return None;
     }
     let mut out = String::from(
-        "Kod bağlamı ŞEMA olarak verilmiştir (imzalar + satır aralıkları + çağrı ilişkileri).\n\
-         - Kısa gövdeler şemada TAM OLARAK verilmiştir; uzun gövdeler için get_code_body aracını çağır.\n\
+        "Code context is provided as a SCHEMA (signatures + line ranges + call relationships).\n\
+         - Short bodies are given FULLY in the schema; call the get_code_body tool for long bodies.\n\
          - \"çağırır:\" notu o tanımın hangi fonksiyonları kullandığını gösterir — bir hatayı araştırıyorsan\n\
          veya değişikliğin etkisini bilmiyorsan İLGİLİ TÜM fonksiyonları fetch et (fetch ucuzdur, eksik bağlam pahalıdır).\n\
          - Değişikliklerini şu formatta döndür (her blok için):\n\
@@ -122,14 +134,18 @@ fn build_code_context(blocks: &[(String, String, String)]) -> Option<String> {
          (yeni satırlar)\n\
          >>>>>>> REPLACE\n\
          ```\n\
-         SEARCH mevcut kodla birebir eşleşmelidir; birden çok blok verebilirsin.\n\nŞEMA:\n",
+         SEARCH must match the current code exactly; you may provide multiple blocks.\n\nŞEMA:\n",
     );
     for (id, name, body) in blocks {
         let _ = id;
         match schema::extract_schema(body) {
-            Some(s) => out.push_str(&format!("--- {} ---\n{}\n", name, schema::render_schema(&s))),
+            Some(s) => out.push_str(&format!(
+                "--- {} ---\n{}\n",
+                name,
+                schema::render_schema(&s)
+            )),
             None => out.push_str(&format!(
-                "--- {} (şema çıkarılamadı, tam gövde) ---\n{}\n",
+                "--- {} (schema extraction failed, full body) ---\n{}\n",
                 name, body
             )),
         }
@@ -197,7 +213,7 @@ fn whole_file_fallback(
         vec![json!({
             "file": name,
             "applied": true,
-            "message": "whole-file yedeği ile uygulandı (SEARCH/REPLACE eşleşmedi)",
+            "message": "applied via whole-file fallback (SEARCH/REPLACE mismatch)",
             "new_body": code,
         })]
     }))
@@ -224,7 +240,7 @@ pub fn run_tool_loop(
     loop {
         rounds += 1;
         if rounds > max_rounds {
-            return Err(format!("tool döngüsü sınırı aşıldı ({} tur)", max_rounds));
+            return Err(format!("tool loop limit exceeded ({} rounds)", max_rounds));
         }
         let body = json!({"model": model, "messages": messages, "tools": tools_json});
         let resp = transport.post_json(url, &headers, &body)?;
@@ -233,7 +249,7 @@ pub fn run_tool_loop(
         }
         let msg = resp["choices"][0]["message"].clone();
         if msg.is_null() {
-            return Err("sağlayıcı yanıtı beklenmedik biçimde boş".into());
+            return Err("provider response was unexpectedly empty".into());
         }
         let tool_calls = msg["tool_calls"].as_array().cloned().unwrap_or_default();
         if tool_calls.is_empty() {
@@ -271,7 +287,7 @@ fn project_memory(root: &str) -> Option<String> {
         None
     } else {
         Some(format!(
-            "PROJE YÖNERGELERİ (bu talimatlara uy):\n{}",
+            "PROJECT INSTRUCTIONS (follow these):\n{}",
             parts.join("\n\n")
         ))
     }
@@ -335,11 +351,17 @@ pub async fn ai_chat(
     // bulut sağlayıcılar için anahtar zorunludur.
     let is_local_base = is_local_endpoint(&url);
     if req.api_key.trim().is_empty() && !is_local_base {
-        return Err((axum::http::StatusCode::BAD_REQUEST, "api_key gerekli".into()));
+        return Err((
+            axum::http::StatusCode::BAD_REQUEST,
+            "api_key gerekli".into(),
+        ));
     }
     let messages = req.messages.as_array().cloned().unwrap_or_default();
     if messages.is_empty() {
-        return Err((axum::http::StatusCode::BAD_REQUEST, "messages boş olamaz".into()));
+        return Err((
+            axum::http::StatusCode::BAD_REQUEST,
+            "messages cannot be empty".into(),
+        ));
     }
     let blocks: Vec<(String, String, String)> = req
         .code_blocks
@@ -353,7 +375,13 @@ pub async fn ai_chat(
     if let Some(ctx) = build_code_context(&blocks) {
         messages.insert(0, json!({"role": "system", "content": ctx}));
     }
-    if let Some(mem) = project_memory(&state.workspace_root.read().unwrap_or_else(|e| e.into_inner()).clone()) {
+    if let Some(mem) = project_memory(
+        &state
+            .workspace_root
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone(),
+    ) {
         messages.insert(0, json!({"role": "system", "content": mem}));
     }
 
@@ -363,7 +391,10 @@ pub async fn ai_chat(
     // Sıkıştırılmış veri varsa decoder talimatı tam bir sistem mesajı olarak
     // en başa girer (görünmez katmanın model tarafı sözleşmesi).
     if engine_count > 0 {
-        messages.insert(0, json!({"role": "system", "content": MINIMAL_DECODER_INSTRUCTION}));
+        messages.insert(
+            0,
+            json!({"role": "system", "content": MINIMAL_DECODER_INSTRUCTION}),
+        );
     }
 
     let blocks_for_task = blocks.clone();
@@ -475,13 +506,21 @@ mod tests {
 
     #[test]
     fn is_local_endpoint_only_accepts_real_loopback() {
-        assert!(is_local_endpoint("http://localhost:11434/v1/chat/completions"));
-        assert!(is_local_endpoint("http://127.0.0.1:1234/v1/chat/completions"));
+        assert!(is_local_endpoint(
+            "http://localhost:11434/v1/chat/completions"
+        ));
+        assert!(is_local_endpoint(
+            "http://127.0.0.1:1234/v1/chat/completions"
+        ));
         assert!(is_local_endpoint("http://[::1]:8000/v1/chat/completions"));
         // Eski substring hatası: bu URL'ler YEREL sayılmamalı.
         assert!(!is_local_endpoint("https://evil.com/?x=localhost"));
-        assert!(!is_local_endpoint("https://evil.com/localhost/v1/chat/completions"));
-        assert!(!is_local_endpoint("https://api.openai.com/v1/chat/completions"));
+        assert!(!is_local_endpoint(
+            "https://evil.com/localhost/v1/chat/completions"
+        ));
+        assert!(!is_local_endpoint(
+            "https://api.openai.com/v1/chat/completions"
+        ));
         assert!(!is_local_endpoint("http://localhost.evil.com/v1"));
         assert!(!is_local_endpoint("http://attacker@127.0.0.1:11434/v1"));
     }
@@ -492,8 +531,16 @@ mod tests {
         seen: std::sync::Mutex<Vec<Value>>,
     }
     impl Transport for FakeTransport {
-        fn post_json(&self, _url: &str, _h: &[(String, String)], body: &Value) -> Result<Value, String> {
-            self.seen.lock().unwrap_or_else(|e| e.into_inner()).push(body.clone());
+        fn post_json(
+            &self,
+            _url: &str,
+            _h: &[(String, String)],
+            body: &Value,
+        ) -> Result<Value, String> {
+            self.seen
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(body.clone());
             let idx = self.seen.lock().unwrap_or_else(|e| e.into_inner()).len() - 1;
             self.responses
                 .get(idx)
@@ -513,11 +560,24 @@ mod tests {
             ],
             seen: std::sync::Mutex::new(Vec::new()),
         };
-        let blocks = vec![("b1".to_string(), "login".to_string(), "def login(u, p): return True".to_string())];
+        let blocks = vec![(
+            "b1".to_string(),
+            "login".to_string(),
+            "def login(u, p): return True".to_string(),
+        )];
         let messages = vec![json!({"role":"user","content":"login kontrol et"})];
 
-        let (content, rounds, _usage) =
-            run_tool_loop(&transport, "http://x", "key", "m", messages, &blocks, std::path::Path::new("."), 4).unwrap();
+        let (content, rounds, _usage) = run_tool_loop(
+            &transport,
+            "http://x",
+            "key",
+            "m",
+            messages,
+            &blocks,
+            std::path::Path::new("."),
+            4,
+        )
+        .unwrap();
 
         assert_eq!(content, "login fonksiyonu doğru görünüyor.");
         assert_eq!(rounds, 2);
@@ -540,8 +600,22 @@ mod tests {
             ],
             seen: std::sync::Mutex::new(Vec::new()),
         };
-        let blocks = vec![("b1".to_string(), "login".to_string(), "def login(): pass".to_string())];
-        let (content, _, _usage) = run_tool_loop(&transport, "http://x", "k", "m", vec![json!({"role":"user","content":"x"})], &blocks, std::path::Path::new("."), 4).unwrap();
+        let blocks = vec![(
+            "b1".to_string(),
+            "login".to_string(),
+            "def login(): pass".to_string(),
+        )];
+        let (content, _, _usage) = run_tool_loop(
+            &transport,
+            "http://x",
+            "k",
+            "m",
+            vec![json!({"role":"user","content":"x"})],
+            &blocks,
+            std::path::Path::new("."),
+            4,
+        )
+        .unwrap();
         assert_eq!(content, "bulamadım");
     }
 
@@ -562,9 +636,13 @@ mod tests {
 
     #[test]
     fn code_context_sends_schema_not_body() {
-        let blocks = vec![("b1".into(), "sample.py".into(), crate::engine::code_shrink::SAMPLE.into())];
+        let blocks = vec![(
+            "b1".into(),
+            "sample.py".into(),
+            crate::engine::code_shrink::SAMPLE.into(),
+        )];
         let ctx = build_code_context(&blocks).unwrap();
-        assert!(ctx.contains("ŞEMA"));
+        assert!(ctx.contains("SCHEMA"));
         assert!(ctx.contains("class ConfigurationManager:"));
         // Gövdedeki benzersiz satır şemada OLMAMALI (bağlam tasarrufu kanıtı)
         assert!(!ctx.contains("raise LookupError"));
@@ -573,18 +651,32 @@ mod tests {
     #[test]
     fn extract_code_block_parses_fence() {
         let content = "İşte yeni hali:\n```python\ndef f():\n    return 1\n```\n";
-        assert_eq!(extract_code_block(content).unwrap(), "def f():\n    return 1");
+        assert_eq!(
+            extract_code_block(content).unwrap(),
+            "def f():\n    return 1"
+        );
     }
 
     #[test]
     fn whole_file_fallback_returns_new_body() {
         struct S;
         impl Transport for S {
-            fn post_json(&self, _u: &str, _h: &[(String, String)], _b: &Value) -> Result<Value, String> {
-                Ok(json!({"choices":[{"message":{"content":"Yeni hali:\n```python\ndef f():\n    return 2\n```\n"}}]}))
+            fn post_json(
+                &self,
+                _u: &str,
+                _h: &[(String, String)],
+                _b: &Value,
+            ) -> Result<Value, String> {
+                Ok(
+                    json!({"choices":[{"message":{"content":"Yeni hali:\n```python\ndef f():\n    return 2\n```\n"}}]}),
+                )
             }
         }
-        let blocks = vec![("b1".to_string(), "f.py".to_string(), "def f():\n    return 1".to_string())];
+        let blocks = vec![(
+            "b1".to_string(),
+            "f.py".to_string(),
+            "def f():\n    return 1".to_string(),
+        )];
         let out = whole_file_fallback(
             &S,
             "http://x",

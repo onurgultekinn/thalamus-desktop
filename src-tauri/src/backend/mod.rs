@@ -86,7 +86,7 @@ async fn health(State(_state): State<BackendState>) -> Json<serde_json::Value> {
     Json(serde_json::json!({
         "ok": true,
         "engine": "ready",
-        "info": "Yerel Sıkıştırma Motoru Aktif"
+        "info": "Local Compression Engine Active"
     }))
 }
 
@@ -97,7 +97,7 @@ async fn compress(
     if req.prompt.trim().is_empty() {
         return Err((
             axum::http::StatusCode::BAD_REQUEST,
-            "Prompt metni boş olamaz.".to_string(),
+            "Prompt text cannot be empty.".to_string(),
         ));
     }
     let metrics = process_with_metrics(&req.prompt, &state.bpe, req.veto_override);
@@ -189,7 +189,7 @@ pub fn serve(bpe: Arc<CoreBPE>, workspace_root: Arc<RwLock<String>>) -> BackendS
 mod tests {
     use super::*;
     use axum::body::Body;
-    use axum::http::{Request, header::ACCESS_CONTROL_ALLOW_ORIGIN};
+    use axum::http::{header::ACCESS_CONTROL_ALLOW_ORIGIN, Request};
     use tower::ServiceExt;
 
     fn test_state() -> BackendState {

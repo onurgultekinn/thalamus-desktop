@@ -155,7 +155,7 @@ function inTauriDesktop(): boolean {
  * Tarayici önizlemesinde native backend yoktur; yerel gecersiz kalir.
  */
 export async function openProject(root: string): Promise<OpenProjectResult> {
-  if (!root) return { ok: false, error: 'Proje yolu boş.' };
+  if (!root) return { ok: false, error: 'Project path is empty.' };
   const previous = getWorkspaceRoot();
   saveWorkspaceRoot(root);
   rememberProject(root);
@@ -171,7 +171,7 @@ export async function openProject(root: string): Promise<OpenProjectResult> {
       rememberProject(info.root, info.name);
       return { ok: true, root: info.root };
     }
-    throw new Error('Backend kökü onaylamadı.');
+    throw new Error('Backend did not confirm the workspace root.');
   } catch (e) {
     // Masaüstü ve backend reddetti: yolu geri al + hayalet girdiyi düsür.
     if (previous) {

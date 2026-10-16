@@ -93,7 +93,9 @@ fn migrate_legacy_config() {
     if new_path.exists() {
         return;
     }
-    let legacy = env::current_dir().ok().map(|d| d.join("thalamus_config.json"));
+    let legacy = env::current_dir()
+        .ok()
+        .map(|d| d.join("thalamus_config.json"));
     if let Some(legacy) = legacy {
         if legacy.exists() && legacy != new_path {
             if let Ok(content) = fs::read_to_string(&legacy) {
@@ -135,7 +137,13 @@ fn default_workspace_root() -> String {
 }
 
 fn workspace_base(state: &AppState) -> PathBuf {
-    PathBuf::from(state.workspace_root.read().unwrap_or_else(|e| e.into_inner()).clone())
+    PathBuf::from(
+        state
+            .workspace_root
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone(),
+    )
 }
 
 fn build_workspace_info(root_dir: &Path) -> WorkspaceInfo {
@@ -175,7 +183,7 @@ fn count_files(dir: &Path, count: &mut usize) -> std::io::Result<()> {
 fn is_safe_path(path_str: &str, base: &Path) -> Result<PathBuf, String> {
     let base_canonical = base
         .canonicalize()
-        .map_err(|e| format!("Çalışma dizini çözülemedi: {}", e))?;
+        .map_err(|e| format!("Could not resolve working directory: {}", e))?;
 
     let target = Path::new(path_str);
     let absolute_target = if target.is_absolute() {
@@ -191,13 +199,13 @@ fn is_safe_path(path_str: &str, base: &Path) -> Result<PathBuf, String> {
         .components()
         .any(|c| matches!(c, std::path::Component::ParentDir))
     {
-        return Err("Güvenlik İhlali: yol '..' bileşeni içeremez.".to_string());
+        return Err("Security violation: path cannot contain '..' components.".to_string());
     }
 
     if absolute_target.exists() {
         let canonical_target = absolute_target
             .canonicalize()
-            .map_err(|e| format!("Hedef yol çözülemedi: {}", e))?;
+            .map_err(|e| format!("Could not resolve target path: {}", e))?;
         if canonical_target.starts_with(&base_canonical) {
             return Ok(canonical_target);
         }
@@ -207,18 +215,18 @@ fn is_safe_path(path_str: &str, base: &Path) -> Result<PathBuf, String> {
             if parent.exists() {
                 let canonical_parent = parent
                     .canonicalize()
-                    .map_err(|e| format!("Ata dizin çözülemedi: {}", e))?;
+                    .map_err(|e| format!("Could not resolve ancestor directory: {}", e))?;
                 if canonical_parent.starts_with(&base_canonical) {
                     return Ok(absolute_target);
                 } else {
-                    return Err("Güvenlik İhlali: İzin verilmeyen dizin erişimi.".to_string());
+                    return Err("Security violation: directory access denied.".to_string());
                 }
             }
             ancestor = parent;
         }
     }
 
-    Err("Güvenlik İhlali: İzin verilmeyen dizin erişimi.".to_string())
+    Err("Security violation: directory access denied.".to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -229,12 +237,17 @@ fn is_safe_path(path_str: &str, base: &Path) -> Result<PathBuf, String> {
 fn thalamus_get_engine_status(state: State<'_, AppState>) -> Result<EngineStatus, String> {
     // HTTP backend başlatılamadıysa bunu dürüstçe raporla — motor hazır
     // desem arayüz boşuna "aktif" sanır.
-    if let Some(Err(e)) = state.backend_status.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+    if let Some(Err(e)) = state
+        .backend_status
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+    {
         return Ok(EngineStatus {
             is_ready: false,
             model_loaded: false,
             model_path: None,
-            info: format!("HTTP backend başlatılamadı: {}", e),
+            info: format!("HTTP backend failed to start: {}", e),
         });
     }
     // Yerel sıkıştırma motoru model gerektirmediği için her zaman hazırdır.
@@ -242,7 +255,7 @@ fn thalamus_get_engine_status(state: State<'_, AppState>) -> Result<EngineStatus
         is_ready: true,
         model_loaded: true,
         model_path: None,
-        info: "Yerel Sıkıştırma Motoru Aktif (ONNX gerektirmez)".to_string(),
+        info: "Local compression engine active (no ONNX required)".to_string(),
     })
 }
 
@@ -253,7 +266,7 @@ fn thalamus_compress_prompt(
     state: State<'_, AppState>,
 ) -> Result<CompressionMetrics, String> {
     if prompt.trim().is_empty() {
-        return Err("Prompt metni boş olamaz.".to_string());
+        return Err("Prompt text cannot be empty.".to_string());
     }
 
     let bpe = &state.bpe;
@@ -264,7 +277,7 @@ fn thalamus_compress_prompt(
 fn thalamus_read_file(path: String, state: State<'_, AppState>) -> Result<String, String> {
     let base = workspace_base(&state);
     let safe_path = is_safe_path(&path, &base)?;
-    fs::read_to_string(safe_path).map_err(|e| format!("Dosya okunamadı: {}", e))
+    fs::read_to_string(safe_path).map_err(|e| format!("Could not read file: {}", e))
 }
 
 #[tauri::command]
@@ -278,7 +291,7 @@ fn thalamus_write_file(
     if let Some(parent) = safe_path.parent() {
         let _ = fs::create_dir_all(parent);
     }
-    fs::write(safe_path, content).map_err(|e| format!("Dosya yazılamadı: {}", e))
+    fs::write(safe_path, content).map_err(|e| format!("Could not write file: {}", e))
 }
 
 #[tauri::command]
@@ -286,14 +299,16 @@ fn list_dir(path: String, state: State<'_, AppState>) -> Result<Vec<DirEntry>, S
     let base = workspace_base(&state);
     let safe_path = is_safe_path(&path, &base)?;
     if !safe_path.is_dir() {
-        return Err("Belirtilen yol bir klasör değil.".to_string());
+        return Err("The given path is not a directory.".to_string());
     }
 
     let mut entries: Vec<DirEntry> = Vec::new();
-    for entry in fs::read_dir(&safe_path).map_err(|e| format!("Klasör okunamadı: {}", e))? {
-        let entry = entry.map_err(|e| format!("Girdi okunamadı: {}", e))?;
+    for entry in fs::read_dir(&safe_path).map_err(|e| format!("Could not read directory: {}", e))? {
+        let entry = entry.map_err(|e| format!("Could not read entry: {}", e))?;
         let name = entry.file_name().to_string_lossy().to_string();
-        let ft = entry.file_type().map_err(|e| format!("Tür okunamadı: {}", e))?;
+        let ft = entry
+            .file_type()
+            .map_err(|e| format!("Could not read entry type: {}", e))?;
         entries.push(DirEntry {
             name,
             is_dir: ft.is_dir(),
@@ -316,16 +331,16 @@ fn create_entry(path: String, is_dir: bool, state: State<'_, AppState>) -> Resul
     let safe_path = is_safe_path(&path, &base)?;
 
     if safe_path.exists() {
-        return Err("Aynı adlı öğe zaten var.".to_string());
+        return Err("An entry with this name already exists.".to_string());
     }
 
     if is_dir {
-        fs::create_dir_all(&safe_path).map_err(|e| format!("Klasör oluşturulamadı: {}", e))?;
+        fs::create_dir_all(&safe_path).map_err(|e| format!("Could not create directory: {}", e))?;
     } else {
         if let Some(parent) = safe_path.parent() {
             let _ = fs::create_dir_all(parent);
         }
-        fs::write(&safe_path, "").map_err(|e| format!("Dosya oluşturulamadı: {}", e))?;
+        fs::write(&safe_path, "").map_err(|e| format!("Could not create file: {}", e))?;
     }
 
     Ok(())
@@ -354,10 +369,10 @@ fn move_entry(from: String, to: String, state: State<'_, AppState>) -> Result<()
     let dst = is_safe_path(&to, &base)?;
 
     if !src.exists() {
-        return Err("Kaynak bulunamadı.".to_string());
+        return Err("Source not found.".to_string());
     }
     if dst.exists() {
-        return Err("Hedefte aynı adlı öğe zaten var.".to_string());
+        return Err("An entry with this name already exists at the target.".to_string());
     }
 
     // Hızlı yol: aynı birimde atomik rename. Başarısız olursa (farklı sürücü,
@@ -371,7 +386,7 @@ fn move_entry(from: String, to: String, state: State<'_, AppState>) -> Result<()
     } else {
         fs::copy(&src, &dst).and_then(|_| fs::remove_file(&src))
     };
-    moved.map_err(|e| format!("Taşıma başarısız: {}", e))
+    moved.map_err(|e| format!("Move failed: {}", e))
 }
 
 /// D9: canonicalize Windows'ta `\\?\` verbatim ön-eki üretir; VisualBasic
@@ -409,7 +424,7 @@ fn send_to_recycle_bin(path: &Path) -> Result<(), String> {
     let output = std::process::Command::new("powershell.exe")
         .args(["-NoProfile", "-NonInteractive", "-Command", &script])
         .output()
-        .map_err(|e| format!("PowerShell çalıştırılamadı: {}", e))?;
+        .map_err(|e| format!("Could not start PowerShell: {}", e))?;
     if output.status.success() {
         Ok(())
     } else {
@@ -419,7 +434,7 @@ fn send_to_recycle_bin(path: &Path) -> Result<(), String> {
 
 #[cfg(not(windows))]
 fn send_to_recycle_bin(_path: &Path) -> Result<(), String> {
-    Err("Çöp kutusu bu platformda desteklenmiyor.".to_string())
+    Err("Recycle bin is not supported on this platform.".to_string())
 }
 
 /// Öğeyi çöp kutusuna gönderir; çöp kutusu kullanılamazsa kalıcı silmeye
@@ -434,7 +449,7 @@ fn delete_entry(path: String, state: State<'_, AppState>) -> Result<String, Stri
     let safe_path = is_safe_path(&path, &base)?;
 
     if !safe_path.exists() {
-        return Err("Silinecek öğe bulunamadı.".to_string());
+        return Err("Item to delete not found.".to_string());
     }
 
     match send_to_recycle_bin(&safe_path) {
@@ -447,11 +462,11 @@ fn delete_entry(path: String, state: State<'_, AppState>) -> Result<String, Stri
             };
             match res {
                 Ok(()) => Ok(format!(
-                    "permanently_deleted (çöp kutusu kullanılamadı: {})",
+                    "permanently_deleted (recycle bin unavailable: {})",
                     trash_err
                 )),
                 Err(e) => Err(format!(
-                    "Silme başarısız (çöp kutusu: {}; kalıcı silme: {})",
+                    "Delete failed (recycle bin: {}; permanent delete: {})",
                     trash_err, e
                 )),
             }
@@ -463,15 +478,20 @@ fn delete_entry(path: String, state: State<'_, AppState>) -> Result<String, Stri
 fn set_workspace_root(path: String, state: State<'_, AppState>) -> Result<WorkspaceInfo, String> {
     let p = Path::new(&path);
     if !p.exists() {
-        return Err("Belirtilen yol bulunamadı.".to_string());
+        return Err("The given path was not found.".to_string());
     }
     if !p.is_dir() {
-        return Err("Belirtilen yol bir klasör değil.".to_string());
+        return Err("The given path is not a directory.".to_string());
     }
 
-    let canonical = p.canonicalize().map_err(|e| format!("Yol çözülemedi: {}", e))?;
+    let canonical = p
+        .canonicalize()
+        .map_err(|e| format!("Could not resolve path: {}", e))?;
     let root_str = display_path(&canonical);
-    *state.workspace_root.write().unwrap_or_else(|e| e.into_inner()) = root_str.clone();
+    *state
+        .workspace_root
+        .write()
+        .unwrap_or_else(|e| e.into_inner()) = root_str.clone();
 
     // Config'e kalıcı olarak yaz (mevcut ayarları bozmadan)
     let config_path = config_path();
@@ -501,7 +521,11 @@ fn path_is_dir(path: String) -> bool {
 
 #[tauri::command]
 fn get_workspace_info(state: State<'_, AppState>) -> Result<WorkspaceInfo, String> {
-    let root = state.workspace_root.read().unwrap_or_else(|e| e.into_inner()).clone();
+    let root = state
+        .workspace_root
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
     Ok(build_workspace_info(Path::new(&root)))
 }
 
@@ -519,7 +543,9 @@ struct Utf8Stream {
 
 impl Utf8Stream {
     fn new() -> Self {
-        Self { pending: Vec::new() }
+        Self {
+            pending: Vec::new(),
+        }
     }
 
     fn push(&mut self, chunk: &[u8]) -> String {
@@ -574,7 +600,7 @@ fn start_terminal(
             pixel_width: 0,
             pixel_height: 0,
         })
-        .map_err(|e| format!("PTY açılamadı: {}", e))?;
+        .map_err(|e| format!("Could not open PTY: {}", e))?;
 
     let mut cmd = portable_pty::CommandBuilder::new("powershell.exe");
     cmd.arg("-NoLogo");
@@ -583,7 +609,7 @@ fn start_terminal(
     let child = pair
         .slave
         .spawn_command(cmd)
-        .map_err(|e| format!("Terminal başlatılamadı: {}", e))?;
+        .map_err(|e| format!("Could not start terminal: {}", e))?;
 
     // Slave tarafı kopyalandıktan sonra kapatılır ki okuma akışı EOF alabilsin.
     drop(pair.slave);
@@ -591,11 +617,11 @@ fn start_terminal(
     let reader = pair
         .master
         .try_clone_reader()
-        .map_err(|e| format!("PTY okuyucusu alınamadı: {}", e))?;
+        .map_err(|e| format!("Could not take PTY reader: {}", e))?;
     let writer = pair
         .master
         .take_writer()
-        .map_err(|e| format!("PTY yazıcısı alınamadı: {}", e))?;
+        .map_err(|e| format!("Could not take PTY writer: {}", e))?;
 
     // Es/kuşak sızıntısını önlemek için önceki terminal oturumunu kapat.
     {
@@ -663,14 +689,19 @@ fn resize_terminal(rows: u16, cols: u16, state: State<'_, AppState>) -> Result<(
                 pixel_width: 0,
                 pixel_height: 0,
             })
-            .map_err(|e| format!("Terminal boyutlandırılamadı: {}", e))?;
+            .map_err(|e| format!("Could not resize terminal: {}", e))?;
     }
     Ok(())
 }
 
 #[tauri::command]
 fn close_terminal(state: State<'_, AppState>) -> Result<(), String> {
-    if let Some(mut session) = state.terminal.lock().unwrap_or_else(|e| e.into_inner()).take() {
+    if let Some(mut session) = state
+        .terminal
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take()
+    {
         let _ = session.child.kill();
     }
     Ok(())
@@ -686,7 +717,7 @@ fn thalamus_save_config(config_json: String) -> Result<(), String> {
 fn thalamus_load_config() -> Result<String, String> {
     let config_path = config_path();
     if config_path.exists() {
-        fs::read_to_string(config_path).map_err(|e| format!("Ayarlar okunamadı: {}", e))
+        fs::read_to_string(config_path).map_err(|e| format!("Could not read settings: {}", e))
     } else {
         Ok("{}".to_string())
     }
@@ -699,7 +730,7 @@ fn thalamus_load_config() -> Result<String, String> {
 #[tauri::command]
 fn secret_set(provider: String, secret: String) -> Result<(), String> {
     if provider.trim().is_empty() {
-        return Err("Sağlayıcı adı boş olamaz.".to_string());
+        return Err("Provider name cannot be empty.".to_string());
     }
     secrets::imp::secret_set(provider.trim(), &secret)
 }
@@ -722,7 +753,7 @@ pub fn run() {
     // Yerel motor her zaman hazır olduğundan model yükleme thread'ine gerek yok.
     let workspace_root = Arc::new(RwLock::new(default_workspace_root()));
 
-    let bpe = Arc::new(cl100k_base().expect("BPE tokenizer yüklenemedi"));
+    let bpe = Arc::new(cl100k_base().expect("Failed to load BPE tokenizer"));
 
     // HTTP backend (her zaman): tarayıcı önizlemesi ve masaüstü için 127.0.0.1:<port>.
     // Workspace root paylaşılır → repo map diskten okuyabilir.

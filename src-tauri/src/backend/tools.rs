@@ -29,7 +29,7 @@ pub fn specs() -> Value {
             "type": "function",
             "function": {
                 "name": "get_code_body",
-                "description": "Şemada gördüğün bir fonksiyon/sınıf tanımının tam gövdesini döndürür. Detaya ihtiyacın olduğunda çağır.",
+                "description": "Returns the full body of a function/class definition seen in the schema. Call when you need details.",
                 "parameters": {"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}
             }
         },
@@ -37,9 +37,9 @@ pub fn specs() -> Value {
             "type": "function",
             "function": {
                 "name": "read_file",
-                "description": "Workspace içindeki bir dosyanın içeriğini okur. Değişiklik yapmadan önce ilgili dosyayı OKU.",
+                "description": "Reads the contents of a file inside the workspace. READ the relevant file before making changes.",
                 "parameters": {"type":"object","properties":{
-                    "path":{"type":"string","description":"workspace köküne göreli yol"}
+                    "path":{"type":"string","description":"path relative to the workspace root"}
                 },"required":["path"]}
             }
         },
@@ -47,9 +47,9 @@ pub fn specs() -> Value {
             "type": "function",
             "function": {
                 "name": "list_dir",
-                "description": "Bir dizinin girdilerini listeler (dosya/klasör, boyut).",
+                "description": "Lists the entries of a directory (files/folders, sizes).",
                 "parameters": {"type":"object","properties":{
-                    "path":{"type":"string","description":"göreli dizin (boş = kök)"}
+                    "path":{"type":"string","description":"relative directory (empty = root)"}
                 }}
             }
         },
@@ -57,10 +57,10 @@ pub fn specs() -> Value {
             "type": "function",
             "function": {
                 "name": "grep_search",
-                "description": "Workspace içinde metin/desen arar (büyük/küçük harf duyarsız). Sembol nerede kullanılıyor bulmak için çağır.",
+                "description": "Searches for text/pattern inside the workspace (case-insensitive). Call it to find where a symbol is used.",
                 "parameters": {"type":"object","properties":{
                     "query":{"type":"string"},
-                    "path":{"type":"string","description":"alt dizin (boş = kök)"}
+                    "path":{"type":"string","description":"subdirectory (empty = root)"}
                 },"required":["query"]}
             }
         }
@@ -71,19 +71,28 @@ pub fn specs() -> Value {
 fn safe_join(root: &Path, rel: &str) -> Result<PathBuf, String> {
     let root_c = root
         .canonicalize()
-        .map_err(|e| format!("workspace kökü çözülemedi: {}", e))?;
+        .map_err(|e| format!("could not resolve workspace root: {}", e))?;
     let p = Path::new(rel);
-    let abs = if p.is_absolute() { p.to_path_buf() } else { root_c.join(p) };
+    let abs = if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        root_c.join(p)
+    };
     // G1: `..` bileşenini kontrol ÖNCESİNDE reddet (yok-hedefta ata-traversal'ı kapatır).
-    if abs.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
-        return Err("Güvenlik: yol '..' bileşeni içeremez".into());
+    if abs
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return Err("Security: path cannot contain '..' components".into());
     }
     if abs.exists() {
-        let c = abs.canonicalize().map_err(|e| format!("yol çözülemedi: {}", e))?;
+        let c = abs
+            .canonicalize()
+            .map_err(|e| format!("could not resolve path: {}", e))?;
         if c.starts_with(&root_c) {
             Ok(c)
         } else {
-            Err("Güvenlik: kök dışına erişim reddedildi".into())
+            Err("Security: access outside the workspace root was denied".into())
         }
     } else {
         // var olmayan hedef: en yakın var olan atası kök altındaysa kabul
@@ -94,12 +103,12 @@ fn safe_join(root: &Path, rel: &str) -> Result<PathBuf, String> {
                 return if pc.starts_with(&root_c) {
                     Ok(abs)
                 } else {
-                    Err("Güvenlik: kök dışına erişim reddedildi".into())
+                    Err("Security: access outside the workspace root was denied".into())
                 };
             }
             anc = par;
         }
-        Err("yol çözülemedi".into())
+        Err("could not resolve path".into())
     }
 }
 
@@ -118,7 +127,7 @@ fn tool_read_file(root: &Path, args: &Value) -> String {
                     text.to_string()
                 }
             }
-            Err(e) => format!("okunamadı '{}': {}", rel, e),
+            Err(e) => format!("could not read '{}': {}", rel, e),
         },
         Err(e) => e,
     }
@@ -138,11 +147,19 @@ fn tool_list_dir(root: &Path, args: &Value) -> String {
                         "{}{}  {}",
                         e.file_name().to_string_lossy(),
                         if is_dir { "/" } else { "" },
-                        if is_dir { String::new() } else { format!("{}B", size) }
+                        if is_dir {
+                            String::new()
+                        } else {
+                            format!("{}B", size)
+                        }
                     ));
                 }
                 items.sort();
-                if items.is_empty() { "(boş dizin)".into() } else { items.join("\n") }
+                if items.is_empty() {
+                    "(empty directory)".into()
+                } else {
+                    items.join("\n")
+                }
             }
             Err(e) => format!("listelenemedi '{}': {}", rel, e),
         },
@@ -198,7 +215,7 @@ fn tool_grep(root: &Path, args: &Value) -> String {
         }
     }
     if hits.is_empty() {
-        format!("eşleşme yok: '{}'", query)
+        format!("no match: '{}'", query)
     } else {
         hits.join("\n")
     }
@@ -218,7 +235,10 @@ fn tool_get_code_body(args: &Value, blocks: &[(String, String, String)]) -> Stri
             return body.clone();
         }
     }
-    format!("bulunamadı: '{}'. read_file/grep_search ile dosyada arayabilirsin.", wanted)
+    format!(
+        "'{}' not found. You can search in files with read_file/grep_search.",
+        wanted
+    )
 }
 
 /// Araç çağrısını yürütür; sonucu modele metin olarak döndürür.
@@ -228,7 +248,7 @@ pub fn execute(name: &str, args: &Value, ctx: &ToolCtx) -> String {
         "read_file" => tool_read_file(ctx.root, args),
         "list_dir" => tool_list_dir(ctx.root, args),
         "grep_search" => tool_grep(ctx.root, args),
-        other => format!("bilinmeyen araç: {}", other),
+        other => format!("unknown tool: {}", other),
     }
 }
 
@@ -237,7 +257,10 @@ mod tests {
     use super::*;
 
     fn ctx<'a>(root: &'a Path, blocks: &'a [(String, String, String)]) -> ToolCtx<'a> {
-        ToolCtx { root, code_blocks: blocks }
+        ToolCtx {
+            root,
+            code_blocks: blocks,
+        }
     }
 
     #[test]
@@ -259,7 +282,11 @@ mod tests {
         let blocks: Vec<(String, String, String)> = vec![];
         let c = ctx(&tmp, &blocks);
         let out = execute("read_file", &json!({"path":"../../etc/passwd"}), &c);
-        assert!(out.contains("Güvenlik") || out.contains("okunamadı"), "çıkış reddedilmeli: {}", out);
+        assert!(
+            out.contains("Security") || out.contains("could not read"),
+            "çıkış reddedilmeli: {}",
+            out
+        );
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
@@ -276,7 +303,11 @@ mod tests {
 
     #[test]
     fn code_body_from_blocks() {
-        let blocks = vec![("b1".to_string(), "login".to_string(), "def login(): pass".to_string())];
+        let blocks = vec![(
+            "b1".to_string(),
+            "login".to_string(),
+            "def login(): pass".to_string(),
+        )];
         let tmp = std::env::temp_dir();
         let c = ctx(&tmp, &blocks);
         assert!(execute("get_code_body", &json!({"name":"login"}), &c).contains("def login"));

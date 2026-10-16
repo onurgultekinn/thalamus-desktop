@@ -4,16 +4,20 @@
 
 use super::BackendState;
 use crate::engine::repo_map::{build_repo_map, RepoFile};
-use axum::{
-    extract::State,
-    Json,
-};
+use axum::{extract::State, Json};
 use serde_json::json;
 use std::path::Path;
 use std::sync::Mutex;
 use std::time::SystemTime;
 
-const SKIP_DIRS: [&str; 6] = ["node_modules", "target", "dist", "__pycache__", "src_backup_before_copy", ".zcode"];
+const SKIP_DIRS: [&str; 6] = [
+    "node_modules",
+    "target",
+    "dist",
+    "__pycache__",
+    "src_backup_before_copy",
+    ".zcode",
+];
 const EXTENSIONS: [&str; 5] = ["py", "ts", "tsx", "js", "rs"];
 const MAX_DEPTH: usize = 6;
 const MAX_FILE_BYTES: u64 = 256 * 1024;
@@ -43,9 +47,11 @@ fn load_ignore(root: &Path) -> Vec<String> {
 fn is_ignored(rel: &str, patterns: &[String]) -> bool {
     patterns.iter().any(|p| {
         if p.starts_with('*') {
-            p.strip_prefix('*').is_some_and(|suffix| rel.ends_with(suffix))
+            p.strip_prefix('*')
+                .is_some_and(|suffix| rel.ends_with(suffix))
         } else if p.ends_with('*') {
-            p.strip_suffix('*').is_some_and(|prefix| rel.starts_with(prefix))
+            p.strip_suffix('*')
+                .is_some_and(|prefix| rel.starts_with(prefix))
         } else {
             rel.contains(p.as_str())
         }
@@ -103,10 +109,8 @@ fn walk(
                     _ => {
                         let code = std::fs::read_to_string(&path).unwrap_or_default();
                         if c.len() >= MAX_CACHE_ENTRIES && !c.contains_key(&key) {
-                            let mut entries_by_age: Vec<(String, SystemTime)> = c
-                                .iter()
-                                .map(|(k, (t, _))| (k.clone(), *t))
-                                .collect();
+                            let mut entries_by_age: Vec<(String, SystemTime)> =
+                                c.iter().map(|(k, (t, _))| (k.clone(), *t)).collect();
                             entries_by_age.sort_by_key(|(_, t)| *t);
                             let evict_count = c.len() - MAX_CACHE_ENTRIES + 1;
                             for (k, _) in entries_by_age.into_iter().take(evict_count) {
@@ -138,7 +142,11 @@ pub async fn repo_map(
     State(state): State<BackendState>,
     Json(req): Json<RepoMapRequest>,
 ) -> Json<serde_json::Value> {
-    let root = state.workspace_root.read().unwrap_or_else(|e| e.into_inner()).clone();
+    let root = state
+        .workspace_root
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
     let budget = req.budget.unwrap_or(DEFAULT_BUDGET);
     let focus = req.focus;
     let bpe = state.bpe.clone();
@@ -152,13 +160,11 @@ pub async fn repo_map(
         build_repo_map(&files, &bpe, budget, focus.as_deref())
     })
     .await
-    .unwrap_or_else(|e| {
-        crate::engine::repo_map::RepoMapResult {
-            map: format!("repo map hatası: {}", e),
-            tokens: 0,
-            included: 0,
-            total: 0,
-        }
+    .unwrap_or_else(|e| crate::engine::repo_map::RepoMapResult {
+        map: format!("repo map hatası: {}", e),
+        tokens: 0,
+        included: 0,
+        total: 0,
     });
 
     Json(json!({

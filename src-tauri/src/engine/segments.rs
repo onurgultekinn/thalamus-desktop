@@ -129,12 +129,7 @@ impl PromptSegmenter {
 
     /// Korunan bölge dışındaki metinde: yapısal satır-run'ları (JSONL/CSV/
     /// logfmt/md-tablo), inline kod aralıkları ve JSON adaylarını ayırır.
-    fn scan_gap<'a>(
-        input: &'a str,
-        start: usize,
-        end: usize,
-        out: &mut Vec<Segment<'a>>,
-    ) {
+    fn scan_gap<'a>(input: &'a str, start: usize, end: usize, out: &mut Vec<Segment<'a>>) {
         // Satır aralıkları
         let mut lines: Vec<(usize, usize)> = Vec::new();
         let mut pos = start;
@@ -200,12 +195,7 @@ impl PromptSegmenter {
 
     /// Yapısal run dışındaki metinde: inline kod aralıklarını ayır,
     /// kalan parçalarda JSON tara.
-    fn emit_chunk<'a>(
-        input: &'a str,
-        start: usize,
-        end: usize,
-        out: &mut Vec<Segment<'a>>,
-    ) {
+    fn emit_chunk<'a>(input: &'a str, start: usize, end: usize, out: &mut Vec<Segment<'a>>) {
         if start >= end {
             return;
         }
@@ -237,12 +227,7 @@ impl PromptSegmenter {
     }
 
     /// Düz metin parçasında dengeli-parantez JSON adaylarını bulur.
-    fn scan_json<'a>(
-        input: &'a str,
-        start: usize,
-        end: usize,
-        out: &mut Vec<Segment<'a>>,
-    ) {
+    fn scan_json<'a>(input: &'a str, start: usize, end: usize, out: &mut Vec<Segment<'a>>) {
         for piece in JsonExtractor::extract(&input[start..end]) {
             match piece {
                 Piece::Text(t) => out.push(Segment::Text(t)),

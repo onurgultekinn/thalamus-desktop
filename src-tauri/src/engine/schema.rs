@@ -155,7 +155,7 @@ pub fn render_schema(schema: &CodeSchema) -> String {
                 e.body_tokens
             ));
             if !e.calls.is_empty() {
-                out.push_str(&format!(" → çağırır: {}", e.calls.join(", ")));
+                out.push_str(&format!(" → calls: {}", e.calls.join(", ")));
             }
             out.push('\n');
             if let Some(body) = &e.inlined_body {
@@ -182,7 +182,11 @@ mod tests {
         let schema = extract_schema(SAMPLE).unwrap();
         // 1 sınıf + 4 metot (SAMPLE'da 4 def: __init__, load_configuration,
         // dispatch_request, dispatch_request_again)
-        let count = schema.entries.iter().map(|e| 1 + e.children.len()).sum::<usize>();
+        let count = schema
+            .entries
+            .iter()
+            .map(|e| 1 + e.children.len())
+            .sum::<usize>();
         assert!(count >= 5, "tüm tanımlar çıkarılmalı, çıkan: {}", count);
     }
 
@@ -219,7 +223,7 @@ def dispatch_request(handler):
         let schema = extract_schema(code).unwrap();
         let rendered = render_schema(&schema);
         assert!(
-            rendered.contains("çağırır: validate_token"),
+            rendered.contains("calls: validate_token"),
             "çağrı bağı görünmeli:\n{}",
             rendered
         );
@@ -238,10 +242,12 @@ def dispatch_request(handler):
         let full = count(&b, SAMPLE);
         let schema_tok = count(&b, &rendered);
         println!("tam kod : {} token", full);
-        println!("şema    : {} token (%{:.0}) → tasarruf %{:.0}",
+        println!(
+            "şema    : {} token (%{:.0}) → tasarruf %{:.0}",
             schema_tok,
             100.0 * schema_tok as f64 / full as f64,
-            100.0 * (1.0 - schema_tok as f64 / full as f64));
+            100.0 * (1.0 - schema_tok as f64 / full as f64)
+        );
         println!("--- şema ---\n{}", rendered);
         assert!(schema_tok < full);
     }

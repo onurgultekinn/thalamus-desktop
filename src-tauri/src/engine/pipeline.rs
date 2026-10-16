@@ -9,8 +9,8 @@
 // Kod bloklarına (fenced/inline) ve metne asla dokunulmaz; segment sırası
 // girdi sırasını birebir korur. Sıkıştırılamayan her şey ham kalır.
 use crate::engine::jscompress::JsonCompressor;
-use crate::engine::segments::{PromptSegmenter, Segment};
 use crate::engine::sanitize_json_string;
+use crate::engine::segments::{PromptSegmenter, Segment};
 use crate::engine::MINIMAL_DECODER_INSTRUCTION;
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
@@ -220,8 +220,7 @@ fn count_tokens(bpe: &CoreBPE, text: &str) -> usize {
 
 fn is_lossless(raw: &str, compressed: &str) -> bool {
     if let Ok(decompressed) = JsonCompressor::decompress(compressed) {
-        if let Ok(original) =
-            serde_json::from_str::<serde_json::Value>(&sanitize_json_string(raw))
+        if let Ok(original) = serde_json::from_str::<serde_json::Value>(&sanitize_json_string(raw))
         {
             return decompressed == original;
         }

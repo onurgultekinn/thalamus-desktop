@@ -78,10 +78,8 @@ pub fn build_repo_map(
     }
 
     // 2) Önem puanı: başka dosyada referans edilen tanımlar + focus yakınlığı
-    let mut score: HashMap<String, usize> = files
-        .iter()
-        .map(|f| (f.name.clone(), 0usize))
-        .collect();
+    let mut score: HashMap<String, usize> =
+        files.iter().map(|f| (f.name.clone(), 0usize)).collect();
     for f in files {
         for (def_name, owner) in &def_owner {
             if *owner != f.name && f.code.contains(def_name.as_str()) {
@@ -126,7 +124,7 @@ pub fn build_repo_map(
             // Bütçe dışı dosyalar da LLM'in görüş alanında kalmalı:
             // varlığını bilmeden get_code_body isteyemez. Not koşulsuz eklenir.
             let note = format!(
-                "## {} — bütçe dışı ({} tanım; get_code_body ile istenebilir)\n",
+                "## {} — out of budget ({} definitions; requestable via get_code_body)\n",
                 name,
                 definition_names(&f.code).len()
             );
@@ -196,6 +194,6 @@ mod tests {
         let b = bpe();
         let r = build_repo_map(&files, &b, 60, None);
         assert!(r.included < r.total, "küçük bütçede hepsi sığmamalı");
-        assert!(r.map.contains("bütçe dışı"));
+        assert!(r.map.contains("out of budget"));
     }
 }

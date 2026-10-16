@@ -675,7 +675,7 @@ export default function App() {
                     // Silinen/olmayan sohbetten gelen eski mesajda İncele artık
                     // ölü veriyle diff açmaz — dürüst mesaj görüntülenir.
                     if (!chats.some(c => c.id === activeChatId)) {
-                      showToast('Sohbet Yok', 'Bu mesaj artık bir sohbete bağlı değil — İncele açılamaz.', 'info');
+                      showToast('No Chat', 'This message is no longer attached to a chat session — Inspect cannot open.', 'info');
                       return;
                     }
                     setSelectedDiffData({

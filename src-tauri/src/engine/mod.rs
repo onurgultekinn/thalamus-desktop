@@ -191,7 +191,10 @@ mod tests {
 
         let _comp = lossless_or_skip(&json).expect("köşe durum korpusu sıkışmalı");
         let m = process_with_metrics(&json, &bpe(), false);
-        assert!(m.is_compressed, "köşe durum korpusu hedeflenen tasarrufa ulaşmalı");
+        assert!(
+            m.is_compressed,
+            "köşe durum korpusu hedeflenen tasarrufa ulaşmalı"
+        );
         assert!(m.saved_tokens > 0);
         assert!(m.savings_percentage > 0.0);
     }
@@ -308,7 +311,10 @@ mod tests {
             m.processed_prompt.contains("x = {\"a\": 1, \"b\": 2}"),
             "fenced kod bozulmamalı"
         );
-        assert!(m.processed_prompt.contains("```python"), "fence işaretleri kalmalı");
+        assert!(
+            m.processed_prompt.contains("```python"),
+            "fence işaretleri kalmalı"
+        );
     }
 
     #[test]
@@ -325,8 +331,12 @@ mod tests {
 
     #[test]
     fn multi_segment_order_is_preserved() {
-        let a: Vec<String> = (0..40).map(|i| format!(r#"{{"id":{},"t":"a"}}"#, i)).collect();
-        let b: Vec<String> = (0..40).map(|i| format!(r#"{{"id":{},"t":"b"}}"#, i)).collect();
+        let a: Vec<String> = (0..40)
+            .map(|i| format!(r#"{{"id":{},"t":"a"}}"#, i))
+            .collect();
+        let b: Vec<String> = (0..40)
+            .map(|i| format!(r#"{{"id":{},"t":"b"}}"#, i))
+            .collect();
         let prompt = format!("başlangıç [{}] orta [{}] son", a.join(","), b.join(","));
         let m = process_with_metrics(&prompt, &bpe(), false);
         assert!(m.is_compressed);
@@ -361,7 +371,9 @@ mod tests {
         assert!(m.is_compressed, "logfmt bloğu sıkışmalı");
         assert!(m.saved_tokens > 0);
         assert!(m.processed_prompt.contains("son loglar:"));
-        assert!(m.processed_prompt.contains("@T("), "sabit alanlar katlanmalı");
+        assert!(
+            m.processed_prompt.contains("@T("),
+            "sabit alanlar katlanmalı"
+        );
     }
 }
-

@@ -88,7 +88,10 @@ fn parse_logfmt_line(line: &str) -> Option<Vec<(String, Value)>> {
         }
         let key_start = i;
         while i < bytes.len()
-            && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_' || bytes[i] == b'.' || bytes[i] == b'-')
+            && (bytes[i].is_ascii_alphanumeric()
+                || bytes[i] == b'_'
+                || bytes[i] == b'.'
+                || bytes[i] == b'-')
         {
             i += 1;
         }
@@ -132,9 +135,7 @@ fn try_logfmt(lines: &[&str]) -> Option<Ingested> {
     let mut items = Vec::with_capacity(lines.len());
     for line in lines {
         let pairs = parse_logfmt_line(line)?;
-        if pairs.len() != keys.len()
-            || pairs.iter().zip(&keys).any(|((k, _), ek)| k != ek)
-        {
+        if pairs.len() != keys.len() || pairs.iter().zip(&keys).any(|((k, _), ek)| k != ek) {
             return None; // kolon düzeni bozuldu → güvenli vazgeç
         }
         let mut m = Map::new();
@@ -233,9 +234,9 @@ fn md_cells(line: &str) -> Vec<String> {
 }
 
 fn is_separator(cells: &[String]) -> bool {
-    cells.iter().all(|c| {
-        !c.is_empty() && c.chars().all(|ch| ch == '-' || ch == ':' || ch == ' ')
-    })
+    cells
+        .iter()
+        .all(|c| !c.is_empty() && c.chars().all(|ch| ch == '-' || ch == ':' || ch == ' '))
 }
 
 fn try_md_table(lines: &[&str]) -> Option<Ingested> {

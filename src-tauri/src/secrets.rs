@@ -27,7 +27,9 @@ pub mod imp {
         let slice = unsafe { std::slice::from_raw_parts(ptr, len_chars) };
         // Blob sonunda nul olabilir; kes
         let end = slice.iter().position(|&c| c == 0).unwrap_or(slice.len());
-        OsString::from_wide(&slice[..end]).to_string_lossy().into_owned()
+        OsString::from_wide(&slice[..end])
+            .to_string_lossy()
+            .into_owned()
     }
 
     pub fn secret_set(provider: &str, secret: &str) -> Result<(), String> {
@@ -57,7 +59,7 @@ pub mod imp {
         let ok = unsafe { CredWriteW(&cred, 0) };
         if ok == 0 {
             return Err(format!(
-                "Credential Manager'a yazılamadı (GetLastError={})",
+                "Could not write to Credential Manager (GetLastError={})",
                 unsafe { windows_sys::Win32::Foundation::GetLastError() }
             ));
         }
@@ -67,7 +69,7 @@ pub mod imp {
     pub fn secret_get(provider: &str) -> Result<Option<String>, String> {
         use windows_sys::Win32::Foundation::ERROR_NOT_FOUND;
         use windows_sys::Win32::Security::Credentials::{
-            CredReadW, CredFree, CREDENTIALW, CRED_TYPE_GENERIC,
+            CredFree, CredReadW, CREDENTIALW, CRED_TYPE_GENERIC,
         };
 
         let target = to_wide(&target_name(provider));
@@ -79,7 +81,10 @@ pub mod imp {
             if err == ERROR_NOT_FOUND {
                 return Ok(None);
             }
-            return Err(format!("Credential Manager okunamadı (GetLastError={})", err));
+            return Err(format!(
+                "Could not read Credential Manager (GetLastError={})",
+                err
+            ));
         }
 
         let result = unsafe {
@@ -143,7 +148,7 @@ pub mod imp {
     // Windows dışı platformlarda kayıtlı anahtar yok — frontend'e dürüstçe
     // "yok" döner. (Uygulama şu an Windows odaklıdır.)
     pub fn secret_set(_provider: &str, _secret: &str) -> Result<(), String> {
-        Err("Bu platformda güvenli anahtar deposu desteklenmiyor.".to_string())
+        Err("Secure key store is not supported on this platform.".to_string())
     }
     pub fn secret_get(_provider: &str) -> Result<Option<String>, String> {
         Ok(None)
