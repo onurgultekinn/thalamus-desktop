@@ -49,7 +49,7 @@ export function ChatView({
               <path d="M2 5 C 30 2, 55 7, 85 4 S 150 2, 180 5 S 210 3, 218 4" stroke="#dcb67a" strokeWidth="1.6" strokeLinecap="round" />
             </svg>
             <p className="text-xs text-[#A8A49E] max-w-md mx-auto leading-relaxed mt-4">
-              Thalamus compresses prompts on your machine, without changing what they mean. Pick a starting point:
+              Thalamus is your local AI assistant — behind the scenes it compresses context losslessly to save context and cost. Pick a starting point:
             </p>
           </div>
 
@@ -65,7 +65,7 @@ export function ChatView({
               </div>
               <div className="flex flex-col gap-1 min-w-0">
                 <span className="text-[13px] font-semibold text-[#F2F0E5] group-hover:text-white transition-colors">Sample prompt</span>
-                <span className="text-[11px] text-[#A8A49E] leading-normal">A short Python snippet, ready to compress.</span>
+                <span className="text-[11px] text-[#A8A49E] leading-normal">A short Python snippet to start a conversation with.</span>
               </div>
             </button>
 
