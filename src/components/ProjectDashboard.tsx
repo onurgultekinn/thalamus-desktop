@@ -323,6 +323,9 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
   const [newItemName, setNewItemName] = useState<string>('');
   // F5: gezgin arama filtresi (boşken tüm ağaç).
   const [treeSearch, setTreeSearch] = useState<string>('');
+  // F7b: oluşturmanın hedef klasörü ("" = kök) + sağ-tık menüsü durumu.
+  const [creatingIn, setCreatingIn] = useState<string>('');
+  const [ctxMenu, setCtxMenu] = useState<{ node: FileNode; x: number; y: number } | null>(null);
 
   // DRAG STATES
   const [draggedNode, setDraggedNode] = useState<FileNode | null>(null);
@@ -410,7 +413,9 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
       return;
     }
 
-    const parentPath = activeTab.includes('/') ? activeTab.substring(0, activeTab.lastIndexOf('/')) : '';
+    // F7b: hedef artık aktif sekmeyen değil, oluşturma başlangıcında seçilen
+    // klasör (creatingIn; "" = kök). Sağ-tıkla "buraya oluştur" seçilebilir.
+    const parentPath = creatingIn.trim();
     const finalId = parentPath ? `${parentPath}/${trimmedName}` : trimmedName;
     const isFolder = creationMode === 'folder';
 
@@ -447,6 +452,48 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
     };
     setFileTree(prev => toggleRecursive(prev));
   };
+
+  /** F7b: oluştur hedefi klasörün anne zinciri açılır (yeni öğe görünsün). */
+  const openFolderPath = (dir: string) => {
+    if (!dir) return;
+    const ancestors = new Set<string>();
+    let acc = '';
+    for (const p of dir.split('/')) {
+      acc = acc ? `${acc}/${p}` : p;
+      ancestors.add(acc);
+    }
+    const open = (nodes: FileNode[]): FileNode[] =>
+      nodes.map(n => {
+        if (!n.isFolder) return n;
+        const isOpen = n.isOpen || ancestors.has(n.id);
+        return { ...n, isOpen, children: n.children ? open(n.children) : n.children };
+      });
+    setFileTree(prev => open(prev));
+  };
+
+  /** F7b: oluştur akışını hedef klasörle başlatır. */
+  const startCreate = (mode: 'file' | 'folder', dir: string) => {
+    setCreatingIn(dir);
+    setCreationMode(mode);
+    setNewItemName('');
+    if (dir) openFolderPath(dir);
+  };
+
+  /** F7b: ağaç satırında sağ tık → menü; dosyada üst klasörü hedef alır. */
+  const openCtxMenu = (e: React.MouseEvent, node: FileNode) => {
+    e.preventDefault();
+    setCtxMenu({ node, x: e.clientX, y: e.clientY });
+  };
+
+  // F7b: menü dışında tık/Esc kapatır.
+  useEffect(() => {
+    if (!ctxMenu) return;
+    const close = () => setCtxMenu(null);
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setCtxMenu(null); };
+    window.addEventListener('click', close);
+    window.addEventListener('keydown', onKey);
+    return () => { window.removeEventListener('click', close); window.removeEventListener('keydown', onKey); };
+  }, [ctxMenu]);
 
   const handleMouseDown = (e: React.MouseEvent, node: FileNode) => {
     if (e.button !== 0) return;
@@ -494,6 +541,15 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
         }
 
         if (targetFolderId !== undefined && targetFolderId !== draggedNode.id) {
+          // F7b: klasör kendi alt klasörüne taşınamaz.
+          if (
+            draggedNode.isFolder &&
+            targetFolderId &&
+            targetFolderId.startsWith(draggedNode.id + '/')
+          ) {
+            setDraggedNode(null);
+            return;
+          }
           const currentParentId = findParentFolderId(fileTree, draggedNode.id) ?? null;
 
           if (currentParentId !== targetFolderId) {
@@ -584,31 +640,36 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
     } catch {}
   };
 
-  /** F5: aktif dosyayi yeniden adlandirir (move_entry, birebir ayni dizinde). */
-  const handleRenameActiveFile = async () => {
-    if (!activeTab || !activeNode) {
-      showToast('Nothing to rename', 'Open a file from the explorer first.', 'info');
-      return;
-    }
-    const raw = window.prompt(`Rename "${activeNode.name}"`, activeNode.name);
+  /** F7b: herhangi bir düğümü yeniden adlandırır (move_entry, aynı dizinde). */
+  const handleRenameEntry = async (node: FileNode) => {
+    const raw = window.prompt(`Rename "${node.name}"`, node.name);
     const newName = raw?.trim();
-    if (!newName || newName === activeNode.name) return;
-    // Windows dosya adında geçersiz karakterler — diske gitmeden oyundur.
+    if (!newName || newName === node.name) return;
+    // Windows dosya adında geçersiz karakterler — diske gitmeden dur.
     if (/[\\/:*?"<>|]/.test(newName)) {
       showToast('Invalid name', 'Name contains characters Windows does not allow (\\ / : * ? " < > |).', 'error');
       return;
     }
-    const parent = activeTab.includes('/') ? activeTab.slice(0, activeTab.lastIndexOf('/')) : '';
+    const parent = node.id.includes('/') ? node.id.slice(0, node.id.lastIndexOf('/')) : '';
     const newPath = parent ? `${parent}/${newName}` : newName;
     try {
-      await invoke('move_entry', { from: activeTab, to: newPath });
+      await invoke('move_entry', { from: node.id, to: newPath });
       await loadTree();
-      remapPathKeys(activeTab, newPath);
-      showToast('File Renamed', `${activeNode.name} → ${newName}`, 'success');
+      remapPathKeys(node.id, newPath);
+      showToast('Renamed', `${node.name} → ${newName}`, 'success');
     } catch (err) {
       console.error('Rename error:', err);
-      showToast('Rename Error', `Could not rename ${activeTab}.`, 'error');
+      showToast('Rename Error', `Could not rename ${node.id}.`, 'error');
     }
+  };
+
+  /** F5: aktif dosyayı yeniden adlandırır (breadcrumb kalem düğmesi). */
+  const handleRenameActiveFile = () => {
+    if (!activeTab || !activeNode) {
+      showToast('Nothing to rename', 'Open a file from the explorer first.', 'info');
+      return;
+    }
+    void handleRenameEntry(activeNode);
   };
 
   const handleCloseTab = (e: React.MouseEvent, fileName: string) => {
@@ -724,36 +785,50 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
     }
   };
 
-  /** Sends the active file to the recycle bin (the Rust side uses recycle-bin). */
-  const handleDeleteActiveFile = async () => {
+  /** F7b: herhangi bir dosya/klasörü çöp kutusuna gönderir. */
+  const handleDeleteEntry = async (node: FileNode) => {
+    if (!window.confirm(`Delete "${node.name}"? It will be moved to the recycle bin.`)) return;
+    try {
+      // D9: Rust tarafı hangi yolun KULLANILDIĞINI döner; UI ona göre
+      // konuşur — kalıcı silme olduysa "çöp kutusuna taşındı" denmez.
+      const mode = await invoke<string>('delete_entry', { path: node.id });
+      const affected = (p: string) => p === node.id || p.startsWith(node.id + '/');
+      const closed = openTabs.filter(affected);
+      const remaining = openTabs.filter(t => !affected(t));
+      if (closed.length > 0) {
+        setOpenTabs(remaining);
+        if (affected(activeTab)) setActiveTab(remaining[remaining.length - 1] ?? '');
+        for (const t of closed) clearDirtyBuffer(t);
+        setFileContents(prev => {
+          const n = { ...prev };
+          for (const t of closed) delete n[t];
+          return n;
+        });
+        setSavedContents(prev => {
+          const n = { ...prev };
+          for (const t of closed) delete n[t];
+          return n;
+        });
+      }
+      await loadTree();
+      if (mode === 'recycled') {
+        showToast('Deleted', `${node.name} moved to the recycle bin.`, 'success');
+      } else {
+        showToast('Permanently Deleted', `${node.name} was NOT sent to the recycle bin (${mode}). It cannot be restored from the app.`, 'error');
+      }
+    } catch (err) {
+      console.error('Delete error:', err);
+      showToast('Delete Error', `Could not delete ${node.id}.`, 'error');
+    }
+  };
+
+  /** Sends the active file to the recycle bin (breadcrumb trash button). */
+  const handleDeleteActiveFile = () => {
     if (!activeTab || !activeNode) {
       showToast('Nothing to delete', 'Open a file from the explorer first.', 'info');
       return;
     }
-    if (!window.confirm(`Delete "${activeTab}"? It will be moved to the recycle bin.`)) return;
-
-    try {
-      // D9: Rust tarafı hangi yolun KULLANILDIĞINI döner; UI ona göre
-      // konuşur — kalıcı silme olduysa "çöp kutusuna taşındı" denmez.
-      const mode = await invoke<string>('delete_entry', { path: activeTab });
-      const deletedFile = activeTab;
-      const updatedTabs = openTabs.filter(t => t !== activeTab);
-      setOpenTabs(updatedTabs);
-      if (updatedTabs.length > 0) setActiveTab(updatedTabs[updatedTabs.length - 1]);
-      else setActiveTab('');
-      setFileContents(prev => { const n = { ...prev }; delete n[deletedFile]; return n; });
-      setSavedContents(prev => { const n = { ...prev }; delete n[deletedFile]; return n; });
-      clearDirtyBuffer(deletedFile);
-      await loadTree();
-      if (mode === 'recycled') {
-        showToast('File Deleted', `${deletedFile} moved to the recycle bin.`, 'success');
-      } else {
-        showToast('File Permanently Deleted', `${deletedFile} was NOT sent to the recycle bin (${mode}). It cannot be restored from the app.`, 'error');
-      }
-    } catch (err) {
-      console.error('Delete error:', err);
-      showToast('Delete Error', `Could not delete ${activeTab}.`, 'error');
-    }
+    void handleDeleteEntry(activeNode);
   };
 
   useEffect(() => {
@@ -809,6 +884,7 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
             <div
               data-folder-id={node.id}
               onMouseDown={(e) => handleMouseDown(e, node)}
+              onContextMenu={(e) => openCtxMenu(e, node)}
               onClick={() => handleToggleFolder(node.id)}
               style={{ paddingLeft }}
               className="w-full flex items-center gap-1.5 py-1 rounded text-[12px] font-mono text-[#CECDC3] cursor-pointer hover:bg-[#282726] transition-all select-none"
@@ -834,6 +910,7 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
         <div
           key={node.id}
           onMouseDown={(e) => handleMouseDown(e, node)}
+          onContextMenu={(e) => openCtxMenu(e, node)}
           onClick={() => handleOpenFile(node)}
           style={{ paddingLeft }}
           className={`w-full flex items-center gap-1.5 py-1 rounded text-[12px] font-mono cursor-pointer transition-colors select-none ${
@@ -863,6 +940,53 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
           <span>{draggedNode.name}</span>
         </div>
       )}
+
+      {/* F7b: AĞAÇ SAĞ-TIK MENÜSÜ */}
+      {ctxMenu && (() => {
+        const dir = ctxMenu.node.isFolder
+          ? ctxMenu.node.id
+          : (ctxMenu.node.id.includes('/') ? ctxMenu.node.id.slice(0, ctxMenu.node.id.lastIndexOf('/')) : '');
+        return (
+          <div
+            style={{ left: Math.min(ctxMenu.x, window.innerWidth - 190), top: Math.min(ctxMenu.y, window.innerHeight - 180) }}
+            className="fixed z-50 w-[176px] bg-[#282726] border border-[#34332F] rounded-md shadow-2xl py-1 animate-in fade-in zoom-in-95 duration-100"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-2.5 py-1.5 text-[10px] font-mono text-[#575654] truncate border-b border-[#34332F]/60">
+              {ctxMenu.node.isFolder ? <Folder size={11} className="inline mr-1 text-[#dcb67a]" /> : <FileCode size={11} className="inline mr-1 text-[#3AA99F]" />}
+              {ctxMenu.node.name}
+            </div>
+            <button
+              type="button"
+              onClick={() => { setCtxMenu(null); startCreate('file', dir); }}
+              className="w-full text-left px-2.5 py-1.5 text-[11.5px] font-sans text-[#CECDC3] hover:bg-[#34332F] hover:text-white cursor-pointer transition-colors"
+            >
+              <Plus size={11} className="mr-1.5 inline text-[#3AA99F]" /> New File Here
+            </button>
+            <button
+              type="button"
+              onClick={() => { setCtxMenu(null); startCreate('folder', dir); }}
+              className="w-full text-left px-2.5 py-1.5 text-[11.5px] font-sans text-[#CECDC3] hover:bg-[#34332F] hover:text-white cursor-pointer transition-colors"
+            >
+              <FolderPlus size={11} className="mr-1.5 inline text-[#dcb67a]" /> New Folder Here
+            </button>
+            <button
+              type="button"
+              onClick={() => { setCtxMenu(null); void handleRenameEntry(ctxMenu.node); }}
+              className="w-full text-left px-2.5 py-1.5 text-[11.5px] font-sans text-[#CECDC3] hover:bg-[#34332F] hover:text-white cursor-pointer transition-colors"
+            >
+              <Pencil size={11} className="mr-1.5 inline text-[#4385BE]" /> Rename…
+            </button>
+            <button
+              type="button"
+              onClick={() => { setCtxMenu(null); void handleDeleteEntry(ctxMenu.node); }}
+              className="w-full text-left px-2.5 py-1.5 text-[11.5px] font-sans text-[#D14D41] hover:bg-[#34332F] hover:text-[#E0685C] cursor-pointer transition-colors"
+            >
+              <Trash2 size={11} className="mr-1.5 inline" /> Delete…
+            </button>
+          </div>
+        );
+      })()}
 
       {/* CONFIRMATION MODAL */}
       {pendingMove && (
@@ -911,17 +1035,17 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
             <span>EXPLORER</span>
             <div className="flex items-center gap-1 text-[#CECDC3]">
               <button 
-                title="New File" 
+                title="New File (workspace root)" 
                 type="button" 
-                onClick={() => setCreationMode('file')}
+                onClick={() => startCreate('file', '')}
                 className="p-1 hover:bg-[#282726] rounded cursor-pointer text-[#CECDC3] hover:text-white transition-colors"
               >
                 <Plus size={13} />
               </button>
               <button 
-                title="New Folder" 
+                title="New Folder (workspace root)" 
                 type="button" 
-                onClick={() => setCreationMode('folder')}
+                onClick={() => startCreate('folder', '')}
                 className="p-1 hover:bg-[#282726] rounded cursor-pointer text-[#CECDC3] hover:text-white transition-colors"
               >
                 <FolderPlus size={13} />
@@ -963,6 +1087,11 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
                 ) : (
                   <FileCode size={14} className="text-[#3AA99F]" />
                 )}
+                {/* F7b: hedef klasör düz yazıyla görünür — "aktif sekmenin
+                    klasörüne gizlice yaz" davranışı kalktı. */}
+                <span className="truncate font-mono text-[10px] text-[#575654]" title={creatingIn || 'workspace root'}>
+                  {creatingIn ? `${creatingIn.split('/').pop()}/` : './'}
+                </span>
                 <input
                   type="text"
                   autoFocus
