@@ -14,7 +14,6 @@ export function ChatView({
   messages,
   loading,
   userName,
-  targetModel,
   onlinePricing,
   projectName,
   chatEndRef,
