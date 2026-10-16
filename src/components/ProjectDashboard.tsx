@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { SyntaxHighlighter, vscDarkPlus } from '../lib/codeHighlight';
+import { explainError } from '../lib/errors';
 import { API_BASE } from '../services/ThalamusClient';
 import { RealTerminal } from './RealTerminal';
 import { ThalamusCopilot } from './ThalamusCopilot';
@@ -727,7 +728,14 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
         storeFileContent(node.id, code);
       } catch (err) {
         console.error('Could not read file:', err);
-        showToast('Read Error', `Could not read ${node.id}.`, 'error');
+        const x = explainError(err, 'File read');
+        showToast(
+          x.title,
+          `"${node.id}" could not be opened. ${x.explanation}`,
+          'error',
+          undefined,
+          `[${x.code}] ${x.detail ?? node.id}`
+        );
       }
     } else if (!isDirty(node.id)) {
       // V1: disk kopyasi AI araclari/baska bir kanalla degismis olabilir.
