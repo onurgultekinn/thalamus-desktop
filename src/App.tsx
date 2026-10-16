@@ -266,7 +266,7 @@ export default function App() {
             JSON.stringify(toStore.slice(-50))
           );
         } catch {
-          showToast('Storage Full', 'Chat history could not be saved — storage quota exceeded.', 'error', undefined, '[TL-021] localStorage quota exceeded');
+          showToast('Storage Full', 'Chat history could not be saved — storage quota exceeded.', 'error', undefined, '[507] localStorage quota exceeded');
         }
       }
     }
