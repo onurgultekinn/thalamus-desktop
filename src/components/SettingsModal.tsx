@@ -226,13 +226,13 @@ export function SettingsModal({
     e.target.value = '';
     if (!file) return;
     if (!file.type.startsWith('image/')) {
-      showToast('Invalid file', 'Please choose an image file.', 'error');
+      showToast('Invalid file', 'Please choose an image file (PNG, JPG, WEBP or GIF).', 'error', undefined, '[400] wrong file type');
       return;
     }
     try {
       setAvatar(await fileToAvatarDataUrl(file));
     } catch {
-      showToast('Could not read image', 'The selected file could not be processed.', 'error');
+      showToast('Could not read image', 'The selected file could not be processed — it may be corrupt or in an unsupported format. Try another image.', 'error', undefined, '[400] image decode failed');
     }
   }
 

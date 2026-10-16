@@ -665,7 +665,7 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
     if (!newName || newName === node.name) return;
     // Windows dosya adında geçersiz karakterler — diske gitmeden dur.
     if (/[\\/:*?"<>|]/.test(newName)) {
-      showToast('Invalid name', 'Name contains characters Windows does not allow (\\ / : * ? " < > |).', 'error');
+      showToast('Invalid name', 'Name contains characters Windows does not allow (\\ / : * ? " < > |). Use a name without them.', 'error', undefined, '[400] invalid name characters');
       return;
     }
     const parent = node.id.includes('/') ? node.id.slice(0, node.id.lastIndexOf('/')) : '';
