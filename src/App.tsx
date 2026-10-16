@@ -17,6 +17,7 @@ import { aiChat, userMessage, getActiveProvider } from './services/aiClient';
 import { DEFAULT_MODEL_NAME, MODEL_PRICING } from './constants';
 import { getWorkspaceName, getWorkspaceRoot, openProject, pruneRecentProjects, rememberProject } from './lib/workspace';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { explainError } from './lib/errors';
 import type { Message, ChatItem, User } from './types';
 export type { Message, MessageMetrics, ChatItem } from './types';
 import './App.css';
@@ -472,16 +473,22 @@ export default function App() {
       } catch (err) {
         // T2: kullanıcı Stop'a bastıysa hata mesajı yazılmaz; dürüst not düşülür.
         const kind = abortKind();
-        applyMessages(prev => [...prev, {
-          role: 'assistant',
-          content: kind === 'stop'
-            ? 'Request stopped.'
-            : kind === 'timeout'
-              ? '⚠️ **Request timed out** after 180 s — no response arrived.'
-              : `⚠️ **Vision request failed:** ${err instanceof Error ? err.message : String(err)}`,
-          timestamp: ts(),
-          modelName: kind ? 'Vision model (request aborted)' : 'Vision model (request failed)',
-        }]);
+        if (kind) {
+          applyMessages(prev => [...prev, {
+            role: 'assistant',
+            content: kind === 'stop' ? 'Request stopped.' : '⚠️ **Request timed out** after 180 s — no response arrived.',
+            timestamp: ts(),
+            modelName: 'Vision model (request aborted)',
+          }]);
+        } else {
+          const x = explainError(err, 'Vision request');
+          applyMessages(prev => [...prev, {
+            role: 'assistant',
+            content: `⚠️ **${x.title}**\n\n${x.explanation}${x.detail ? `\n\n${x.detail}` : ''}`,
+            timestamp: ts(),
+            modelName: 'Vision model (request failed)',
+          }]);
+        }
       } finally {
         setLoading(false);
         abortControllerRef.current = null;
@@ -534,16 +541,23 @@ export default function App() {
       }
     } catch (err) {
       const kind = abortKind();
-      applyMessages(prev => [...prev, {
-        role: 'assistant',
-        content: kind === 'stop'
-          ? 'Request stopped.'
-          : kind === 'timeout'
-            ? '⚠️ **Request timed out** after 180 s — no response arrived.'
-            : `⚠️ **Request failed:** ${err instanceof Error ? err.message : String(err)}`,
-        timestamp: ts(),
-        modelName: LOCAL_ENGINE_STAMP,
-      }]);
+      if (kind) {
+        applyMessages(prev => [...prev, {
+          role: 'assistant',
+          content: kind === 'stop' ? 'Request stopped.' : '⚠️ **Request timed out** after 180 s — no response arrived.',
+          timestamp: ts(),
+          modelName: LOCAL_ENGINE_STAMP,
+        }]);
+      } else {
+        const x = explainError(err, 'Assistant request');
+        applyMessages(prev => [...prev, {
+          role: 'assistant',
+          content: `⚠️ **${x.title}**\n\n${x.explanation}${x.detail ? `\n\n${x.detail}` : ''}`,
+          timestamp: ts(),
+          modelName: LOCAL_ENGINE_STAMP,
+        }]);
+        showToast(x.title, x.explanation, 'error', undefined, x.detail);
+      }
     } finally {
       setLoading(false);
       abortControllerRef.current = null;
@@ -602,7 +616,14 @@ export default function App() {
     // hayalet girdi son kullanilanlardan duser, gorunum degistirilmez.
     const result = await openProject(root);
     if (!result.ok) {
-      showToast('Project Unavailable', `Could not open ${root}: ${result.error ?? 'unknown error'}. It was removed from the recent list.`, 'error');
+      const openErr = explainError(result.error, 'Project open');
+      showToast(
+        'Project Unavailable',
+        `"${root}" could not be opened and was removed from the recent list. ${openErr.explanation}`,
+        'error',
+        undefined,
+        openErr.detail
+      );
       setWorkspaceVersion(v => v + 1);
       return;
     }
