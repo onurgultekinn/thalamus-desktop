@@ -3,6 +3,10 @@ import ReactDOM from 'react-dom/client';
 import './App.css'; // Ensure the stylesheet loads first
 import App from './App';
 import { ToastProvider } from './components/Toast';
+import { initPerfTrace } from './lib/perfTrace';
+
+// Dev-only probes (longtask / ipc / net); no-op in production builds.
+initPerfTrace();
 
 /**
  * Any uncaught render/effect error shows this recoverable screen instead of a

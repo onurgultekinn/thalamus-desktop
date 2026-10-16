@@ -18,6 +18,7 @@ import { DEFAULT_MODEL_NAME, MODEL_PRICING } from './constants';
 import { getWorkspaceName, getWorkspaceRoot, openProject, pruneRecentProjects, rememberProject } from './lib/workspace';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { explainError, splitExplanation } from './lib/errors';
+import { markSwitchStart, reportSwitchPaint } from './lib/perfTrace';
 import type { Message, ChatItem, User } from './types';
 export type { Message, MessageMetrics, ChatItem } from './types';
 import './App.css';
@@ -228,8 +229,6 @@ export default function App() {
   // Perf: acilista okunan sohbetin hemen geri yazilmasini engelleyen isaret
   // (bkz. kalicilik efektindeki loadedChatRef).
   const loadedChatRef = useRef<string | null>(null);
-  /** Sohbet gecisi olcumunun baslangici (dev perf logu icin). */
-  const switchT0Ref = useRef<number>(0);
 
   // Load messages whenever activeChatId changes
   useEffect(() => {
@@ -579,14 +578,13 @@ export default function App() {
 };
 
   /**
-   * Dev olcumu: sohbet gecisi kac ms suruyor ve kac mesaj render edildi.
-   * Prod build'de gorunmez; konsola sadece DEV'de yazar.
+   * Dev olcumu: sohbet gecisinde tiklamadan boyanma anina kadar gecen sure.
+   * Uzun suruyorsa konsoldaki [longtask]/[ipc]/[net] satirlari nerede
+   * harcandigini gosterir (bkz. lib/perfTrace.ts). Prod'da gorunmez.
    */
   useEffect(() => {
-    if (!import.meta.env.DEV || !switchT0Ref.current) return;
-    const ms = Math.round(performance.now() - switchT0Ref.current);
-    switchT0Ref.current = 0;
-    console.log(`[perf] chat switch → ${ms}ms (${messages.length} messages)`);
+    if (!import.meta.env.DEV || messages.length === 0) return;
+    reportSwitchPaint(`chat switch (${messages.length} messages)`);
   }, [messages]);
 
   /** T2: süren isteği durdurur; fetch AbortError fırlatır, mesaj "Request stopped." yazılır. */
@@ -711,7 +709,7 @@ export default function App() {
           chats={chats}
           activeChatId={activeChatId}
           onSelectChat={(id) => {
-            if (import.meta.env.DEV) switchT0Ref.current = performance.now();
+            markSwitchStart();
             setActiveChatId(id);
             setCurrentView('chat');
           }}
