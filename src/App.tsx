@@ -140,7 +140,7 @@ export default function App() {
     }
   }, [onlinePricing]);
 
-  const { compressPrompt, isEngineReady, isLoading: engineLoading, checkHealth } = useThalamus();
+  const { isLoading: engineLoading, checkHealth } = useThalamus();
 
   /** Welcome card 4: a real engine health check (HTTP + latency). */
   const handleEngineDiagnostic = async () => {
@@ -337,33 +337,19 @@ export default function App() {
       setChats(prev => prev.map(c => c.id === currentId ? { ...c, title: generatedTitle } : c));
     }
 
-    const unitPrice = modelPricing[targetModel] || 0.000003;
-    const approxTokens = Math.max(1, Math.ceil(userText.length / 4));
-    // D8: birim fiyatlar kabaca degerlerdir; maliyet tahminidir, makbuz degil.
-    const userCost = '≈$' + (approxTokens * unitPrice).toFixed(6);
-
     // Regenerate, mesaj üzerinde saklanan görselleri yeniden kullanır; aksi
     // halde pendingImages ilk gönderimde silinmiş olduğundan regenerate sessizce
     // metin-sıkıştırma yoluna düşüyordu.
     const activeImages = pendingImages.length > 0 ? pendingImages : (imagesFromRegenerate ?? []);
 
-    // D1: kim isledi rozeti — metin yerel motorda, görsel seçili sağlayıcıda.
-    const pipelineStamp = activeImages.length > 0 ? 'Vision model' : LOCAL_ENGINE_STAMP;
+    // Rozet gerçekten ne işleyeceğini söyler: görsel → provider yolu, metin →
+    // asistan yolu (motor backend'de sessizdir; P2 katmanı orada çalışır).
     const userMsg: Message = {
       role: 'user',
       content: userText.trim() || (activeImages.length ? `[${activeImages.length} image${activeImages.length > 1 ? 's' : ''}]` : userText),
       timestamp: nowTime,
-      modelName: pipelineStamp,
+      ...(activeImages.length > 0 ? { modelName: 'Vision model' } : {}),
       ...(activeImages.length > 0 ? { images: activeImages } : {}),
-      metrics: {
-        originalTokens: approxTokens,
-        compressedTokens: approxTokens,
-        savingsPercentage: 0,
-        executionTimeMs: 0,
-        classId: 0,
-        cost: userCost,
-        financialSavings: '+$0.000000'
-      }
     };
 
     if (!isRegenerate) {
@@ -441,90 +427,56 @@ export default function App() {
       return;
     }
 
+    // ── Metin yolu: gerçek AI yanıtı ─────────────────────────────────────
+    // Ürün kararı (2026-10): ana yüzey "sohbet asistanı"dır; sıkıştırma
+    // motoru backend `/api/ai/chat` içinde istek başına sessizce ve lossless
+    // çalışır (P2), ön yüz sıkıştırmayı içerik olarak göstermez.
     try {
-      // 1. Call the real compression engine (Tauri Rust IPC)
-      const startTime = performance.now();
-      const metrics = await compressPrompt(userText);
-      const elapsed = performance.now() - startTime;
-
-      // Anti-flicker floor only: long enough to avoid a spinner flash, short
-      // enough that the engine's real speed is what the user experiences.
-      const MIN_LOADING_TIME = 250;
-      if (elapsed < MIN_LOADING_TIME) {
-        await new Promise(resolve => setTimeout(resolve, MIN_LOADING_TIME - elapsed));
-      }
-
-      // If the engine is unreachable, tell the user honestly — never present a
-      // fake "successful" passthrough result as a normal compression response.
-      if (metrics.degraded) {
-        showToast(
-          'Compression Unavailable',
-          `Could not reach the compression engine (${metrics.error ?? 'unknown error'}). The raw prompt was sent uncompressed.`,
-          'error'
-        );
-      }
-
-      // Real price and savings calculation for the selected model
-      const realCost = '≈$' + (metrics.compressed_tokens * unitPrice).toFixed(6);
-      const savedCost = '≈+$' + (metrics.saved_tokens * unitPrice).toFixed(6);
-
-      // Update the user message's approximate token count with the real count
-      applyMessages(prev => {
-        const updated = [...prev];
-        const lastUserIdx = updated.map(m => m.role).lastIndexOf('user');
-        if (lastUserIdx !== -1) {
-          updated[lastUserIdx] = {
-            ...updated[lastUserIdx],
-            metrics: {
-              ...updated[lastUserIdx].metrics!,
-              originalTokens: metrics.original_tokens,
-              compressedTokens: metrics.compressed_tokens,
-              cost: '≈$' + (metrics.compressed_tokens * unitPrice).toFixed(6),
-            }
-          };
+      const provider = await getActiveProvider();
+      if (!provider) {
+        applyMessages(prev => [...prev, {
+          role: 'assistant',
+          content: '**No AI provider is configured.** Add a key in Settings → Providers to get answers. File explorer, terminal and the compression engine keep working without a key.',
+          timestamp: ts(),
+          modelName: LOCAL_ENGINE_STAMP,
+        }]);
+      } else {
+        // Regenerate'te yeniden sorulan soru, bağlama tekrar girilmez.
+        let historySrc = messages;
+        if (isRegenerate) {
+          const lastUserIdx = messages.map(m => m.role).lastIndexOf('user');
+          if (lastUserIdx !== -1) historySrc = messages.slice(0, lastUserIdx);
         }
-        return updated;
-      });
-
-      const responseText = metrics.is_compressed
-        ? `Your prompt was successfully compressed by Thalamus Local Compression Engine.\n\n**Compressed Prompt Output (@TLM):**\n\n\`\`\`text\n${metrics.processed_prompt}\n\`\`\``
-        : metrics.degraded
-          ? `⚠️ **The local compression engine could not be reached** (${metrics.error}). Your prompt was sent as-is, uncompressed.\n\nIn desktop mode the backend runs at \`${API_BASE}\`; start it with \`${'npm run tauri:dev'}\`.`
-          : isEngineReady
-            ? `Your prompt was analyzed but no compression was needed or it was bypassed by the semantic veto (raw text preserved).`
-            : `⚠️ The local compression engine is not connected — this preview runs in a browser, but compression, files and terminal only work inside the desktop app. Launch it with \`npm run tauri:dev\`.`;
-
-      const assistantMsg: Message = {
+        const history = historySrc
+          .filter(m =>
+            typeof m.content === 'string' &&
+            m.content.trim().length > 0 &&
+            !m.content.startsWith('⚠️')
+          )
+          .slice(-8)
+          .map(m => ({ role: m.role, content: m.content as string }));
+        const res = await aiChat([
+          {
+            role: 'system',
+            content: 'You are Thalamus, a helpful desktop assistant for coding. Always answer in the same language the user writes in (Turkish user → Turkish answer).',
+          },
+          ...history,
+          userMessage(userText),
+        ]);
+        applyMessages(prev => [...prev, {
+          role: 'assistant',
+          content: res.content,
+          timestamp: ts(),
+          modelName: `${provider.name} · ${provider.model}`,
+        }]);
+      }
+    } catch (err) {
+      applyMessages(prev => [...prev, {
         role: 'assistant',
-        content: responseText,
+        content: `⚠️ **Request failed:** ${err instanceof Error ? err.message : String(err)}`,
         timestamp: ts(),
         modelName: LOCAL_ENGINE_STAMP,
-        originalCodeSnippet: userText,
-        compressedCodeSnippet: metrics.processed_prompt,
-        metrics: {
-          originalTokens: metrics.original_tokens,
-          compressedTokens: metrics.compressed_tokens,
-          savingsPercentage: metrics.savings_percentage,
-          executionTimeMs: metrics.execution_time_ms,
-          classId: metrics.is_compressed ? 1 : 0,
-          losslessVerified: metrics.lossless_verified !== false,
-          cost: realCost,
-          financialSavings: savedCost
-        }
-      };
-
-      applyMessages(prev => [...prev, assistantMsg]);
-    } catch (err) {
-      console.error(err);
-      applyMessages(prev => [
-        ...prev,
-        {
-          role: 'assistant',
-          content: '⚠️ **Thalamus Compression Engine Error:** Rust backend could not be reached.',
-          timestamp: nowTime,
-          modelName: LOCAL_ENGINE_STAMP
-        }
-      ]);
+      }]);
     } finally {
       setLoading(false);
     }
