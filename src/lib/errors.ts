@@ -18,6 +18,7 @@
  * | 402   | Payment Required            | provider billing / balance failure          |
  * | 403   | Forbidden                   | provider access denied (plan/key scope)     |
  * | 404   | Not Found                   | model or endpoint unknown to provider       |
+ * | 415   | Unsupported Media Type      | file is not valid UTF-8 text (binary/other) |
  * | 429   | Too Many Requests           | provider rate / usage limit                 |
  * | 5xx   | Provider Server Error       | passthrough of provider's own 500/502/...   |
  * | 503   | Service Unavailable         | local engine unreachable (network layer)    |
@@ -148,15 +149,29 @@ export function explainError(err: unknown, context?: string): ExplainedError {
     return {
       code: '503',
       title: 'The local engine is unreachable',
-      explanation: 'The chat could not reach the local backend (127.0.0.1:8277). Restart the application via thalamus_baslat.bat, or check that the backend runs.',
+      explanation: 'The chat could not reach the local backend (127.0.0.1:8277). Restart the application via thalamus_baslat.bat.',
       detail: trimDetail(raw),
     };
   }
 
+  // Text file that is not UTF-8 (binary, image, legacy encoding).
+  if (/valid utf-?8|utf-?8|did not contain valid/i.test(raw)) {
+    return {
+      code: '415',
+      title: 'Not a text file',
+      explanation: 'This file is not valid UTF-8 text — it may be binary, an image or a legacy encoding. Open it with an external editor.',
+      detail: trimDetail(raw),
+    };
+  }
+
+  // Filesystem contexts get filesystem advice, not provider advice.
+  const fsContext = context ? /file|create|move|rename|delete|save|workspace|read/i.test(context) : false;
   return {
     code: '500',
     title: context ? `${context} failed` : 'Operation failed',
-    explanation: 'This operation failed unexpectedly. If it keeps happening, check Settings > Providers (key / Base URL) and try a different provider.',
+    explanation: fsContext
+      ? 'This operation failed unexpectedly. Check that the file is not open in another program and that you have permission, then try again.'
+      : 'This operation failed unexpectedly. If it keeps happening, check Settings > Providers (key / Base URL) and try a different provider.',
     detail: trimDetail(raw),
   };
 }

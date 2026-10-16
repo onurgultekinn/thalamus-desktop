@@ -112,28 +112,26 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                 </button>
               </div>
 
-              {/* Ne oldu: sakin, okunur gri ton. */}
+              {/* Ne oldu: sakin, okunur gri ton; başlıktan küçük ve bir ton soluk. */}
               {cause && (
-                <span className="text-[12px] text-[#CFCAC2] leading-[19px] tracking-[-0.01em]">{cause}</span>
+                <span className="text-[11.5px] text-[#BDB8AF] leading-[18px] tracking-[-0.01em]">{cause}</span>
               )}
 
               {/* Ne yapmalısın: girintili, aksan yaylı aksiyon satırı - göz ilk buraya gider. */}
               {action && (
-                <span className="flex items-start gap-1.5 text-[12px] leading-[19px] tracking-[-0.01em] text-[#E7E3DB]">
+                <span className="flex items-start gap-1.5 text-[12px] leading-[18px] tracking-[-0.01em] text-[#E9E5DD]">
                   <span className="flex-shrink-0" style={{ color: accent }}>→</span>
                   <span className="flex-1 min-w-0">{action}</span>
                 </span>
               )}
 
-              {/* Teknik detay: mono, okunur gri ton - netleştirici ince ayırıcı üstünde. */}
-              {(bodyDetail || (toast.type === 'error' && code)) && (
+              {/* Alt satır: yalnız kısa referans. Ham teknik metin tooltip'te durur. */}
+              {toast.type === 'error' && code && (
                 <span
-                  className="text-[10.5px] text-[#928D85] font-mono leading-[16px] line-clamp-2 cursor-help mt-0.5 pt-1.5 border-t border-[#312F2C]"
-                  title={bodyDetail}
+                  className="text-[10px] text-[#7E7A73] font-mono leading-[15px] mt-0.5 pt-1.5 border-t border-[#2E2C29] cursor-help"
+                  title={bodyDetail ?? undefined}
                 >
-                  {bodyDetail}
-                  {bodyDetail && code ? '  ·  ' : ''}
-                  {toast.type === 'error' && code ? `wiki › ${code}` : ''}
+                  wiki › {code}
                 </span>
               )}
 
