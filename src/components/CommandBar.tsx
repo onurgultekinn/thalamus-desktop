@@ -9,6 +9,13 @@ import { prepareImageFile, IMAGE_MODE_ORDER, imageModeLabel, imageModeHint, DEFA
 const MAX_TEXT_CHARS = 200_000;
 const MAX_READ_BYTES = 8 * 1024 * 1024;
 
+interface UploadedFile {
+  name: string;
+  size: string;
+  /** Operand injected into the textarea for this file; removed on delete. */
+  injected?: string;
+}
+
 interface CommandBarProps {
   input: string;
   loading: boolean;
@@ -17,7 +24,7 @@ interface CommandBarProps {
   setTargetModel: (model: string) => void;
   targetModel: string;
   images: AttachedImage[];
-  setImages: (images: AttachedImage[]) => void;
+  setImages: React.Dispatch<React.SetStateAction<AttachedImage[]>>;
 }
 
 export function CommandBar({
@@ -32,25 +39,22 @@ export function CommandBar({
 }: CommandBarProps) {
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
   const [isFileMenuOpen, setIsFileMenuOpen] = useState(false);
-  const [uploadedFiles, setUploadedFiles] = useState<{ name: string; size: string }[]>([]);
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
   const [imageMode, setImageMode] = useState<ImageMode>(DEFAULT_IMAGE_MODE);
 
   const popoverRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    (window as unknown as { __attachStep?: string }).__attachStep = 'handler-enter';
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
+  // Shared by the file-picker input and drag&drop → the exact same rules apply.
+  const handleFile = async (file: File) => {
     const size = `${(file.size / 1024).toFixed(1)} KB`;
 
     if (file.type.startsWith('image/')) {
-      (window as unknown as { __attachStep?: string }).__attachStep = 'image-prepare';
       try {
         const attached = await prepareImageFile(file, imageMode);
-        setImages([...images, attached]);
+        setImages(prev => [...prev, attached]);
       } catch {
         setUploadedFiles(prev => [...prev, { name: `${file.name} (image — could not be read)`, size }]);
       }
@@ -58,8 +62,9 @@ export function CommandBar({
     }
 
     if (file.size > MAX_READ_BYTES) {
-      setUploadedFiles(prev => [...prev, { name: file.name, size }]);
-      setInput(input + `\n\n--- @${file.name} (${size}) ---\n[skipped — file is too large to attach]\n`);
+      const injected = `\n\n--- @${file.name} (${size}) ---\n[skipped — file is too large to attach]\n`;
+      setUploadedFiles(prev => [...prev, { name: file.name, size, injected }]);
+      setInput(input + injected);
       return;
     }
 
@@ -71,8 +76,9 @@ export function CommandBar({
       if (probe[i] === 0) { binary = true; break; }
     }
     if (binary) {
-      setUploadedFiles(prev => [...prev, { name: file.name, size }]);
-      setInput(input + `\n\n--- @${file.name} (binary, ${size}) ---\n[contents omitted — binary file]\n`);
+      const injected = `\n\n--- @${file.name} (binary, ${size}) ---\n[contents omitted — binary file]\n`;
+      setUploadedFiles(prev => [...prev, { name: file.name, size, injected }]);
+      setInput(input + injected);
       return;
     }
 
@@ -82,8 +88,23 @@ export function CommandBar({
       text = text.slice(0, MAX_TEXT_CHARS);
       truncated = true;
     }
-    setUploadedFiles(prev => [...prev, { name: file.name, size }]);
-    setInput(input + `\n\n--- @${file.name} ---\n${text}${truncated ? '\n[truncated — file too large]' : ''}\n`);
+    const injected = `\n\n--- @${file.name} ---\n${text}${truncated ? '\n[truncated — file too large]' : ''}\n`;
+    setUploadedFiles(prev => [...prev, { name: file.name, size, injected }]);
+    setInput(input + injected);
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (file) await handleFile(file);
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) await handleFile(file);
   };
 
   useEffect(() => {
@@ -107,7 +128,12 @@ export function CommandBar({
   const modelsData = MODELS.map((m) => ({ id: m.id, name: m.name, company: m.company }));
 
   const removeFile = (index: number) => {
-    setUploadedFiles(prev => prev.filter((_, i) => i !== index));
+    setUploadedFiles(prev => {
+      const file = prev[index];
+      // Chip removal must also remove the injected operand from the input.
+      if (file?.injected) setInput(input.split(file.injected).join(''));
+      return prev.filter((_, i) => i !== index);
+    });
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -182,12 +208,25 @@ export function CommandBar({
             </div>
             <span className="text-[9.5px] text-obsidian-muted/70">Image: {imageModeHint(imageMode)}</span>
           </div>
-          <div 
+          <div
             onClick={() => fileInputRef.current?.click()}
-            className="border border-dashed border-obsidian-border bg-obsidian-bg/50 rounded-md p-3 text-center flex flex-col items-center gap-1 hover:border-obsidian-muted/40 cursor-pointer transition-colors"
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setIsDragging(true);
+            }}
+            onDragLeave={() => setIsDragging(false)}
+            onDrop={handleDrop}
+            className={`border border-dashed rounded-md p-3 text-center flex flex-col items-center gap-1 cursor-pointer transition-colors ${
+              isDragging
+                ? 'border-[#dcb67a]/60 bg-[#dcb67a]/10'
+                : 'border-obsidian-border bg-obsidian-bg/50 hover:border-obsidian-muted/40'
+            }`}
           >
-            <UploadCloud size={14} className="text-obsidian-muted" />
-            <span className="text-[10px] text-obsidian-muted">Upload or drag dataset</span>
+            <UploadCloud size={14} className={isDragging ? 'text-[#dcb67a]' : 'text-obsidian-muted'} />
+            <span className={`text-[10px] ${isDragging ? 'text-[#dcb67a]' : 'text-obsidian-muted'}`}>
+              {isDragging ? 'Release to attach' : 'Upload or drag dataset'}
+            </span>
           </div>
 
           <div className="flex flex-col gap-1 max-h-[120px] overflow-y-auto">
@@ -206,7 +245,7 @@ export function CommandBar({
                     </span>
                     <button
                       type="button"
-                      onClick={() => setImages(images.filter((_, i) => i !== idx))}
+                      onClick={() => setImages(prev => prev.filter((_, i) => i !== idx))}
                       className="absolute -top-1.5 -right-1.5 bg-obsidian-panel border border-obsidian-border rounded-full p-0.5 text-obsidian-muted hover:text-rose-400 cursor-pointer"
                       title="Remove image"
                     >
@@ -259,7 +298,7 @@ export function CommandBar({
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Ask Thalamus or type a pipeline command..."
+          placeholder="Send a prompt to the compression engine..."
           disabled={loading}
           rows={1}
           className="w-full border-none outline-none text-obsidian-text text-[13px] bg-transparent resize-none min-h-[24px] max-h-[180px] leading-relaxed font-sans placeholder-obsidian-muted/40"
