@@ -80,7 +80,7 @@ export function ThalamusCopilot({
   const [mode, setMode] = useState<'chat' | 'agent'>('chat');
   const [input, setInput] = useState("");
   const [executedActions, setExecutedActions] = useState<Record<string, boolean>>({});
-  const [lastEdit, setLastEdit] = useState<{ file: string; prev: string } | null>(null);
+  const [lastEdit, setLastEdit] = useState<{ file: string; prev: string }[]>([]);
   // ZCode/Claude Code style: plan mode, permission mode, context, summarization
   const [planMode, setPlanMode] = useState(false);
   const [permission, setPermission] = useState<'ask' | 'auto'>('ask');
@@ -121,11 +121,13 @@ export function ThalamusCopilot({
     if (prepared.length) addPendingImages(prepared);
   };
 
-  /** Reverts the last applied edit (safety net). */
+  /** Reverts the last applied edit batch (safety net), one entry at a time. */
   const undoLastEdit = () => {
-    if (!lastEdit) return;
-    onApplyCode?.(lastEdit.file, lastEdit.prev);
-    setLastEdit(null);
+    setLastEdit(prev => {
+      const entry = prev[prev.length - 1];
+      if (entry) onApplyCode?.(entry.file, entry.prev);
+      return prev.slice(0, -1);
+    });
   };
 
   
@@ -148,11 +150,18 @@ export function ThalamusCopilot({
   /** Applies pending edits with user confirmation when permission mode is 'ask'. */
   const applyPendingEdits = () => {
     if (!pendingEdits) return;
-    const e = pendingEdits.find(x => x.applied && x.new_body) ?? pendingEdits[0];
-    if (e && e.new_body) {
-      onApplyCode?.(activeFile, e.new_body);
-      setLastEdit({ file: activeFile, prev: activeFileCode });
+    // TÜM bekleyen editler uygulanır — eski davranış yalnızca birini uygulayıp
+    // kalanını sessizce atıyordu. Her edit kendi dosyasına yazılır (file alanı
+    // boşsa aktif dosyaya). Geri al: yalnızca aktif dosyanın eski içeriği
+    // bileşende bilinir; diğer dosyalar için undo girdisi üretilemez.
+    const undoStack: { file: string; prev: string }[] = [];
+    for (const e of pendingEdits) {
+      if (!e.new_body) continue;
+      const target = e.file || activeFile;
+      if (target === activeFile) undoStack.push({ file: target, prev: activeFileCode });
+      onApplyCode?.(target, e.new_body);
     }
+    if (undoStack.length) setLastEdit(undoStack);
     setPendingEdits(null);
   };
 
@@ -170,7 +179,7 @@ export function ThalamusCopilot({
       setMessages([{ id: newId(), sender: 'ai', text: `[SUMMARY]\n${data.content}`, timestamp: ts(), modeUsed: 'chat' }]);
       setPendingEdits(null);
       setPendingPlan(null);
-      setLastEdit(null);
+      setLastEdit([]);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setMessages(prev => [...prev, { id: newId(), sender: 'ai', text: msg === 'API_KEY_MISSING' ? 'A key is required for summarization (Settings → Providers).' : `Summarization failed: ${msg}`, timestamp: ts(), modeUsed: 'chat' }]);
@@ -353,8 +362,14 @@ export function ThalamusCopilot({
         } else if (applied.length > 0 && permRef.current === 'ask') {
           setPendingEdits(applied);
         } else if (applied.length > 0) {
-          applied.forEach(e => onApplyCode?.(activeFile, e.new_body as string));
-          setLastEdit({ file: activeFile, prev: activeFileCode });
+          // Otomatik mod: yine TÜM editler, her biri kendi dosyasına.
+          const undoStack: { file: string; prev: string }[] = [];
+          applied.forEach(e => {
+            const target = e.file || activeFile;
+            if (target === activeFile) undoStack.push({ file: target, prev: activeFileCode });
+            onApplyCode?.(target, e.new_body as string);
+          });
+          setLastEdit(undoStack);
         }
         (res.edits || []).filter(e => !e.applied).forEach(e =>
           console.warn('edit could not be applied:', e.file, e.message)
@@ -726,10 +741,10 @@ export function ThalamusCopilot({
             </button>
           </div>
         )}
-        {lastEdit && (
+        {lastEdit.length > 0 && (
           <div className="flex items-center justify-between px-0.5">
             <span className="text-[9.5px] font-mono text-[#D0A215]">
-              Last edit ({lastEdit.file.split('/').pop()}) can be undone
+              {lastEdit.length} applied edit(s) can be undone
             </span>
             <button
               type="button"
