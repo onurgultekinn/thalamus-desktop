@@ -395,18 +395,28 @@ pub async fn ai_chat(
     let edits = finalize_edits(&result.0, &blocks);
 
     // Aider stratejisi: SEARCH/REPLACE eşleşmediyse whole-file yedeği dene.
+    // Blocking client async çalışanda çağrılamaz — spawn_blocking'e taşındı
+    // (aksi halde uzun provider gecikmesi tüm HTTP sunucusunu kilitler).
     let all_failed = edits.is_empty() || edits.iter().all(|e| e["applied"] == Value::Bool(false));
     let edits = if all_failed && !blocks.is_empty() {
-        let transport = HttpTransport;
-        match whole_file_fallback(
-            &transport,
-            &url,
-            &req.api_key,
-            &req.model,
-            &messages_before_context,
-            &blocks,
-        ) {
-            Ok(Some(fb)) => fb,
+        let fallback_messages = messages_before_context;
+        let fallback_url = url.clone();
+        let fallback_key = req.api_key.clone();
+        let fallback_model = req.model.clone();
+        match tokio::task::spawn_blocking(move || {
+            let transport = HttpTransport;
+            whole_file_fallback(
+                &transport,
+                &fallback_url,
+                &fallback_key,
+                &fallback_model,
+                &fallback_messages,
+                &blocks,
+            )
+        })
+        .await
+        {
+            Ok(Ok(Some(fb))) => fb,
             _ => edits,
         }
     } else {

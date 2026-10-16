@@ -20,6 +20,7 @@ pub struct ToolCtx<'a> {
 const MAX_READ_BYTES: usize = 200_000;
 const MAX_LIST: usize = 500;
 const MAX_GREP_HITS: usize = 80;
+const MAX_GREP_FILE_BYTES: u64 = 1_500_000;
 
 /// Modelin gördüğü araç şemaları (OpenAI function-calling biçimi).
 pub fn specs() -> Value {
@@ -177,13 +178,19 @@ fn tool_grep(root: &Path, args: &Value) -> String {
             let p = e.path();
             if p.is_dir() {
                 stack.push(p);
-            } else if let Ok(text) = std::fs::read_to_string(&p) {
-                for (i, line) in text.lines().enumerate() {
-                    if line.to_lowercase().contains(&query) {
-                        let disp = p.strip_prefix(root).unwrap_or(&p);
-                        hits.push(format!("{}:{}: {}", disp.display(), i + 1, line.trim()));
-                        if hits.len() >= MAX_GREP_HITS {
-                            break;
+            } else {
+                // Büyük dosyalar belleğe alınmaz (model için gereksiz; OOME domuzlarına hayır).
+                if e.metadata().map(|m| m.len()).unwrap_or(0) > MAX_GREP_FILE_BYTES {
+                    continue;
+                }
+                if let Ok(text) = std::fs::read_to_string(&p) {
+                    for (i, line) in text.lines().enumerate() {
+                        if line.to_lowercase().contains(&query) {
+                            let disp = p.strip_prefix(root).unwrap_or(&p);
+                            hits.push(format!("{}:{}: {}", disp.display(), i + 1, line.trim()));
+                            if hits.len() >= MAX_GREP_HITS {
+                                break;
+                            }
                         }
                     }
                 }
