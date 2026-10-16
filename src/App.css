@@ -864,6 +864,37 @@ html[data-theme='nord-red'] .pretty-scrollbar::-webkit-scrollbar-thumb {
   }
 }
 
+/* ---------------------------------------------------------------------------
+ * Code block skeleton.
+ * While Prism highlights a block that just scrolled into view, the block keeps
+ * its exact height with a dark placeholder (no uncolored text, no layout jump).
+ * ------------------------------------------------------------------------- */
+.code-skeleton {
+  position: relative;
+  background: #100F0F;
+  animation: tlm_skeleton_pulse 1400ms ease-in-out infinite;
+}
+
+.code-skeleton-label {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  transform: translateY(-50%);
+  text-align: center;
+  font-family: 'Cascadia Code', 'Ubuntu Sans Mono', Consolas, monospace;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  color: #4a4945;
+  user-select: none;
+}
+
+@keyframes tlm_skeleton_pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.72; }
+}
+
+
 /* Sidebar chat icon: pops when a chat becomes active. */
 .chat-pop {
   animation: tlm_chat_pop 300ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
