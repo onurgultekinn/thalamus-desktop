@@ -184,6 +184,16 @@ fn is_safe_path(path_str: &str, base: &Path) -> Result<PathBuf, String> {
         base_canonical.join(target)
     };
 
+    // G1: `..` bileşenini kontrol ÖNCESİNDE reddet. Olmayan hedeflerde yalnızca
+    // en yakın var ata denetleniyordu; `ws\..\..\evil.txt` ilk var atası kök
+    // içinde kaldığı için geçip OS'te kök dışına çözülebiliyordu.
+    if absolute_target
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return Err("Güvenlik İhlali: yol '..' bileşeni içeremez.".to_string());
+    }
+
     if absolute_target.exists() {
         let canonical_target = absolute_target
             .canonicalize()

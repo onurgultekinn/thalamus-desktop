@@ -10,8 +10,10 @@
 
 use crate::engine::{process_with_metrics, CompressionMetrics};
 use axum::{
-    extract::State,
-    http::{HeaderValue, Method},
+    extract::{Request, State},
+    http::{header, HeaderValue, Method, StatusCode},
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
 };
@@ -41,6 +43,43 @@ pub struct CompressRequest {
     pub prompt: String,
     #[serde(default)]
     pub veto_override: bool,
+}
+
+/// G2: DNS-rebinding koruması. Kötü niyetli bir site kendi alan adını
+/// 127.0.0.1'e çözümlersen, tarayıcıdan bu backend'e `Host: evil.com` ile
+/// istek atabilir; CORS alone yanıtı okumayı engellese de POST'lar (araç
+/// döngüsü üzerinden dosya yazma gibi) yanıt okumadan yan etki üretir.
+/// Yalnızca gerçek loopback Host başlıklarını kabul ediyoruz; sunucu zaten
+/// sadece 127.0.0.1'e bind olduğu için meşru istemciler bundan etkilenmez.
+fn host_allowed(host_header: Option<&str>) -> bool {
+    let Some(h) = host_header else { return false };
+    let h = h.trim().to_ascii_lowercase();
+    // Host başlığında userinfo bulunamaz; bulunrsa anormal istek — reddet.
+    if h.contains('@') {
+        return false;
+    }
+    let authority = &h[..];
+    let host = if let Some(rest) = authority.strip_prefix('[') {
+        rest.split(']').next().unwrap_or("")
+    } else {
+        authority.split(':').next().unwrap_or(authority)
+    };
+    matches!(host, "127.0.0.1" | "localhost" | "::1")
+}
+
+async fn host_guard(req: Request, next: Next) -> Response {
+    let host = req
+        .headers()
+        .get(header::HOST)
+        .and_then(|h| h.to_str().ok());
+    if !host_allowed(host) {
+        return (
+            StatusCode::FORBIDDEN,
+            "Reddedildi: beklenmeyen Host başlığı (DNS-rebinding koruması).",
+        )
+            .into_response();
+    }
+    next.run(req).await
 }
 
 async fn health(State(_state): State<BackendState>) -> Json<serde_json::Value> {
@@ -92,6 +131,8 @@ fn router(state: BackendState) -> Router {
         .route("/api/repo/map", post(repo::repo_map))
         .with_state(state)
         .layer(cors)
+        // En dış katman: CORS preflight'ı bile Host denetiminden geçer.
+        .layer(middleware::from_fn(host_guard))
 }
 
 /// Backend başlatma sonucu: `None` = henüz bilinmiyor, `Some(Ok(()))` =
@@ -169,6 +210,7 @@ mod tests {
             Request::builder()
                 .method("OPTIONS")
                 .uri("/api/compress")
+                .header("host", "127.0.0.1:8277")
                 .header("Origin", origin)
                 .header("Access-Control-Request-Method", "POST")
                 .header("Access-Control-Request-Headers", "content-type")
@@ -177,6 +219,44 @@ mod tests {
         )
         .await
         .unwrap()
+    }
+
+    #[test]
+    fn host_allowed_matches_only_loopback() {
+        assert!(host_allowed(Some("127.0.0.1:8277")));
+        assert!(host_allowed(Some("localhost:8277")));
+        assert!(host_allowed(Some("LOCALHOST")));
+        assert!(host_allowed(Some("[::1]:8277")));
+        // DNS-rebinding ve dış Host denemeleri reddedilmeli.
+        assert!(!host_allowed(Some("evil.example.com")));
+        assert!(!host_allowed(Some("evil.example.com:8277")));
+        assert!(!host_allowed(Some("127.0.0.1.evil.com")));
+        assert!(!host_allowed(Some("attacker@127.0.0.1:8277")));
+        assert!(!host_allowed(None));
+    }
+
+    #[test]
+    fn rebinding_host_is_rejected_before_routes() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let app = router(test_state());
+            let res = app
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/compress")
+                        .header("host", "evil.example.com")
+                        .header("Content-Type", "application/json")
+                        .body(Body::from(r#"{"prompt":"merhaba"}"#))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(res.status(), axum::http::StatusCode::FORBIDDEN);
+        });
     }
 
     #[test]
@@ -217,6 +297,7 @@ mod tests {
                     Request::builder()
                         .method("POST")
                         .uri("/api/compress")
+                        .header("host", "127.0.0.1:8277")
                         .header("Content-Type", "application/json")
                         .body(Body::from(r#"{"prompt":"   "}"#))
                         .unwrap(),

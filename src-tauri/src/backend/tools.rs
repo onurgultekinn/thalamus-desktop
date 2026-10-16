@@ -73,6 +73,10 @@ fn safe_join(root: &Path, rel: &str) -> Result<PathBuf, String> {
         .map_err(|e| format!("workspace kökü çözülemedi: {}", e))?;
     let p = Path::new(rel);
     let abs = if p.is_absolute() { p.to_path_buf() } else { root_c.join(p) };
+    // G1: `..` bileşenini kontrol ÖNCESİNDE reddet (yok-hedefta ata-traversal'ı kapatır).
+    if abs.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        return Err("Güvenlik: yol '..' bileşeni içeremez".into());
+    }
     if abs.exists() {
         let c = abs.canonicalize().map_err(|e| format!("yol çözülemedi: {}", e))?;
         if c.starts_with(&root_c) {

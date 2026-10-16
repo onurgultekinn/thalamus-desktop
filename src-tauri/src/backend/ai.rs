@@ -72,6 +72,25 @@ fn provider_url(provider: &str, base_url: Option<&str>) -> Result<String, String
     }
 }
 
+/// G2: URL'in OTORİTE (host) kısmını ayrıştırıp yalnızca gerçek loopback
+/// adreslerini yerel sayar. Eski `url.contains("localhost")` kontrolü
+/// `https://evil.com/?x=localhost` gibi URL'leri yerel sanıp API anahtarı
+/// zorunluluğunu atlıyordu.
+fn is_local_endpoint(url: &str) -> bool {
+    let rest = url.split("://").nth(1).unwrap_or(url);
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    // Host başlığında userinfo meşru değil; URL'de varsa anormal say, reddet.
+    if authority.contains('@') {
+        return false;
+    }
+    let host = if let Some(stripped) = authority.strip_prefix('[') {
+        stripped.split(']').next().unwrap_or("")
+    } else {
+        authority.split(':').next().unwrap_or(authority)
+    };
+    matches!(host.to_ascii_lowercase().as_str(), "localhost" | "127.0.0.1" | "::1")
+}
+
 /// Kod bağlamı: gövde yerine ŞEMA gönderilir (bağlam tasarrufu);
 /// gövde `get_code_body` aracıyla istenir. Düzenlemeler aider tarzı
 /// SEARCH/REPLACE blokları olarak beklenir.
@@ -256,7 +275,7 @@ pub async fn ai_chat(
         .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, e))?;
     // Local endpoint'ler (Ollama, LM Studio…) anahtarsız kullanılabilir;
     // bulut sağlayıcılar için anahtar zorunludur.
-    let is_local_base = url.contains("localhost") || url.contains("127.0.0.1");
+    let is_local_base = is_local_endpoint(&url);
     if req.api_key.trim().is_empty() && !is_local_base {
         return Err((axum::http::StatusCode::BAD_REQUEST, "api_key gerekli".into()));
     }
@@ -338,6 +357,19 @@ pub async fn ai_chat(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn is_local_endpoint_only_accepts_real_loopback() {
+        assert!(is_local_endpoint("http://localhost:11434/v1/chat/completions"));
+        assert!(is_local_endpoint("http://127.0.0.1:1234/v1/chat/completions"));
+        assert!(is_local_endpoint("http://[::1]:8000/v1/chat/completions"));
+        // Eski substring hatası: bu URL'ler YEREL sayılmamalı.
+        assert!(!is_local_endpoint("https://evil.com/?x=localhost"));
+        assert!(!is_local_endpoint("https://evil.com/localhost/v1/chat/completions"));
+        assert!(!is_local_endpoint("https://api.openai.com/v1/chat/completions"));
+        assert!(!is_local_endpoint("http://localhost.evil.com/v1"));
+        assert!(!is_local_endpoint("http://attacker@127.0.0.1:11434/v1"));
+    }
 
     /// Sıralı yanıtları oynatan sahte taşıma; istek gövdelerini de kaydeder.
     struct FakeTransport {
