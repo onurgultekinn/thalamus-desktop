@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
 import { X } from 'lucide-react';
-import { wikiUrlFor } from '../lib/errors';
+import { wikiUrlFor, splitExplanation } from '../lib/errors';
 
 export type ToastType = 'success' | 'error' | 'info';
 
@@ -31,15 +31,12 @@ const restOf = (detail?: string): string | undefined => {
 };
 
 /**
- * Explanations are written as "what happened. What to do." — the second part is
- * the actionable instruction. Split it so the toast can show the cause and the
- * action as two visually distinct lines.
+ * Explanations are "what happened. What to do." — the first sentence usually
+ * restates the title, so only the actionable tail is rendered.
  */
 const splitMessage = (message?: string): { cause?: string; action?: string } => {
-  if (!message) return {};
-  const parts = message.split(/(?<=[.!?])\s+/);
-  if (parts.length < 2) return { cause: message };
-  return { cause: parts[0], action: parts.slice(1).join(' ') };
+  const { cause, rest } = splitExplanation(message);
+  return { cause, action: rest };
 };
 
 /** Single accent per type; everything else stays neutral. */
@@ -113,16 +110,12 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                 </button>
               </div>
 
-              {/* Ne oldu: sakin, okunur gri ton; başlıktan küçük ve bir ton soluk. */}
-              {cause && (
-                <span className="text-[11.5px] text-[#BDB8AF] leading-[18px] tracking-[-0.01em]">{cause}</span>
-              )}
-
-              {/* Ne yapmalısın: girintili, aksan yaylı aksiyon satırı - göz ilk buraya gider. */}
-              {action && (
-                <span className="flex items-start gap-1.5 text-[12px] leading-[18px] tracking-[-0.01em] text-[#E9E5DD]">
-                  <span className="flex-shrink-0" style={{ color: accent }}>→</span>
-                  <span className="flex-1 min-w-0">{action}</span>
+              {/* Baslik zaten "ne oldu"yu soyluyor: tekrar eden ilk cumle (cause)
+                  atilir, yalniz aksiyon/aciklama satiri kalir. Aksiyon yoksa
+                  mesajin tamami gosterilir. */}
+              {(action ?? (cause ? cause : undefined)) && (
+                <span className="text-[11.5px] text-[#C6C1B8] leading-[18px] tracking-[-0.01em]">
+                  {action ?? cause}
                 </span>
               )}
 

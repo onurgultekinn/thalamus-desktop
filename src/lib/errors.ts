@@ -52,6 +52,19 @@ export function wikiUrlFor(code: string): string | null {
   return `${WIKI_BASE_URL}${code}`;
 }
 
+/**
+ * Explanations are written as "what happened. What to do.". The first sentence
+ * usually restates the toast/chat TITLE, so the UI drops it and keeps only the
+ * actionable part. If there is no second sentence, the whole text is returned
+ * as `rest` so no information is lost.
+ */
+export function splitExplanation(message?: string): { cause?: string; rest?: string } {
+  if (!message) return {};
+  const parts = message.split(/(?<=[.!?])\s+/);
+  if (parts.length < 2) return { cause: message };
+  return { cause: parts[0], rest: parts.slice(1).join(' ') };
+}
+
 const trimDetail = (s: string, max = 200): string => s.replace(/\s+/g, ' ').trim().slice(0, max);
 
 /**

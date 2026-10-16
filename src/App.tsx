@@ -17,7 +17,7 @@ import { aiChat, userMessage, getActiveProvider } from './services/aiClient';
 import { DEFAULT_MODEL_NAME, MODEL_PRICING } from './constants';
 import { getWorkspaceName, getWorkspaceRoot, openProject, pruneRecentProjects, rememberProject } from './lib/workspace';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
-import { explainError } from './lib/errors';
+import { explainError, splitExplanation } from './lib/errors';
 import type { Message, ChatItem, User } from './types';
 export type { Message, MessageMetrics, ChatItem } from './types';
 import './App.css';
@@ -482,10 +482,11 @@ export default function App() {
           }]);
         } else {
           const x = explainError(err, 'Vision request');
-          // Ham JSON dump gösterilmez: kod + başlık + açıklama + wiki yeter.
+          // Ham JSON dump gosterilmez. Baslik "ne oldu"yu soyler; tekrar eden
+          // ilk cumle atilir, yalniz aksiyon/aciklama satiri kalir.
           applyMessages(prev => [...prev, {
             role: 'assistant',
-            content: `**[${x.code}] ${x.title}**\n\n${x.explanation}\n\n*For more info, check the wiki · ${x.code}*`,
+            content: `**[${x.code}] ${x.title}**\n\n${splitExplanation(x.explanation).rest ?? x.explanation}\n\n*For more info, check the wiki · ${x.code}*`,
             timestamp: ts(),
             modelName: 'Vision model (request failed)',
           }]);
@@ -551,11 +552,11 @@ export default function App() {
           }]);
         } else {
           const x = explainError(err, 'Assistant request');
-          // Sohbet balonu zaten hatayı gösteriyor: ayrıca toast açmak çift
-          // mesaj olurdu. Toast yalnız sohbet dışı işlemler için kalır.
+          // Sohbet balonu zaten hatayi gosteriyor: ayrica toast acmak cift
+          // mesaj olurdu. Baslik + aksiyon; tekrar eden ilk cumle atilir.
           applyMessages(prev => [...prev, {
             role: 'assistant',
-            content: `**[${x.code}] ${x.title}**\n\n${x.explanation}\n\n*For more info, check the wiki · ${x.code}*`,
+            content: `**[${x.code}] ${x.title}**\n\n${splitExplanation(x.explanation).rest ?? x.explanation}\n\n*For more info, check the wiki · ${x.code}*`,
             timestamp: ts(),
             modelName: LOCAL_ENGINE_STAMP,
           }]);
