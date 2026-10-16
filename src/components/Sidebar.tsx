@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { 
   Plus, 
   MessageSquare, 
+  Folder,
   FolderOpen,
   Settings, 
   ChevronLeft, 
@@ -326,7 +327,20 @@ export function Sidebar({
                   title={project.root}
                   className="flex-1 min-w-0 flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer text-left"
                 >
-                  <FolderOpen size={13} className={`flex-shrink-0 ${isActive ? 'text-[#dcb67a]' : 'opacity-60'}`} />
+                  {/* Aktif proje: acik klasor + pop animasyonu. Digerleri: kapali klasor. */}
+                  {isActive ? (
+                    <FolderOpen
+                      key={`open-${project.root}`}
+                      size={13}
+                      className="flex-shrink-0 text-[#dcb67a] folder-pop"
+                    />
+                  ) : (
+                    <Folder
+                      key={`closed-${project.root}`}
+                      size={13}
+                      className="flex-shrink-0 opacity-50"
+                    />
+                  )}
                   <span className="truncate text-[11.5px]">{project.name}</span>
                 </button>
                 <button

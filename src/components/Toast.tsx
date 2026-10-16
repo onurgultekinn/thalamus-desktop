@@ -25,10 +25,6 @@ const codeOf = (detail?: string): string | null => {
   const m = detail?.match(/^\[(\w+)\]\s*([\s\S]*)$/);
   return m ? m[1] : null;
 };
-const restOf = (detail?: string): string | undefined => {
-  const m = detail?.match(/^\[\w+\]\s*([\s\S]*)$/);
-  return m ? m[1] : detail;
-};
 
 /**
  * Explanations are "what happened. What to do." — the first sentence usually
@@ -77,7 +73,6 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         {toasts.map(toast => {
           const accent = ACCENT[toast.type];
           const code = codeOf(toast.detail);
-          const bodyDetail = restOf(toast.detail);
           const { cause, action } = splitMessage(toast.message);
           return (
             <div
@@ -127,15 +122,11 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-[10px] font-mono leading-[15px] mt-0.5 pt-1.5 border-t border-[#2E2C29] text-[#8A867E] hover:text-[#CFCAC2] hover:underline cursor-pointer w-fit"
-                    title={bodyDetail ? `${bodyDetail}\nFor more info, check the wiki (${code})` : `For more info, check the wiki (${code})`}
                   >
                     For more info, check the wiki ↗
                   </a>
                 ) : (
-                  <span
-                    className="text-[10px] text-[#7E7A73] font-mono leading-[15px] mt-0.5 pt-1.5 border-t border-[#2E2C29] cursor-help w-fit"
-                    title={bodyDetail ? `${bodyDetail}\nFor more info, check the wiki (${code}) — not published yet` : `For more info, check the wiki (${code}) — not published yet`}
-                  >
+                  <span className="text-[10px] text-[#7E7A73] font-mono leading-[15px] mt-0.5 pt-1.5 border-t border-[#2E2C29] w-fit">
                     For more info, check the wiki
                   </span>
                 )
