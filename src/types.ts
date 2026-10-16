@@ -1,6 +1,8 @@
 // Shared application types — App and components import from here
 // (the duplicate Message definition in App.tsx and ThalamusCopilot.tsx was unified).
 
+import type { AttachedImage } from './lib/imageAttach';
+
 export interface MessageMetrics {
   originalTokens: number;
   compressedTokens: number;
@@ -25,6 +27,12 @@ export interface Message {
   originalCodeSnippet?: string;
   compressedCodeSnippet?: string;
   metrics?: MessageMetrics;
+  /**
+   * Vision attachments for this user message (kept so Regenerate can re-send
+   * them). Session-only: stripped before writing to localStorage — data URLs
+   * would blow the 5 MB quota — so a reloaded chat cannot regenerate vision.
+   */
+  images?: AttachedImage[];
 }
 
 export interface ChatItem {

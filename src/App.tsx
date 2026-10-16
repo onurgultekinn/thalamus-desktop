@@ -216,9 +216,12 @@ export default function App() {
   // crashing the app — localStorage's 5 MB limit is a real boundary.
   useEffect(() => {
     if (activeChatId && messages.length > 0) {
-      const toStore = messages.length > MAX_STORED_MESSAGES
-        ? messages.slice(-MAX_STORED_MESSAGES)
-        : messages;
+      const toStore = (
+        messages.length > MAX_STORED_MESSAGES ? messages.slice(-MAX_STORED_MESSAGES) : messages
+      // Görseller (data URL'ler) kalıcı depoya gitmez — 5 MB kota rekoru
+      // (Storage Full) sohbet kaydını komple öldürür. Regenerate görselleri
+      // yalnızca aynı oturum içi Bellek üzerinde çalışır.
+      ).map(m => (m.images ? { ...m, images: undefined } : m));
       try {
         localStorage.setItem(`thalamus_chat_messages_${activeChatId}`, JSON.stringify(toStore));
       } catch {
@@ -307,7 +310,11 @@ export default function App() {
     }
   }, [messages, currentView]);
 
-  const handleSendMessage = async (userText: string, isRegenerate = false) => {
+  const handleSendMessage = async (
+    userText: string,
+    isRegenerate = false,
+    imagesFromRegenerate?: AttachedImage[]
+  ) => {
     const nowTime = ts();
     let currentId = activeChatId;
 
@@ -335,13 +342,19 @@ export default function App() {
     // D8: birim fiyatlar kabaca degerlerdir; maliyet tahminidir, makbuz degil.
     const userCost = '≈$' + (approxTokens * unitPrice).toFixed(6);
 
+    // Regenerate, mesaj üzerinde saklanan görselleri yeniden kullanır; aksi
+    // halde pendingImages ilk gönderimde silinmiş olduğundan regenerate sessizce
+    // metin-sıkıştırma yoluna düşüyordu.
+    const activeImages = pendingImages.length > 0 ? pendingImages : (imagesFromRegenerate ?? []);
+
     // D1: kim isledi rozeti — metin yerel motorda, görsel seçili sağlayıcıda.
-    const pipelineStamp = pendingImages.length > 0 ? 'Vision model' : LOCAL_ENGINE_STAMP;
+    const pipelineStamp = activeImages.length > 0 ? 'Vision model' : LOCAL_ENGINE_STAMP;
     const userMsg: Message = {
       role: 'user',
-      content: userText.trim() || (pendingImages.length ? `[${pendingImages.length} image${pendingImages.length > 1 ? 's' : ''}]` : userText),
+      content: userText.trim() || (activeImages.length ? `[${activeImages.length} image${activeImages.length > 1 ? 's' : ''}]` : userText),
       timestamp: nowTime,
       modelName: pipelineStamp,
+      ...(activeImages.length > 0 ? { images: activeImages } : {}),
       metrics: {
         originalTokens: approxTokens,
         compressedTokens: approxTokens,
@@ -376,9 +389,11 @@ export default function App() {
 
     // Images attached → a single vision call. This is the only branch that uses
     // a model, so text-only chats stay on the local, zero-model path below.
-    if (pendingImages.length > 0) {
-      const images = pendingImages;
-      setPendingImages([]);
+    if (activeImages.length > 0) {
+      const images = activeImages;
+      // Sadece taze eklenen görseller içeride temizlenir; regenerate görselleri
+      // mesaj üzerinde zaten durur.
+      if (pendingImages.length > 0) setPendingImages([]);
       try {
         const provider = await getActiveProvider();
         if (!provider) {
@@ -527,15 +542,17 @@ export default function App() {
   const handleRegenerate = async (assistantIdx: number) => {
     if (loading || engineLoading) return;
     let userText = "";
+    let userImages: AttachedImage[] | undefined;
     for (let i = assistantIdx - 1; i >= 0; i--) {
       if (messages[i].role === 'user') {
         userText = messages[i].content;
+        userImages = messages[i].images;
         break;
       }
     }
-    if (!userText) return;
+    if (!userText && !userImages) return;
     setMessages(prev => prev.slice(0, assistantIdx));
-    await handleSendMessage(userText, true);
+    await handleSendMessage(userText, true, userImages);
   };
 
   // Remember the configured workspace so it shows up in the projects list.
