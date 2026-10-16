@@ -460,7 +460,12 @@ export function Sidebar({
                   }`}
                   title={chat.title}
                 >
-                  <MessageSquare size={13} className={`flex-shrink-0 ${isActive ? 'text-obsidian-text' : 'opacity-60'}`} />
+                  {/* Aktif sohbet: pop animasyonlu ikon. Digerleri: sade, soluk. */}
+                  {isActive ? (
+                    <MessageSquare key={`chat-open-${chat.id}`} size={13} className="flex-shrink-0 text-[#C6C0B2] chat-pop" />
+                  ) : (
+                    <MessageSquare size={13} className="flex-shrink-0 opacity-50" />
+                  )}
                   {isOpen && <span className="truncate text-[11.5px]">{chat.title}</span>}
                 </button>
                 
