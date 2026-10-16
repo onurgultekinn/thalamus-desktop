@@ -266,7 +266,7 @@ export default function App() {
             JSON.stringify(toStore.slice(-50))
           );
         } catch {
-          showToast('Storage Full', 'Chat history could not be saved — storage quota exceeded.', 'error');
+          showToast('Storage Full', 'Chat history could not be saved — storage quota exceeded.', 'error', undefined, '[TL-021] localStorage quota exceeded');
         }
       }
     }
@@ -484,7 +484,7 @@ export default function App() {
           const x = explainError(err, 'Vision request');
           applyMessages(prev => [...prev, {
             role: 'assistant',
-            content: `⚠️ **${x.title}**\n\n${x.explanation}${x.detail ? `\n\n${x.detail}` : ''}`,
+            content: `⚠️ **[${x.code}] ${x.title}**\n\n${x.explanation}${x.detail ? `\n\n${x.detail}` : ''}`,
             timestamp: ts(),
             modelName: 'Vision model (request failed)',
           }]);
@@ -552,11 +552,11 @@ export default function App() {
         const x = explainError(err, 'Assistant request');
         applyMessages(prev => [...prev, {
           role: 'assistant',
-          content: `⚠️ **${x.title}**\n\n${x.explanation}${x.detail ? `\n\n${x.detail}` : ''}`,
+          content: `⚠️ **[${x.code}] ${x.title}**\n\n${x.explanation}${x.detail ? `\n\n${x.detail}` : ''}`,
           timestamp: ts(),
           modelName: LOCAL_ENGINE_STAMP,
         }]);
-        showToast(x.title, x.explanation, 'error', undefined, x.detail);
+        showToast(x.title, x.explanation, 'error', undefined, `[${x.code}] ${x.detail ?? x.explanation}`);
       }
     } finally {
       setLoading(false);
@@ -622,7 +622,7 @@ export default function App() {
         `"${root}" could not be opened and was removed from the recent list. ${openErr.explanation}`,
         'error',
         undefined,
-        openErr.detail
+        `[${openErr.code}] ${openErr.detail ?? openErr.explanation}`
       );
       setWorkspaceVersion(v => v + 1);
       return;
