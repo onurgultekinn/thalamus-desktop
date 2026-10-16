@@ -239,8 +239,20 @@ export default function App() {
     const savedMsg = localStorage.getItem(`thalamus_chat_messages_${activeChatId}`);
     if (savedMsg) {
       try {
+        const t0 = performance.now();
+        const parsed = JSON.parse(savedMsg) as Message[];
+        if (import.meta.env.DEV) {
+          const total = parsed.reduce((s, m) => s + (m.content?.length ?? 0), 0);
+          const biggest = parsed.reduce((b, m, i) => (m.content && m.content.length > b.len ? { len: m.content.length, i } : b), { len: 0, i: -1 });
+          const heavy = parsed
+            .map((m, i) => ({ i, len: m.content?.length ?? 0, imgs: m.images?.length ?? 0 }))
+            .filter((m) => m.len > 20000 || m.imgs > 0)
+            .map((m) => `#${m.i} ${Math.round(m.len / 1024)}KB${m.imgs ? ` +${m.imgs} img` : ''}`)
+            .join(', ');
+          console.log(`[perf] loaded chat: ${parsed.length} msgs, ${Math.round(total / 1024)}KB total, biggest #${biggest.i} ${Math.round(biggest.len / 1024)}KB, parse ${Math.round(performance.now() - t0)}ms${heavy ? ` | heavy: ${heavy}` : ''}`);
+        }
         loadedChatRef.current = activeChatId;
-        setMessages(JSON.parse(savedMsg));
+        setMessages(parsed);
       } catch {
         setMessages(getDefaultMessages());
       }
