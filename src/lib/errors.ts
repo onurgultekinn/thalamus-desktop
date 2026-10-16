@@ -69,14 +69,14 @@ export function explainError(err: unknown, context?: string): ExplainedError {
     if (status === 429) {
       return {
         title: 'Too many requests',
-        explanation: 'The provider rate-limited or charged-limit hit. Wait a moment and try again.',
+        explanation: 'The provider hit a rate or usage limit. Wait a moment and try again.',
         detail: body,
       };
     }
     if (status >= 500) {
       return {
         title: 'Provider error',
-        explanation: `The provider is temporarily unavailable (HTTP ${status}). It is usually a spot outage of the server — try again in a moment.`,
+        explanation: `The provider is temporarily unavailable (HTTP ${status}). It is usually a temporary server-side issue — try again in a moment.`,
         detail: body,
       };
     }
