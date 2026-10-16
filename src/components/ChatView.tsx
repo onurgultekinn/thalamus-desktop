@@ -216,9 +216,13 @@ export function ChatView({
 
                   <div className="msg-metrics">
                     <span>
+                      {/* T7: her tahmin '≈' taşır; görsel mesajlar ek'teki ölçülmüş
+                          estTokens'i toplar — '[1 image] = 1 tokens' yalanı gitti. */}
                       {msg.metrics?.compressedTokens
                         ? `${msg.metrics.compressedTokens} tokens`
-                        : `${Math.ceil(msg.content.length / 4)} tokens`}
+                        : msg.images?.length
+                          ? `≈${msg.images.reduce((s, i) => s + i.estTokens, 0) + (typeof msg.content === 'string' ? Math.ceil(msg.content.length / 4) : 0)} tokens (image est.)`
+                          : `≈${Math.ceil(msg.content.length / 4)} tokens`}
                     </span>
                     {onlinePricing && (
                       <>
