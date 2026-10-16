@@ -753,11 +753,20 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
 
     // V1 (C-dizi): bosluklu/yol tureten isimler komutu kirmasın diye tırnakla.
     const quoted = `"${activeTab.replace(/"/g, '\\"')}"`;
+    const isScript = activeTab.endsWith('.py') || activeTab.endsWith('.rs');
     const cmd = activeTab.endsWith('.py')
       ? `python ${quoted}`
       : activeTab.endsWith('.rs')
         ? `cargo run`
         : `Get-Content ${quoted}`;
+
+    // Çalıştırma dürüstlüğü: script olmayan dosya "çalıştırılmaz", içeriği
+    // ekrana basılır — kullanıcıya önceden söyle + komutu onayla.
+    if (!isScript) {
+      if (!window.confirm(
+        `"${activeTab}" is not a runnable script (.py/.rs). Its CONTENTS will be printed instead of running.\n\nCommand: ${cmd}\n\nProceed?`
+      )) return;
+    } else if (!window.confirm(`Run "${activeTab}"?\n\nCommand: ${cmd}`)) return;
 
     // Calisma gercekten gorulebilsin: terminal katlamaysa ac, sonra yaz.
     // (Katli terminalde gonderilen komut gorunmez "sessiz islem" olurdu.)
@@ -1348,18 +1357,20 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
     </div>
   )}
 
-  {/* Panel content */}
-  {isCopilotOpen && (
-    <div className="flex-1 flex flex-col min-h-0">
-      <ThalamusCopilot 
-        activeFile={activeTab}
-        activeFileCode={currentCode}
-        workspaceFiles={collectFilePaths(fileTree)}
-        onApplyCode={handleApplyCode}
-        onOpenTerminal={() => setIsTerminalOpen(true)}
-      />
-    </div>
-  )}
+  {/* Panel content — M2-tarzı: katlama unmount DEĞİL; sohbet + undo +
+      pending editler katlayıp açarken yaşar kalır. */}
+  <div 
+    className="flex-1 flex flex-col min-h-0"
+    style={{ display: isCopilotOpen ? 'flex' : 'none', visibility: isCopilotOpen ? 'visible' : 'hidden' }}
+  >
+    <ThalamusCopilot 
+      activeFile={activeTab}
+      activeFileCode={currentCode}
+      workspaceFiles={collectFilePaths(fileTree)}
+      onApplyCode={handleApplyCode}
+      onOpenTerminal={() => setIsTerminalOpen(true)}
+    />
+  </div>
 </div>
 
     </div>

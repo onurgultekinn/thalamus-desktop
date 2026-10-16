@@ -338,10 +338,17 @@ export default function App() {
   };
 
 // Optimized scroll: only in 'chat' view, with instant (auto) scrolling
+  // Otomatik scroll: nur yukarıda okurken her yeni mesaj kullanıcıyı alta
+  // fırlatmayı durdurur — yalnızca alt bölgeye (±140px) yakınsak kaydırırız.
   useEffect(() => {
-    if (chatEndRef.current && currentView === 'chat') {
+    if (!chatEndRef.current || currentView !== 'chat') return;
+    const container = chatEndRef.current.closest('[data-chat-scroll]') as HTMLElement | null;
+    if (!container) {
       chatEndRef.current.scrollIntoView({ behavior: 'auto' });
+      return;
     }
+    const distFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    if (distFromBottom < 140) container.scrollTop = container.scrollHeight;
   }, [messages, currentView]);
 
   const handleSendMessage = async (
@@ -647,7 +654,7 @@ export default function App() {
         <main className="main-content">
           {currentView === 'chat' && (
             <div className="chat-layout" style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-              <div className="message-list" style={{ flex: 1, overflowY: 'auto' }}>
+              <div className="message-list" data-chat-scroll style={{ flex: 1, overflowY: 'auto' }}>
                 <ChatView
                   messages={messages}
                   loading={loading}
@@ -665,6 +672,12 @@ export default function App() {
                   onEngineDiagnostic={handleEngineDiagnostic}
                   onRegenerate={handleRegenerate}
                   onInspectDiff={(msg) => {
+                    // Silinen/olmayan sohbetten gelen eski mesajda İncele artık
+                    // ölü veriyle diff açmaz — dürüst mesaj görüntülenir.
+                    if (!chats.some(c => c.id === activeChatId)) {
+                      showToast('Sohbet Yok', 'Bu mesaj artık bir sohbete bağlı değil — İncele açılamaz.', 'info');
+                      return;
+                    }
                     setSelectedDiffData({
                       originalCode: msg.originalCodeSnippet || msg.content,
                       optimizedCode: msg.compressedCodeSnippet || '',
