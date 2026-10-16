@@ -14,7 +14,9 @@ import {
   ChevronLeft,
   MessageSquare,
   Save,
-  Trash2
+  Trash2,
+  Pencil,
+  Search as SearchIcon
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { SyntaxHighlighter, vscDarkPlus } from '../lib/codeHighlight';
@@ -72,6 +74,19 @@ const collectFilePaths = (nodes: FileNode[]): string[] =>
   nodes.flatMap(node =>
     node.isFolder ? (node.children ? collectFilePaths(node.children) : []) : [node.id]
   );
+
+/** F5: ağaç adına göre filtreleme — klasörler altında eşleşme varsa otomatik açık. */
+const filterTree = (nodes: FileNode[], q: string): FileNode[] => {
+  if (!q.trim()) return nodes;
+  const query = q.trim().toLowerCase();
+  return nodes.flatMap(node => {
+    if (!node.isFolder) return node.name.toLowerCase().includes(query) ? [node] : [];
+    const children = node.children ? filterTree(node.children, q) : [];
+    return children.length > 0 || node.name.toLowerCase().includes(query)
+      ? [{ ...node, isOpen: true, children }]
+      : [];
+  });
+};
 
 interface ProjectDashboardProps {
   activeTab: string;
@@ -306,6 +321,8 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
 
   const [creationMode, setCreationMode] = useState<'file' | 'folder' | null>(null);
   const [newItemName, setNewItemName] = useState<string>('');
+  // F5: gezgin arama filtresi (boşken tüm ağaç).
+  const [treeSearch, setTreeSearch] = useState<string>('');
 
   // DRAG STATES
   const [draggedNode, setDraggedNode] = useState<FileNode | null>(null);
@@ -528,13 +545,9 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
       if (targetNodeId !== targetPath) {
         // If a whole folder moved, remap every open tab and the active file
         // beneath it so saves keep pointing at the real (moved) file.
-        const remapPath = (p: string, from: string, to: string): string => {
-          if (p === from) return to;
-          if (p.startsWith(from + '/')) return to + p.slice(from.length);
-          return p;
-        };
-        setOpenTabs(prev => prev.map(t => remapPath(t, targetNodeId, targetPath)));
-        setActiveTab(remapPath(activeTab, targetNodeId, targetPath));
+        // F5: content buffers + dirty buffers de yeniden eslenir — eski
+        // davranista tasinan kirli dosyanin tamponu sizintili olarak duseyordu.
+        remapPathKeys(targetNodeId, targetPath);
       }
     } catch (err) {
       console.error('Move error:', err);
@@ -542,6 +555,60 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
     }
 
     setPendingMove(null);
+  };
+
+  /** F5: tasima/yeniden adlandirmada path-key'li tum durum tasimalari. */
+  const remapPathKeys = (from: string, to: string) => {
+    const remapPath = (p: string): string => {
+      if (p === from) return to;
+      if (p.startsWith(from + '/')) return to + p.slice(from.length);
+      return p;
+    };
+    setOpenTabs(prev => prev.map(remapPath));
+    setActiveTab(remapPath(activeTab));
+    setFileContents(prev => {
+      const next: Record<string, string> = {};
+      for (const [k, v] of Object.entries(prev)) next[remapPath(k)] = v;
+      return next;
+    });
+    setSavedContents(prev => {
+      const next: Record<string, string> = {};
+      for (const [k, v] of Object.entries(prev)) next[remapPath(k)] = v;
+      return next;
+    });
+    try {
+      const map: Record<string, string> = JSON.parse(localStorage.getItem(DIRTY_BUFFER_KEY) || '{}');
+      const next: Record<string, string> = {};
+      for (const [k, v] of Object.entries(map)) next[remapPath(k)] = v;
+      localStorage.setItem(DIRTY_BUFFER_KEY, JSON.stringify(next));
+    } catch {}
+  };
+
+  /** F5: aktif dosyayi yeniden adlandirir (move_entry, birebir ayni dizinde). */
+  const handleRenameActiveFile = async () => {
+    if (!activeTab || !activeNode) {
+      showToast('Nothing to rename', 'Open a file from the explorer first.', 'info');
+      return;
+    }
+    const raw = window.prompt(`Rename "${activeNode.name}"`, activeNode.name);
+    const newName = raw?.trim();
+    if (!newName || newName === activeNode.name) return;
+    // Windows dosya adında geçersiz karakterler — diske gitmeden oyundur.
+    if (/[\\/:*?"<>|]/.test(newName)) {
+      showToast('Invalid name', 'Name contains characters Windows does not allow (\\ / : * ? " < > |).', 'error');
+      return;
+    }
+    const parent = activeTab.includes('/') ? activeTab.slice(0, activeTab.lastIndexOf('/')) : '';
+    const newPath = parent ? `${parent}/${newName}` : newName;
+    try {
+      await invoke('move_entry', { from: activeTab, to: newPath });
+      await loadTree();
+      remapPathKeys(activeTab, newPath);
+      showToast('File Renamed', `${activeNode.name} → ${newName}`, 'success');
+    } catch (err) {
+      console.error('Rename error:', err);
+      showToast('Rename Error', `Could not rename ${activeTab}.`, 'error');
+    }
   };
 
   const handleCloseTab = (e: React.MouseEvent, fileName: string) => {
@@ -695,10 +762,18 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
         e.preventDefault();
         handleSaveActiveFile();
       }
+      // F5: Ctrl+R — aktif dosyayı çalıştır (sekmeli görünümde tarayıcı
+      // yenilemesine dönüşmesin).
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'r' || e.key === 'R')) {
+        e.preventDefault();
+        if (activeTab && activeNode) handleRunActiveFile();
+        else showToast('Nothing to run', 'Open a file from the explorer first.', 'info');
+      }
     };
     window.addEventListener('keydown', handleKeyDownGlobal);
     return () => window.removeEventListener('keydown', handleKeyDownGlobal);
-  }, [activeTab, fileContents]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, fileContents, activeNode]);
 
   const handleEditorKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Tab') {
@@ -865,6 +940,18 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
             data-root-zone="true"
             className="p-1 flex flex-col gap-0.5 flex-1 overflow-y-auto pretty-scrollbar"
           >
+            <div className="px-1 pb-1 flex items-center gap-1 border-b border-[#34332F]/50 pb-1.5 mb-0.5">
+              <SearchIcon size={11} className="text-[#87857F] flex-shrink-0" />
+              <input
+                type="text"
+                value={treeSearch}
+                onChange={(e) => setTreeSearch(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Escape') setTreeSearch(''); }}
+                placeholder="Search files…"
+                className="w-full bg-[#100F0F] border border-[#34332F] focus:border-[#4385BE]/60 text-[#F2F0E5] font-mono text-[10.5px] px-1.5 py-0.5 rounded outline-none placeholder-[#575654]"
+                spellCheck={false}
+              />
+            </div>
             {creationMode && (
               <form onSubmit={handleCreateItem} className="px-1 py-0.5 flex items-center gap-1">
                 {creationMode === 'folder' ? (
@@ -889,7 +976,7 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
               </form>
             )}
 
-            {rootExpanded && renderTreeNodes(fileTree)}
+            {rootExpanded && renderTreeNodes(filterTree(fileTree, treeSearch))}
           </div>
         </div>
 
@@ -952,6 +1039,16 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
           <span>{workspaceName}</span>
           <ChevronRight size={12} />
           <span className="text-[#CECDC3] font-medium flex-1 truncate">{activeTab}</span>
+          {!noFileOpen && (
+            <button
+              type="button"
+              onClick={handleRenameActiveFile}
+              className="p-0.5 rounded text-[#87857F] hover:text-[#4385BE] hover:bg-[#282726] cursor-pointer transition-colors flex-shrink-0"
+              title="Rename active file"
+            >
+              <Pencil size={12} />
+            </button>
+          )}
           {!noFileOpen && (
             <button
               type="button"
