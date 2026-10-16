@@ -199,12 +199,15 @@ export function ThalamusCopilot({
   /** Has the AI interpret the camera measurements (with the error-reducing protocol). */
   const runCameraInterpret = async (prompt: string) => {
     setCameraOpen(false);
-    setMessages(prev => [...prev, { id: newId(), sender: 'ai', text: 'Camera interpretation requested…', timestamp: ts(), modeUsed: 'chat' }]);
+    // Placeholder kimliğiyle güncellenir — kullanıcının görünüşün arasında
+    // başka mesaja geçtiğinde 'son mesaj' yanıltıcıydı.
+    const placeholderId = newId();
+    setMessages(prev => [...prev, { id: placeholderId, sender: 'ai', text: 'Camera interpretation requested…', timestamp: ts(), modeUsed: 'chat' }]);
     try {
       const res = await callRealAI(prompt);
-      setMessages(prev => [...prev.slice(0, -1), { id: newId(), sender: 'ai', text: res.content, timestamp: ts(), modeUsed: 'chat' }]);
+      setMessages(prev => prev.map(m => m.id === placeholderId ? { ...m, text: res.content } : m));
     } catch (err) {
-      setMessages(prev => [...prev.slice(0, -1), { id: newId(), sender: 'ai', text: `Could not get interpretation: ${err instanceof Error ? err.message : String(err)}`, timestamp: ts(), modeUsed: 'chat' }]);
+      setMessages(prev => prev.map(m => m.id === placeholderId ? { ...m, text: `Could not get interpretation: ${err instanceof Error ? err.message : String(err)}` } : m));
     }
   };
 
@@ -360,8 +363,17 @@ export function ThalamusCopilot({
         const codeBlockRegex = /```[a-zA-Z]*\n([\s\S]*?)```/;
         const match = explanation.match(codeBlockRegex);
         if (match && match[1]) {
-          codeSnippet = match[1].trim();
-          explanation = explanation.replace(codeBlockRegex, "").trim();
+          const raw = match[1].trim();
+          const isSearchReplace =
+            /<{3,}\s*SEARCH/.test(raw) && /={3,}/.test(raw) && /[{>]}{3,}\s*REPLACE/.test(raw);
+          if (isSearchReplace) {
+            // SEARCH/REPLACE bloğu tam-dosya değildir; "Apply" bunu dosyaya
+            // yapıştırdığında marker'lar koda sızmıştı. Bloğu açıkalamada bırak,
+            // Apply düğmesi üretime.
+          } else {
+            codeSnippet = raw;
+            explanation = explanation.replace(codeBlockRegex, "").trim();
+          }
         }
 
         const applied = (res.edits || []).filter(e => e.applied && e.new_body);
