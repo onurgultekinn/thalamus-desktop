@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
-import { CheckCircle2, AlertTriangle, Info, X, BookOpen } from 'lucide-react';
+import { X } from 'lucide-react';
 
 export type ToastType = 'success' | 'error' | 'info';
 
@@ -19,7 +19,7 @@ interface ToastContextValue {
 
 const ToastContext = createContext<ToastContextValue | null>(null);
 
-/** Status-code lookups for the mono code slot (error toasts only). */
+/** Error code lookup: the detail string starts with `[401] raw…`. */
 const codeOf = (detail?: string): string | null => {
   const m = detail?.match(/^\[(\w+)\]\s*([\s\S]*)$/);
   return m ? m[1] : null;
@@ -29,10 +29,10 @@ const restOf = (detail?: string): string | undefined => {
   return m ? m[1] : detail;
 };
 
-/** Aşırı renk yok: tüm toasts aynı zemin/çerçeve, alt çizgide tek nüans rengi. */
+/** Single accent per type; everything else stays neutral. */
 const ACCENT: Record<ToastType, string> = {
   success: '#8F9D77',
-  error: '#D4776C',
+  error: '#C97F73',
   info: '#7D8BA6',
 };
 
@@ -71,75 +71,45 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
           return (
             <div
               key={toast.id}
-              className="pointer-events-auto relative w-full rounded bg-[#232220] border border-[#3B3935] shadow-2xl overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-200"
+              className="pointer-events-auto w-full rounded-md bg-[#201F1D] border border-[#3A3835] shadow-2xl px-3 py-2.5 flex flex-col gap-1 animate-in fade-in slide-in-from-bottom-1 duration-150"
             >
-              {/* Sol 2px tüm toasts: tek tip göstergesi — başka renkli yangın yok. */}
-              <div className="absolute left-0 top-0 bottom-0 w-[2px]" style={{ background: accent }} />
-
-              <div className="px-2.5 pl-3.5 pr-2 py-2 flex flex-col gap-1">
-                {/* Başlık satırı: [kod] başlık + X — tek satırda sıkı ve akıcı. */}
-                <div className="flex items-start gap-2">
-                  {toast.type === 'error' && code ? (
-                    <span
-                      className="font-mono text-[11px] font-bold leading-[18px] tracking-tight flex-shrink-0"
-                      style={{ color: accent }}
-                    >
-                      [{code}]
-                    </span>
-                  ) : (
-                    <span className="leading-[18px] flex-shrink-0" style={{ color: accent }}>
-                      {toast.type === 'success' ? (
-                        <CheckCircle2 size={13} className="mt-0.5" />
-                      ) : toast.type === 'error' ? (
-                        <AlertTriangle size={13} className="mt-0.5" />
-                      ) : (
-                        <Info size={13} className="mt-0.5" />
-                      )}
-                    </span>
-                  )}
-
-                  <span className="text-[12px] font-semibold tracking-tight text-[#F3F1EC] leading-[18px] flex-1 min-w-0">
-                    {toast.title}
+              <div className="flex items-baseline gap-2">
+                {toast.type === 'error' && code ? (
+                  <span className="font-mono text-[11px] font-bold tracking-tight flex-shrink-0" style={{ color: accent }}>
+                    {code}
                   </span>
-
-                  <button
-                    type="button"
-                    onClick={() => removeToast(toast.id)}
-                    className="text-[#6F6C66] hover:text-white p-0.5 rounded cursor-pointer transition-colors flex-shrink-0"
-                    aria-label="Close"
-                  >
-                    <X size={12} />
-                  </button>
-                </div>
-
-                {/* Açıklama: kısa ve öz İngilizce; kullanıcı bunu okuyarak anlar. */}
-                {toast.message && (
-                  <span className="text-[11px] text-[#B9B4AC] leading-snug">{toast.message}</span>
-                )}
-
-                {/* Ham detay: teknik payload, dim mono — isteyen tooltip'ten tam metin okur. */}
-                {bodyDetail && (
+                ) : (
                   <span
-                    className="text-[10px] text-[#6B6862] font-mono leading-snug line-clamp-2 cursor-help pt-0.5"
-                    title={bodyDetail}
-                  >
-                    {bodyDetail}
-                  </span>
+                    className="w-1.5 h-1.5 rounded-full flex-shrink-0 self-center"
+                    style={{ background: accent }}
+                  />
                 )}
 
-                {/* Wiki referansı: hala anlaşılmadıysa adres hazır. */}
-                {toast.type === 'error' && code && (
-                  <span className="flex items-center gap-1 text-[10px] text-[#6B6862] pt-0.5">
-                    <BookOpen size={9} />
-                    <span className="font-mono">wiki › {code}</span>
-                  </span>
-                )}
+                <span className="text-[12px] font-medium tracking-tight text-[#F1EFEA] leading-[18px] flex-1 min-w-0">
+                  {toast.title}
+                </span>
+
+                <button
+                  type="button"
+                  onClick={() => removeToast(toast.id)}
+                  className="text-[#6F6C66] hover:text-[#F1EFEA] cursor-pointer transition-colors flex-shrink-0 self-center"
+                  aria-label="Close"
+                >
+                  <X size={12} />
+                </button>
               </div>
 
-              <div
-                className="absolute bottom-0 left-0 h-[2px] toast-timer"
-                style={{ background: accent, animationDuration: `${toast.durationMs}ms` }}
-              />
+              {toast.message && (
+                <span className="text-[11px] text-[#ACA79F] leading-snug">{toast.message}</span>
+              )}
+
+              {(bodyDetail || (toast.type === 'error' && code)) && (
+                <span className="text-[10px] text-[#6B6862] font-mono leading-snug line-clamp-2 cursor-help pt-0.5" title={bodyDetail}>
+                  {bodyDetail}
+                  {bodyDetail && code ? ' · ' : ''}
+                  {toast.type === 'error' && code ? `wiki › ${code}` : ''}
+                </span>
+              )}
             </div>
           );
         })}

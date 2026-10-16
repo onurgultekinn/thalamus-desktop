@@ -476,20 +476,20 @@ export default function App() {
         if (kind) {
           applyMessages(prev => [...prev, {
             role: 'assistant',
-            content: kind === 'stop' ? 'Request stopped.' : '⚠️ **Request timed out** after 180 s — no response arrived.',
+            content: kind === 'stop' ? 'Request stopped.' : '**Request timed out** after 180 s — no response arrived.',
             timestamp: ts(),
             modelName: 'Vision model (request aborted)',
           }]);
-      } else {
-        const x = explainError(err, 'Assistant request');
-        applyMessages(prev => [...prev, {
-          role: 'assistant',
-          content: `⚠️ **[${x.code}] ${x.title}**\n\n${x.explanation}\n\n📖 wiki › ${x.code}`,
-          timestamp: ts(),
-          modelName: LOCAL_ENGINE_STAMP,
-        }]);
-        showToast(x.title, x.explanation, 'error', undefined, `[${x.code}] ${x.detail ?? x.explanation}`);
-      }
+        } else {
+          const x = explainError(err, 'Vision request');
+          // Ham JSON dump gösterilmez: kod + başlık + açıklama + wiki yeter.
+          applyMessages(prev => [...prev, {
+            role: 'assistant',
+            content: `**[${x.code}] ${x.title}**\n\n${x.explanation}\n\n*wiki › ${x.code}*`,
+            timestamp: ts(),
+            modelName: 'Vision model (request failed)',
+          }]);
+        }
       } finally {
         setLoading(false);
         abortControllerRef.current = null;
@@ -521,7 +521,7 @@ export default function App() {
           .filter(m =>
             typeof m.content === 'string' &&
             m.content.trim().length > 0 &&
-            !m.content.startsWith('⚠️')
+            !m.content.startsWith('**[')
           )
           .slice(-8)
           .map(m => ({ role: m.role, content: m.content as string }));
@@ -545,24 +545,25 @@ export default function App() {
         if (kind) {
           applyMessages(prev => [...prev, {
             role: 'assistant',
-            content: kind === 'stop' ? 'Request stopped.' : '⚠️ **Request timed out** after 180 s — no response arrived.',
+            content: kind === 'stop' ? 'Request stopped.' : '**Request timed out** after 180 s — no response arrived.',
             timestamp: ts(),
             modelName: LOCAL_ENGINE_STAMP,
           }]);
         } else {
-          const x = explainError(err, 'Vision request');
-          // Sohbet balonu ham JSON dump'i göstermez; kod + başlık + açıklama yeter.
+          const x = explainError(err, 'Assistant request');
+          // Sohbet balonu zaten hatayı gösteriyor: ayrıca toast açmak çift
+          // mesaj olurdu. Toast yalnız sohbet dışı işlemler için kalır.
           applyMessages(prev => [...prev, {
             role: 'assistant',
-            content: `⚠️ **[${x.code}] ${x.title}**\n\n${x.explanation}\n\n📖 wiki › ${x.code}`,
+            content: `**[${x.code}] ${x.title}**\n\n${x.explanation}\n\n*wiki › ${x.code}*`,
             timestamp: ts(),
-            modelName: 'Vision model (request failed)',
+            modelName: LOCAL_ENGINE_STAMP,
           }]);
         }
       } finally {
-      setLoading(false);
-      abortControllerRef.current = null;
-    }
+        setLoading(false);
+        abortControllerRef.current = null;
+      }
   };
 
   /** T2: süren isteği durdurur; fetch AbortError fırlatır, mesaj "Request stopped." yazılır. */
