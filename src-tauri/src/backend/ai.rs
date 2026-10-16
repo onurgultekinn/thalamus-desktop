@@ -24,9 +24,18 @@ pub trait Transport: Send + Sync {
 
 pub struct HttpTransport;
 
+/// Paylaşımlı blocking client: her çağrıda yeni connection-pool/thread kurmak
+/// yerine bir kez oluşturulur ve yeniden kullanılır.
+static HTTP_CLIENT: std::sync::OnceLock<reqwest::blocking::Client> = std::sync::OnceLock::new();
+
 impl Transport for HttpTransport {
     fn post_json(&self, url: &str, headers: &[(String, String)], body: &Value) -> Result<Value, String> {
-        let client = reqwest::blocking::Client::new();
+        let client = HTTP_CLIENT.get_or_init(|| {
+            reqwest::blocking::Client::builder()
+                .timeout(std::time::Duration::from_secs(120))
+                .build()
+                .expect("HTTP client oluşturulamadı")
+        });
         let mut req = client.post(url).json(body);
         for (k, v) in headers {
             req = req.header(k, v);

@@ -4,7 +4,8 @@
  *
  * Keys are read from the OS keychain via `lib/secrets`; the active provider is
  * selected from the `tlm_active_provider` setting, and if that provider has no
- * key it falls back to the other registered providers.
+ * key the fallback happens among local-only-picked + cloud providers. Local
+ * endpoints (Ollama, LM Studio) are never auto-selected as fallback.
  */
 import { API_BASE } from './ThalamusClient';
 import {
@@ -57,9 +58,31 @@ export async function getActiveProvider(): Promise<ActiveProvider | null> {
     }
   })();
 
+  // A local provider is valid only when the user explicitly picked it.
+  if (preferred) {
+    const picked = API_PROVIDERS.find((p) => p.id === preferred);
+    if (picked && picked.family === 'local') {
+      const customBase = localStorage.getItem(baseStorageKey(picked.id)) || undefined;
+      return {
+        id: picked.id,
+        name: picked.name,
+        key: (await getStoredKey(picked.id)).trim(),
+        baseUrl: providerEndpoint(picked, customBase || picked.defaultBaseUrl),
+        model: picked.defaultModel || '',
+      };
+    }
+  }
+
   const ordered: ApiProvider[] = [
     ...API_PROVIDERS.filter((p) => p.id === preferred),
-    ...API_PROVIDERS.filter((p) => p.id !== preferred && p.family !== 'anthropic'),
+    // Fallback cloud providers only: local endpoints (Ollama/LM Studio) must
+    // never be auto-selected — they are only used when explicitly chosen.
+    ...API_PROVIDERS.filter(
+      (p) =>
+        p.id !== preferred &&
+        p.family !== 'anthropic' &&
+        p.family !== 'local'
+    ),
   ];
 
   for (const p of ordered) {

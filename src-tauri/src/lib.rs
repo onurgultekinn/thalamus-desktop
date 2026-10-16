@@ -738,7 +738,13 @@ pub fn run() {
     }
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_log::Builder::new().build())
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                // Uygulama logları Info'da kalır; kütüphane gürültüsü (reqwest,
+                // hyper, axum, portable_pty TRACE/DEBUG) tamamen kesilir.
+                .level(log::LevelFilter::Info)
+                .build(),
+        )
         .manage(AppState {
             terminal: Arc::new(Mutex::new(None)),
             bpe,
