@@ -12,7 +12,8 @@
 use serde_json::{json, Value};
 
 
-use crate::engine::{edits, schema};
+use crate::engine::{edits, schema, MINIMAL_DECODER_INSTRUCTION};
+use crate::engine::pipeline::process_with_metrics;
 
 use super::{tools, BackendState};
 use axum::extract::State;
@@ -276,6 +277,54 @@ fn project_memory(root: &str) -> Option<String> {
     }
 }
 
+/// Kullanıcı görünmez sağlam sıkıştırma katmanı (P2).
+///
+/// Provider'a giden `messages` içindeki system/user içerikleri motorun karar
+/// makinesinden geçer: JSON segmentli ve kazançlı veri lossless @T sıkıştırma
+/// alır; veto/karar motoru passthrough derse ham metin kalır. Asistan
+/// yanıtları (assistant) NATURAL kalmak şartıyla dokunulmaz.
+/// Dönen değer toplu `(original_tokens, compressed_tokens, compressed_count)`.
+fn compress_messages_invisibly(
+    messages: &mut Vec<Value>,
+    bpe: &tiktoken_rs::CoreBPE,
+) -> (usize, usize, usize) {
+    let mut original_total = 0usize;
+    let mut compressed_total = 0usize;
+    let mut compressed_count = 0usize;
+    for msg in messages.iter_mut() {
+        let role = msg.get("role").and_then(|r| r.as_str()).unwrap_or("");
+        // Asistan çıktıları ve araç sonuçları doğal kalmalı. system/user
+        // istek tarafıdır — token tasarrufu amacı sağlanabilen yer.
+        if !matches!(role, "user" | "system") {
+            continue;
+        }
+        let Some(content) = msg.get("content").and_then(|c| c.as_str()) else {
+            // Dizi içerikli (görsel ekli) mesajlar: text bölümlerini tek tek
+            // değil, olduğu gibi bırak — parça bazlı yönetim ileride.
+            continue;
+        };
+        if content.trim().len() < 200 {
+            // Kısa içerikte decoder talimatı maliyeti tasarrufu aşar; motor
+            // zaten passthrough kararı verir ama iş yükünü de atlamak karşı
+            // değil.
+            continue;
+        }
+        let m = process_with_metrics(content, bpe, false);
+        if m.is_compressed && m.compressed_tokens < m.original_tokens {
+            original_total += m.original_tokens;
+            compressed_total += m.compressed_tokens;
+            compressed_count += 1;
+            if let Some(obj) = msg.as_object_mut() {
+                obj.insert(
+                    "content".to_string(),
+                    Value::String(m.processed_prompt.clone()),
+                );
+            }
+        }
+    }
+    (original_total, compressed_total, compressed_count)
+}
+
 pub async fn ai_chat(
     State(state): State<BackendState>,
     axum::Json(req): axum::Json<AiChatRequest>,
@@ -306,6 +355,15 @@ pub async fn ai_chat(
     }
     if let Some(mem) = project_memory(&state.workspace_root.read().unwrap_or_else(|e| e.into_inner()).clone()) {
         messages.insert(0, json!({"role": "system", "content": mem}));
+    }
+
+    // P2: görünmez lossless sıkıştırma — provider'a giden istek boyunca.
+    let (engine_original, engine_compressed, engine_count) =
+        compress_messages_invisibly(&mut messages, &state.bpe);
+    // Sıkıştırılmış veri varsa decoder talimatı tam bir sistem mesajı olarak
+    // en başa girer (görünmez katmanın model tarafı sözleşmesi).
+    if engine_count > 0 {
+        messages.insert(0, json!({"role": "system", "content": MINIMAL_DECODER_INSTRUCTION}));
     }
 
     let blocks_for_task = blocks.clone();
@@ -360,12 +418,50 @@ pub async fn ai_chat(
         "rounds": result.1,
         "usage": result.2,
         "edits": edits,
+        // Görünmez katmanın bilançosu — ön yüz sıradan akışta göstermez.
+        "engine": {
+            "compressed_messages": engine_count,
+            "original_tokens": engine_original,
+            "compressed_tokens": engine_compressed,
+        },
     })))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn big_repeated_json_message_is_compressed_invisibly() {
+        let items: Vec<String> = (0..80)
+            .map(|i| format!(r#"{{"id":{},"type":"telemetry","status":"ok"}}"#, i))
+            .collect();
+        let payload = format!("[{}]", items.join(","));
+        let mut messages = vec![json!({
+            "role": "user",
+            "content": format!("Bu telemetry verisini özetle:\n{}", payload),
+        })];
+        let bpe = tiktoken_rs::cl100k_base().unwrap();
+        let (orig, comp, count) = compress_messages_invisibly(&mut messages, &bpe);
+        assert!(count >= 1);
+        assert!(comp < orig);
+        let body = messages[0]["content"].as_str().unwrap();
+        assert_ne!(body, format!("Bu telemetry verisini:\n{}", payload));
+        assert!(body.contains("@T"));
+    }
+
+    #[test]
+    fn assistant_messages_stay_natural() {
+        let big_repeated = "aynı cümle tekrarı_".repeat(200);
+        let mut messages = vec![
+            json!({"role": "assistant", "content": big_repeated.clone()}),
+            json!({"role": "user", "content": "kısa"}),
+        ];
+        let bpe = tiktoken_rs::cl100k_base().unwrap();
+        let (_, _, count) = compress_messages_invisibly(&mut messages, &bpe);
+        assert_eq!(count, 0);
+        assert_eq!(messages[0]["content"].as_str().unwrap(), big_repeated);
+    }
 
     #[test]
     fn is_local_endpoint_only_accepts_real_loopback() {
