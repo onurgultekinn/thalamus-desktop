@@ -165,11 +165,22 @@ export default function App() {
   });
   const [activeChatId, setActiveChatId] = useState<string>(() => {
     try {
-      return localStorage.getItem('thalamus_active_chat_id') || '';
+      const savedId = localStorage.getItem('thalamus_active_chat_id') || '';
+      // V5: kalıcı aktif-id listede yoksa (silinmiş/bozuk kayıt) hayalet
+      // sohbet oluşmasın: gerçek bir sohbete düş, liste boşsa boş kal.
+      const list = JSON.parse(localStorage.getItem('thalamus_chats') || '[]') as ChatItem[];
+      if (list.some(c => c.id === savedId)) return savedId;
+      return list[0]?.id || '';
     } catch {
       return '';
     }
   });
+  // V3: asenkron istekler sürerken kullanıcı sohbet değiştirirse yanıtların
+  // YANLIŞ sohbete yazılmasını engellemek için güncel id'nin ref'i.
+  const activeChatIdRef = useRef(activeChatId);
+  useEffect(() => {
+    activeChatIdRef.current = activeChatId;
+  }, [activeChatId]);
 
   const activeChat = chats.find(c => c.id === activeChatId) || chats[0] || { id: '', title: 'New Chat Session' };
 
@@ -285,10 +296,13 @@ export default function App() {
         id: currentId,
         title: generatedTitle
       };
-      setChats([newChat]);
+      // V2: onceki sohbetleri SİLME; listeye başa ekle. (setChats([newChat])
+      // tüm sohbet geçmişini tek mesajlık yeni sohbetle değiştiriyordu.)
+      // Kalıcılık zaten chats/activeChatId efektlerinin işi; buradan elle
+      // localStorage yazmak yarısı silinmiş kayıtlar üretiyordu.
+      setChats(prev => (prev.some(c => c.id === newChat.id) ? prev : [newChat, ...prev]));
       setActiveChatId(currentId);
-      localStorage.setItem('thalamus_active_chat_id', currentId);
-      localStorage.setItem('thalamus_chats', JSON.stringify([newChat]));
+      activeChatIdRef.current = currentId;
     } else if (messages.length <= 1 && !isRegenerate) {
       const generatedTitle = userText.length > 22 ? userText.slice(0, 22) + '...' : userText;
       setChats(prev => prev.map(c => c.id === currentId ? { ...c, title: generatedTitle } : c));
@@ -319,6 +333,22 @@ export default function App() {
     }
     setLoading(true);
 
+    // V3: istek sürerken kullanıcı başka sohbete geçerse yanıt bu sohbete
+    // dönmeli: hâlâ aynı sohbetteysek ekrana, değilsek o sohbetin kalıcı
+    // kopyasına yazılır (dönünce localStorage'dan yüklenecek).
+    const ownerChatId = currentId;
+    const applyMessages = (fn: (prev: Message[]) => Message[]) => {
+      if (activeChatIdRef.current === ownerChatId) {
+        setMessages(fn);
+        return;
+      }
+      try {
+        const key = `thalamus_chat_messages_${ownerChatId}`;
+        const stored = JSON.parse(localStorage.getItem(key) || '[]') as Message[];
+        localStorage.setItem(key, JSON.stringify(fn(stored)));
+      } catch {}
+    };
+
     // Images attached → a single vision call. This is the only branch that uses
     // a model, so text-only chats stay on the local, zero-model path below.
     if (pendingImages.length > 0) {
@@ -328,7 +358,7 @@ export default function App() {
         const provider = await getActiveProvider();
         if (!provider) {
           const fallback = images.map((i) => `- ${i.name}: ${i.summary}`).join('\n');
-          setMessages(prev => [...prev, {
+          applyMessages(prev => [...prev, {
             role: 'assistant',
             content: `No model key is set, so the image was measured on this device instead:\n\n${fallback}\n\nAdd a provider key in Settings to let a vision model look at the image.`,
             timestamp: ts(),
@@ -336,7 +366,7 @@ export default function App() {
           }]);
         } else {
           const res = await aiChat([userMessage(userText.trim() || 'Describe this image in detail.', images.map((i) => ({ url: i.url, detail: i.detail })))]);
-          setMessages(prev => [...prev, {
+          applyMessages(prev => [...prev, {
             role: 'assistant',
             content: res.content,
             timestamp: ts(),
@@ -344,7 +374,7 @@ export default function App() {
           }]);
         }
       } catch (err) {
-        setMessages(prev => [...prev, {
+        applyMessages(prev => [...prev, {
           role: 'assistant',
           content: `⚠️ **Vision request failed:** ${err instanceof Error ? err.message : String(err)}`,
           timestamp: ts(),
@@ -384,7 +414,7 @@ export default function App() {
       const savedCost = '+$' + (metrics.saved_tokens * unitPrice).toFixed(6);
 
       // Update the user message's approximate token count with the real count
-      setMessages(prev => {
+      applyMessages(prev => {
         const updated = [...prev];
         const lastUserIdx = updated.map(m => m.role).lastIndexOf('user');
         if (lastUserIdx !== -1) {
@@ -427,10 +457,10 @@ export default function App() {
         }
       };
 
-      setMessages(prev => [...prev, assistantMsg]);
+      applyMessages(prev => [...prev, assistantMsg]);
     } catch (err) {
       console.error(err);
-      setMessages(prev => [
+      applyMessages(prev => [
         ...prev,
         {
           role: 'assistant',
