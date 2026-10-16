@@ -219,7 +219,7 @@ export function CopilotDiffModal({
         </div>
 
         <div className="flex items-center gap-3">
-          <div className="hidden sm:flex items-center gap-2 text-[10.5px]">
+          <div className="hidden sm:flex items-center gap-2 text-[11px]">
             <span className="text-[#D14D41] bg-[#282726] border border-[#34332F] px-2 py-0.5 rounded font-mono">
               -{stats.removed}
             </span>
@@ -271,7 +271,7 @@ export function CopilotDiffModal({
 
           {payload.originalCodeSnippet && payload.codeSnippet ? (
             <div className="flex-1 flex flex-col min-h-0 bg-[#100F0F]">
-              <div className="px-4 pt-3 pb-1 text-[10px] text-[#A8A49E] font-bold uppercase border-b border-[#282726]">
+              <div className="px-4 pt-3 pb-1 text-[11px] text-[#A8A49E] font-bold uppercase border-b border-[#282726]">
                 Suggested change — {activeFile} · <span className="text-[#3AA99F]">+{stats.added}</span> <span className="text-[#D14D41]">-{stats.removed}</span>
               </div>
               <div className="flex-1 overflow-auto pretty-scrollbar p-0 font-mono text-[11px] leading-[1.55]">
@@ -302,7 +302,7 @@ export function CopilotDiffModal({
 
           {/* Bottom Bar (Footer) */}
           <div className="px-3.5 py-2 bg-[#1C1B1A] border-t border-[#282726] flex items-center justify-between flex-shrink-0">
-            <div className="flex items-center gap-2 text-[10.5px]">
+            <div className="flex items-center gap-2 text-[11px]">
               <span className="text-[#A8A49E] bg-[#282726] border border-[#34332F] px-2.5 py-0.5 rounded font-mono">
                 {stats.changed} Lines Changed
               </span>
@@ -315,14 +315,14 @@ export function CopilotDiffModal({
 
             <div className="flex items-center gap-2">
               {executed ? (
-                <span className="text-[#3AA99F] text-[10.5px] font-medium flex items-center gap-1 px-2.5 py-0.5 bg-[#1e3a2b]/60 border border-[#2d5a45]/50 rounded font-sans">
+                <span className="text-[#3AA99F] text-[11px] font-medium flex items-center gap-1 px-2.5 py-0.5 bg-[#1e3a2b]/60 border border-[#2d5a45]/50 rounded font-sans">
                   <Check size={12} /> Applied to Code
                 </span>
               ) : (
                 <button
                   type="button"
                   onClick={() => onApply(payload)}
-                  className="px-2.5 py-0.5 bg-[#282726] hover:bg-[#34332F] border border-[#34332F] text-[#A8A49E] hover:text-white font-medium rounded text-[10.5px] flex items-center gap-1.5 cursor-pointer transition-colors font-sans shadow-sm"
+                  className="px-2.5 py-0.5 bg-[#282726] hover:bg-[#34332F] border border-[#34332F] text-[#A8A49E] hover:text-white font-medium rounded text-[11px] flex items-center gap-1.5 cursor-pointer transition-colors font-sans shadow-sm"
                 >
                   <CheckCircle2 size={13} className="text-[#4385BE]" /> Apply to Code
                 </button>
@@ -341,7 +341,7 @@ export function CopilotDiffModal({
                 <span className="w-2 h-2 rounded-full bg-[#3AA99F]" />
                 Suggested change — {payload.targetFile}
               </span>
-              <div className="flex items-center gap-2 text-[10.5px]">
+              <div className="flex items-center gap-2 text-[11px]">
                 <span className="text-[#D14D41] bg-[#3b181a]/40 border border-[#824449]/30 px-2 py-0.5 rounded font-mono">-{stats.removed}</span>
                 <span className="text-[#3AA99F] bg-[#1e3a2b]/40 border border-[#2d5a45]/30 px-2 py-0.5 rounded font-mono">+{stats.added}</span>
                 <span className="text-[#A8A49E] bg-[#282726] border border-[#34332F] px-2 py-0.5 rounded font-mono">{orig.length} B → {opt.length} B</span>
@@ -368,7 +368,7 @@ export function CopilotDiffModal({
 
           {/* Bottom Buttons (Fullscreen Mode Footer) */}
           <div className="px-3.5 py-2 bg-[#1C1B1A] border-t border-[#282726] flex items-center justify-between flex-shrink-0">
-            <div className="flex items-center gap-2 text-[10.5px]">
+            <div className="flex items-center gap-2 text-[11px]">
               <span className="text-[#A8A49E] bg-[#282726] border border-[#34332F] px-2.5 py-0.5 rounded font-mono">
                 {stats.changed} Lines Changed
               </span>
@@ -378,7 +378,7 @@ export function CopilotDiffModal({
               <button
                 type="button"
                 onClick={() => onApply(payload)}
-                className="px-2.5 py-0.5 bg-[#282726] hover:bg-[#34332F] border border-[#34332F] text-[#A8A49E] hover:text-white font-medium rounded text-[10.5px] flex items-center gap-1.5 cursor-pointer transition-colors font-sans shadow-sm"
+                className="px-2.5 py-0.5 bg-[#282726] hover:bg-[#34332F] border border-[#34332F] text-[#A8A49E] hover:text-white font-medium rounded text-[11px] flex items-center gap-1.5 cursor-pointer transition-colors font-sans shadow-sm"
               >
                 <CheckCircle2 size={13} className="text-[#4385BE]" /> Apply to Code
               </button>

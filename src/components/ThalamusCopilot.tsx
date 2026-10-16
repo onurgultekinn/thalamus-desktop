@@ -497,7 +497,7 @@ export function ThalamusCopilot({
             <button
               type="button"
               onClick={() => setMode('chat')}
-              className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium transition-colors cursor-pointer ${
+              className={`flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer ${
                 mode === 'chat' ? 'bg-[#34332F] text-[#F2F0E5]' : 'text-[#87857F] hover:text-[#CECDC3]'
               }`}
             >
@@ -506,7 +506,7 @@ export function ThalamusCopilot({
             <button
               type="button"
               onClick={() => setMode('agent')}
-              className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium transition-colors cursor-pointer ${
+              className={`flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer ${
                 mode === 'agent' ? 'bg-[#34332F] text-[#F2F0E5]' : 'text-[#87857F] hover:text-[#CECDC3]'
               }`}
             >
@@ -521,7 +521,7 @@ export function ThalamusCopilot({
             type="button"
             onClick={() => setPlanMode(v => !v)}
             title="Plan mode: generate a plan first, apply if you approve"
-            className={`flex h-6 items-center gap-1.5 rounded-md border px-2 text-[10.5px] font-medium cursor-pointer transition-colors ${
+            className={`flex h-6 items-center gap-1.5 rounded-md border px-2 text-[11px] font-medium cursor-pointer transition-colors ${
               planMode
                 ? 'bg-white/[0.06] border-white/[0.10] text-[#F2F0E5]'
                 : 'border-transparent text-[#87857F] hover:bg-white/[0.04] hover:text-[#CECDC3]'
@@ -534,7 +534,7 @@ export function ThalamusCopilot({
             type="button"
             onClick={() => setPermission(p => (p === 'ask' ? 'auto' : 'ask'))}
             title="Edit permission: Confirm — every edit is asked first / Automatic — applied directly"
-            className={`flex h-6 items-center gap-1.5 rounded-md border px-2 text-[10.5px] font-medium cursor-pointer transition-colors ${
+            className={`flex h-6 items-center gap-1.5 rounded-md border px-2 text-[11px] font-medium cursor-pointer transition-colors ${
               permission === 'ask'
                 ? 'bg-white/[0.06] border-white/[0.10] text-[#F2F0E5]'
                 : 'border-transparent text-[#87857F] hover:bg-white/[0.04] hover:text-[#CECDC3]'
@@ -548,7 +548,7 @@ export function ThalamusCopilot({
             type="button"
             onClick={compactConversation}
             title="Summarize the chat and clear the window (token savings)"
-            className="flex h-6 items-center gap-1.5 rounded-md border border-transparent px-2 text-[10.5px] font-medium text-[#87857F] hover:bg-white/[0.04] hover:text-[#CECDC3] cursor-pointer transition-colors"
+            className="flex h-6 items-center gap-1.5 rounded-md border border-transparent px-2 text-[11px] font-medium text-[#87857F] hover:bg-white/[0.04] hover:text-[#CECDC3] cursor-pointer transition-colors"
           >
             <Minimize2 size={12} className="flex-shrink-0" /> Summarize
           </button>
@@ -557,7 +557,7 @@ export function ThalamusCopilot({
             type="button"
             onClick={() => setCameraOpen(v => !v)}
             title="Camera: live measurements, AI interpretation (prediction + confidence)"
-            className={`flex h-6 items-center gap-1.5 rounded-md border px-2 text-[10.5px] font-medium cursor-pointer transition-colors ${
+            className={`flex h-6 items-center gap-1.5 rounded-md border px-2 text-[11px] font-medium cursor-pointer transition-colors ${
               cameraOpen
                 ? 'bg-white/[0.06] border-white/[0.10] text-[#F2F0E5]'
                 : 'border-transparent text-[#87857F] hover:bg-white/[0.04] hover:text-[#CECDC3]'
@@ -567,7 +567,7 @@ export function ThalamusCopilot({
           </button>
         </div>
 
-        <div className="flex items-center gap-1.5 text-[#87857F] font-mono text-[10px]">
+        <div className="flex items-center gap-1.5 text-[#87857F] font-mono text-[11px]">
           {/* Context indicator (Claude Code /context style) */}
           {lastUsage && (
             <div className="flex items-center gap-1" title="Total token usage in the last request (128k target)">
@@ -603,7 +603,7 @@ export function ThalamusCopilot({
       <div className="flex-1 overflow-y-auto p-2.5 space-y-2.5 pretty-scrollbar">
         {messages.map((msg) => (
           <div key={msg.id} className={`flex flex-col gap-0.5 ${msg.sender === 'user' ? 'items-end' : 'items-start'}`}>
-            <div className="flex items-center gap-1 text-[9.5px] text-[#87857F] px-1 font-mono">
+            <div className="flex items-center gap-1 text-[11px] text-[#87857F] px-1 font-mono">
               {msg.sender === 'user' && <User size={9} className="text-[#4385BE]" />}
               <span className="text-[#A8A49E] font-medium">
                 {msg.sender === 'user' ? userName : 'Thalamus'}
@@ -623,7 +623,7 @@ export function ThalamusCopilot({
               <MarkdownMessage content={msg.text} />
 
               {msg.agentSteps && (
-                <div className="mt-1 space-y-0.5 font-mono text-[9.5px]">
+                <div className="mt-1 space-y-0.5 font-mono text-[11px]">
                   {msg.agentSteps.map(step => (
                     <div key={step.step} className="flex items-center gap-1 text-[#3AA99F]">
                       <Check size={10} className="flex-shrink-0" />
@@ -635,7 +635,7 @@ export function ThalamusCopilot({
 
               {msg.actionPayload && (
                 <div className="mt-2 rounded border border-[#2a2a2c] bg-[#1C1B1A] p-2 flex items-center justify-between gap-2 overflow-hidden">
-                  <div className="flex items-center gap-1.5 min-w-0 font-mono text-[10px]">
+                  <div className="flex items-center gap-1.5 min-w-0 font-mono text-[11px]">
                     <GitPullRequest size={12} className="text-[#3AA99F] flex-shrink-0" />
                     <span className="font-medium text-[#CECDC3] truncate max-w-[100px]">
                       {msg.actionPayload.targetFile}
@@ -660,20 +660,20 @@ export function ThalamusCopilot({
                     <button
                       type="button"
                       onClick={() => setActiveModalMessage(msg)}
-                      className="px-2 py-0.5 bg-[#205EA6] hover:bg-[#4385BE] text-white font-medium rounded text-[9.5px] flex items-center gap-1 cursor-pointer transition-colors shadow-xs"
+                      className="px-2 py-0.5 bg-[#205EA6] hover:bg-[#4385BE] text-white font-medium rounded text-[11px] flex items-center gap-1 cursor-pointer transition-colors shadow-xs"
                     >
                       <Eye size={10} /> Inspect
                     </button>
 
                     {executedActions[msg.id] ? (
-                      <span className="text-[#3AA99F] text-[9.5px] font-medium flex items-center gap-0.5 px-1.5 py-0.5 bg-[#3AA99F]/10 rounded">
+                      <span className="text-[#3AA99F] text-[11px] font-medium flex items-center gap-0.5 px-1.5 py-0.5 bg-[#3AA99F]/10 rounded">
                         <Check size={9} /> Applied
                       </span>
                     ) : (
                       <button
                         type="button"
                         onClick={() => executeAgentAction(msg.id, msg.actionPayload!)}
-                        className="px-2 py-0.5 bg-[#205EA6] hover:bg-[#4385BE] text-white font-medium rounded text-[9.5px] flex items-center gap-1 cursor-pointer transition-colors shadow-xs"
+                        className="px-2 py-0.5 bg-[#205EA6] hover:bg-[#4385BE] text-white font-medium rounded text-[11px] flex items-center gap-1 cursor-pointer transition-colors shadow-xs"
                       >
                         <GitPullRequest size={9} /> Apply
                       </button>
@@ -689,14 +689,14 @@ export function ThalamusCopilot({
       {/* 3. INPUT AREA */}
       <div className="p-2 border-t border-[#34332F] bg-[#1C1B1A] flex flex-col gap-1 flex-shrink-0 z-10 relative">
         <div className="flex items-center gap-1 px-0.5">
-          <span className="text-[9px] font-mono uppercase tracking-wider text-[#87857F]">Image</span>
+          <span className="text-[11px] font-mono uppercase tracking-wider text-[#87857F]">Image</span>
           {(IMAGE_MODE_ORDER).map((m) => (
             <button
               key={m}
               type="button"
               onClick={() => setImageMode(m)}
               title={imageModeHint(m)}
-              className={`rounded border px-1.5 py-0.5 text-[9.5px] transition-colors cursor-pointer ${
+              className={`rounded border px-1.5 py-0.5 text-[11px] transition-colors cursor-pointer ${
                 imageMode === m
                   ? 'border-[#dcb67a]/50 bg-[#dcb67a]/10 text-[#dcb67a]'
                   : 'border-[#34332F] text-[#87857F] hover:text-[#CECDC3]'
@@ -737,13 +737,13 @@ export function ThalamusCopilot({
         )}
         {pendingPlan && (
           <div className="flex items-center justify-between px-0.5">
-            <span className="flex items-center gap-1 text-[9.5px] font-mono text-[#D0A215]">
+            <span className="flex items-center gap-1 text-[11px] font-mono text-[#D0A215]">
               <ListChecks size={11} /> Plan ready
             </span>
             <button
               type="button"
               onClick={applyPlan}
-              className="text-[10px] font-semibold text-[#D0A215] hover:underline cursor-pointer"
+              className="text-[11px] font-semibold text-[#D0A215] hover:underline cursor-pointer"
             >
               Apply Plan
             </button>
@@ -751,13 +751,13 @@ export function ThalamusCopilot({
         )}
         {pendingEdits && pendingEdits.length > 0 && (
           <div className="flex items-center justify-between px-0.5">
-            <span className="text-[9.5px] font-mono text-[#3AA99F]">
+            <span className="text-[11px] font-mono text-[#3AA99F]">
               {pendingEdits.length} edit(s) pending
             </span>
             <button
               type="button"
               onClick={applyPendingEdits}
-              className="text-[10px] font-semibold text-[#3AA99F] hover:underline cursor-pointer"
+              className="text-[11px] font-semibold text-[#3AA99F] hover:underline cursor-pointer"
             >
               Apply
             </button>
@@ -765,13 +765,13 @@ export function ThalamusCopilot({
         )}
         {lastEdit.length > 0 && (
           <div className="flex items-center justify-between px-0.5">
-            <span className="text-[9.5px] font-mono text-[#D0A215]">
+            <span className="text-[11px] font-mono text-[#D0A215]">
               {lastEdit.length} applied edit(s) can be undone
             </span>
             <button
               type="button"
               onClick={undoLastEdit}
-              className="flex items-center gap-1 text-[10px] font-medium text-[#3AA99F] hover:underline cursor-pointer"
+              className="flex items-center gap-1 text-[11px] font-medium text-[#3AA99F] hover:underline cursor-pointer"
             >
               <Undo2 size={11} /> Undo
             </button>
@@ -779,7 +779,7 @@ export function ThalamusCopilot({
         )}
         {showFileMentionMenu && (
           <div className="absolute bottom-full left-2 mb-1.5 w-[200px] bg-[#282726] border border-[#34332F] rounded shadow-2xl p-1 z-50">
-            <div className="px-1.5 py-0.5 text-[9px] font-mono text-[#87857F] uppercase border-b border-[#34332F] mb-1">
+            <div className="px-1.5 py-0.5 text-[11px] font-mono text-[#87857F] uppercase border-b border-[#34332F] mb-1">
               Attach File (@)
             </div>
             {workspaceFiles.map(file => (
@@ -787,7 +787,7 @@ export function ThalamusCopilot({
                 key={file}
                 type="button"
                 onClick={() => handleSelectFileMention(file)}
-                className="w-full flex items-center gap-1.5 px-1.5 py-1 rounded hover:bg-[#282726] text-[#CECDC3] hover:text-white font-mono text-[10.5px] text-left cursor-pointer transition-colors"
+                className="w-full flex items-center gap-1.5 px-1.5 py-1 rounded hover:bg-[#282726] text-[#CECDC3] hover:text-white font-mono text-[11px] text-left cursor-pointer transition-colors"
               >
                 <FileText size={11} className="text-[#87857F]" />
                 <span className="truncate">{file}</span>
@@ -800,7 +800,7 @@ export function ThalamusCopilot({
           {selectedFiles.length > 0 && (
             <div className="flex items-center gap-1 flex-wrap mb-1 pb-1 border-b border-[#282726]">
               {selectedFiles.map(file => (
-                <span key={file} className="flex items-center gap-1 bg-[#282726] border border-[#34332F] text-[#3AA99F] px-1.5 py-0.2 rounded text-[9.5px] font-mono">
+                <span key={file} className="flex items-center gap-1 bg-[#282726] border border-[#34332F] text-[#3AA99F] px-1.5 py-0.2 rounded text-[11px] font-mono">
                   <FileText size={9} /> @{file}
                   <button 
                     type="button" 
@@ -871,8 +871,8 @@ export function ThalamusCopilot({
                 className="hidden"
                 onChange={handleImagePick}
               />
-              <span className="text-[9px] font-mono text-[#575654] px-0.5">|</span>
-              <span className="text-[9.5px] font-mono text-[#87857F] flex items-center gap-0.5">
+              <span className="text-[11px] font-mono text-[#575654] px-0.5">|</span>
+              <span className="text-[11px] font-mono text-[#87857F] flex items-center gap-0.5">
                 <Sparkles size={10} className="text-[#4385BE]" /> 
                 {mode === 'agent' ? 'Agent' : 'Chat'}
               </span>

@@ -90,7 +90,7 @@ function CodePane({ label, dotClass, code, lang, metric, tsvHint, scrollRef, onS
           {tsvHint && (
             <span
               title={TSV_LEGEND}
-              className="ml-1 cursor-help rounded border border-white/[0.08] bg-white/[0.05] px-1.5 py-px font-mono text-[10px] font-normal text-[#575654]"
+              className="ml-1 cursor-help rounded border border-white/[0.08] bg-white/[0.05] px-1.5 py-px font-mono text-[11px] font-normal text-[#575654]"
             >
               TSV
             </span>
@@ -301,7 +301,7 @@ export const DiffView: React.FC<DiffViewProps> = ({ onCloseDiff, diffData, title
         <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-[#282726] bg-[#282726] lg:grid-cols-4">
           {/* 1 · TOKEN SAVINGS */}
           <div className="flex min-w-0 flex-col gap-1.5 bg-[#1C1B1A] p-4">
-            <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#575654]">Token savings</span>
+            <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#575654]">Token savings</span>
             <span
               className={`truncate font-mono text-[28px] font-bold leading-none ${
                 isSaved ? 'text-[#3AA99F]' : savingsPct < 0 && hasData ? 'text-[#D14D41]' : 'text-[#575654]'
@@ -313,7 +313,7 @@ export const DiffView: React.FC<DiffViewProps> = ({ onCloseDiff, diffData, title
               {hasData ? `${fmtInt(origTokens)} → ${fmtInt(optTokens)} tok` : 'awaiting analysis'}
             </span>
             {hasData && baselinePct !== null && (
-              <span className="truncate font-mono text-[10px] text-[#575654]">
+              <span className="truncate font-mono text-[11px] text-[#575654]">
                 {savingsPct > baselinePct
                   ? `+${(savingsPct - baselinePct).toFixed(1)} p.p. above JSON minify`
                   : `JSON minify alone: -${baselinePct}%`}
@@ -323,31 +323,31 @@ export const DiffView: React.FC<DiffViewProps> = ({ onCloseDiff, diffData, title
 
           {/* 2 · COST / CALL on the user's selected model */}
           <div className="flex min-w-0 flex-col gap-1.5 bg-[#1C1B1A] p-4">
-            <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#575654]">Cost / call</span>
+            <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#575654]">Cost / call</span>
             <span className="truncate font-mono text-[28px] font-bold leading-none text-[#F2F0E5]">
               {hasData ? fmtUsd(costAfter) : '—'}
             </span>
             <span className="truncate font-mono text-[11px] text-[#A8A49E]">{activeModelName}</span>
             {hasData && isSaved && (
-              <span className="truncate font-mono text-[10px] text-[#575654]">was {fmtUsd(costBefore)} uncompressed</span>
+              <span className="truncate font-mono text-[11px] text-[#575654]">was {fmtUsd(costBefore)} uncompressed</span>
             )}
           </div>
 
           {/* 3 · PROJECTED SAVINGS AT VOLUME */}
           <div className="flex min-w-0 flex-col gap-1.5 bg-[#1C1B1A] p-4">
-            <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#575654]">Saved / 1K calls</span>
+            <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#575654]">Saved / 1K calls</span>
             <span className={`truncate font-mono text-[28px] font-bold leading-none ${isSaved ? 'text-[#3AA99F]' : 'text-[#575654]'}`}>
               {isSaved ? `-${fmtUsd(monthlySavedUsd)}` : '—'}
             </span>
             <span className="truncate font-mono text-[11px] text-[#A8A49E]">per 1,000 prompts</span>
             {isSaved && (
-              <span className="truncate font-mono text-[10px] text-[#575654]">vs {fmtUsd(costBefore * 1000)} without it</span>
+              <span className="truncate font-mono text-[11px] text-[#575654]">vs {fmtUsd(costBefore * 1000)} without it</span>
             )}
           </div>
 
           {/* 4 · ENGINE — speed + integrity */}
           <div className="flex min-w-0 flex-col gap-1.5 bg-[#1C1B1A] p-4">
-            <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#575654]">Engine time</span>
+            <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#575654]">Engine time</span>
             <span className="truncate font-mono text-[28px] font-bold leading-none text-[#F2F0E5]">
               {engineTimeMs !== undefined ? `${engineTimeMs} ms` : '—'}
             </span>

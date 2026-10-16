@@ -19,7 +19,7 @@ export function Header({
           <span className="font-bold text-[#F2F0E5] tracking-tight text-[13px]">
             thalamus
           </span>
-          <span className="bg-[#1C1B1A] text-[#A8A49E] border border-[#282726] text-[9px] px-1.5 py-0.5 rounded font-medium">
+          <span className="bg-[#1C1B1A] text-[#A8A49E] border border-[#282726] text-[11px] px-1.5 py-0.5 rounded font-medium">
             studio
           </span>
         </div>

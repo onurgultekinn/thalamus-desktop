@@ -751,7 +751,7 @@ export default function App() {
               </p>
             </div>
             
-            <div className="p-3 bg-[#100F0F]/60 border border-[#34332F] rounded-lg text-[#A8A49E] leading-relaxed text-[10.5px]">
+            <div className="p-3 bg-[#100F0F]/60 border border-[#34332F] rounded-lg text-[#A8A49E] leading-relaxed text-[11px]">
               <strong className="text-[#CECDC3] block mb-1">Effects of your choice:</strong>
               • <strong>Live Updates (Yes):</strong> Always view costs and dollar-based savings updated in real time.<br/>
               • <strong>Stay Offline (No):</strong> Pricing indicators are hidden, running local offline token estimations only.

@@ -952,7 +952,7 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
                 onChange={(e) => setTreeSearch(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Escape') setTreeSearch(''); }}
                 placeholder="Search files…"
-                className="w-full bg-[#100F0F] border border-[#34332F] focus:border-[#4385BE]/60 text-[#F2F0E5] font-mono text-[10.5px] px-1.5 py-0.5 rounded outline-none placeholder-[#575654]"
+                className="w-full bg-[#100F0F] border border-[#34332F] focus:border-[#4385BE]/60 text-[#F2F0E5] font-mono text-[11px] px-1.5 py-0.5 rounded outline-none placeholder-[#575654]"
                 spellCheck={false}
               />
             </div>
@@ -984,7 +984,7 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
           </div>
         </div>
 
-        <div className="p-2 border-t border-[#34332F] text-[10px] font-mono text-[#87857F] flex items-center justify-between bg-[#1C1B1A]">
+        <div className="p-2 border-t border-[#34332F] text-[11px] font-mono text-[#87857F] flex items-center justify-between bg-[#1C1B1A]">
           <span className="flex items-center gap-1">
             <span
               className={`w-1.5 h-1.5 rounded-full ${
@@ -1140,7 +1140,7 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
               <button 
                 type="button" 
                 onClick={handleSaveActiveFile}
-                className="flex items-center gap-1 px-2 py-0.5 bg-[#282726] hover:bg-[#34332F] text-[#CECDC3] hover:text-white border border-[#34332F] rounded text-[10.5px] font-sans font-medium cursor-pointer"
+                className="flex items-center gap-1 px-2 py-0.5 bg-[#282726] hover:bg-[#34332F] text-[#CECDC3] hover:text-white border border-[#34332F] rounded text-[11px] font-sans font-medium cursor-pointer"
                 title="Save File (Ctrl+S)"
               >
                 <Save size={10} /> Save
@@ -1148,7 +1148,7 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
               <button 
                 type="button" 
                 onClick={handleRunActiveFile}
-                className="flex items-center gap-1 px-2 py-0.5 bg-[#205EA6] hover:bg-[#4385BE] text-white rounded text-[10.5px] font-sans font-medium cursor-pointer"
+                className="flex items-center gap-1 px-2 py-0.5 bg-[#205EA6] hover:bg-[#4385BE] text-white rounded text-[11px] font-sans font-medium cursor-pointer"
               >
                 <Play size={10} /> Run Active Code
               </button>

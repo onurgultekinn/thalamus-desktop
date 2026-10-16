@@ -413,7 +413,7 @@ export function SettingsModal({
                           </button>
                         )}
                       </div>
-                      <span className="text-[10.5px] text-[#87857F]">Square JPG or PNG. Stored locally on this device.</span>
+                      <span className="text-[11px] text-[#87857F]">Square JPG or PNG. Stored locally on this device.</span>
                     </div>
                   </div>
 
@@ -428,7 +428,7 @@ export function SettingsModal({
                       className={inputCls}
                       spellCheck={false}
                     />
-                    <span className="text-[10.5px] text-[#87857F]">Shown in the sidebar and on your messages.</span>
+                    <span className="text-[11px] text-[#87857F]">Shown in the sidebar and on your messages.</span>
                   </div>
 
                   <div className="flex flex-col gap-1.5">
@@ -440,7 +440,7 @@ export function SettingsModal({
                       readOnly
                       className={`${inputCls} cursor-not-allowed opacity-60`}
                     />
-                    <span className="text-[10.5px] text-[#87857F]">Part of your local profile; it cannot be changed here.</span>
+                    <span className="text-[11px] text-[#87857F]">Part of your local profile; it cannot be changed here.</span>
                   </div>
                 </div>
               )

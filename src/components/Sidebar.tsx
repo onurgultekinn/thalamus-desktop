@@ -217,7 +217,7 @@ export function Sidebar({
           {/* project path prompt */}
           {sessionMenu === 'project' && isOpen && (
             <div className="mt-1.5 w-full overflow-hidden rounded-md border border-[#282726] bg-[#1C1B1A] p-2">
-              <label className="block px-0.5 pb-1.5 text-[10px] font-mono uppercase tracking-wider text-[#87857F]">
+              <label className="block px-0.5 pb-1.5 text-[11px] font-mono uppercase tracking-wider text-[#87857F]">
                 Project folder path
               </label>
               <div className="flex items-center gap-1.5">
@@ -247,7 +247,7 @@ export function Sidebar({
                   Open
                 </button>
               </div>
-              <p className="px-0.5 pt-1.5 text-[10px] leading-snug text-[#87857F]">
+              <p className="px-0.5 pt-1.5 text-[11px] leading-snug text-[#87857F]">
                 Tip: pick one of your recent projects below instead.
               </p>
             </div>
@@ -258,7 +258,7 @@ export function Sidebar({
         {/* PROJECTS Group — most recently opened first */}
         <div className="flex flex-col gap-0.5 w-full mt-1">
           {isOpen && (
-            <span className="px-1.5 mb-0.5 text-[9px] font-semibold uppercase tracking-widest text-obsidian-muted/50">
+            <span className="px-1.5 mb-0.5 text-[11px] font-semibold uppercase tracking-widest text-obsidian-muted/50">
               Projects
             </span>
           )}
@@ -347,7 +347,7 @@ export function Sidebar({
 
         {/* CHATS Group */}
         <div className="flex flex-col gap-0.5 w-full mt-4">
-          {isOpen && <span className="px-1.5 mb-0.5 text-[9px] font-semibold uppercase tracking-widest text-obsidian-muted/50">Chats</span>}
+          {isOpen && <span className="px-1.5 mb-0.5 text-[11px] font-semibold uppercase tracking-widest text-obsidian-muted/50">Chats</span>}
           
           {chats.map(chat => {
             const isActive = currentView === 'chat' && activeChatId === chat.id;
@@ -551,7 +551,7 @@ export function Sidebar({
                 <span className="min-w-0 flex-1 flex flex-col items-start leading-tight text-left">
                   <span className="text-[12px] text-[#CECDC3] group-hover:text-[#F2F0E5] truncate w-full transition-colors">{displayName}</span>
                   {planLabel && (
-                    <span className="text-[10px] text-[#87857F] truncate w-full">{planLabel}</span>
+                    <span className="text-[11px] text-[#87857F] truncate w-full">{planLabel}</span>
                   )}
                 </span>
                 <ChevronUp

@@ -169,7 +169,7 @@ export function CommandBar({
               }`}
             >
               <span className="text-[11px] font-medium">{model.name}</span>
-              <span className="text-[9px] opacity-60 font-mono">{model.company}</span>
+              <span className="text-[11px] opacity-60 font-mono">{model.company}</span>
             </button>
           ))}
         </div>
@@ -178,7 +178,7 @@ export function CommandBar({
       {/* File Popover */}
       {isFileMenuOpen && (
         <div className="absolute bottom-full left-0 mb-2 bg-obsidian-panel border border-obsidian-border rounded-lg w-[260px] z-50 shadow-2xl p-3 flex flex-col gap-2.5 animate-in fade-in slide-in-from-bottom-2 duration-150">
-          <div className="flex items-center justify-between text-[10px] font-semibold text-obsidian-muted/60 tracking-wider uppercase">
+          <div className="flex items-center justify-between text-[11px] font-semibold text-obsidian-muted/60 tracking-wider uppercase">
             <span>Context Files</span>
             <button type="button" onClick={() => setIsFileMenuOpen(false)} className="text-obsidian-muted hover:text-obsidian-text cursor-pointer">
               <X size={12} />
@@ -199,7 +199,7 @@ export function CommandBar({
                   type="button"
                   onClick={() => setImageMode(m)}
                   title={imageModeHint(m)}
-                  className={`flex-1 rounded-md border px-1.5 py-1 text-[10px] transition-colors cursor-pointer ${
+                  className={`flex-1 rounded-md border px-1.5 py-1 text-[11px] transition-colors cursor-pointer ${
                     imageMode === m
                       ? 'border-[#dcb67a]/50 bg-[#dcb67a]/10 text-[#dcb67a]'
                       : 'border-obsidian-border text-obsidian-muted hover:text-obsidian-text'
@@ -209,7 +209,7 @@ export function CommandBar({
                 </button>
               ))}
             </div>
-            <span className="text-[9.5px] text-obsidian-muted/70">Image: {imageModeHint(imageMode)}</span>
+            <span className="text-[11px] text-obsidian-muted/70">Image: {imageModeHint(imageMode)}</span>
           </div>
           <div
             onClick={() => fileInputRef.current?.click()}
@@ -227,7 +227,7 @@ export function CommandBar({
             }`}
           >
             <UploadCloud size={14} className={isDragging ? 'text-[#dcb67a]' : 'text-obsidian-muted'} />
-            <span className={`text-[10px] ${isDragging ? 'text-[#dcb67a]' : 'text-obsidian-muted'}`}>
+            <span className={`text-[11px] ${isDragging ? 'text-[#dcb67a]' : 'text-obsidian-muted'}`}>
               {isDragging ? 'Release to attach' : 'Upload or drag dataset'}
             </span>
           </div>
@@ -262,9 +262,9 @@ export function CommandBar({
               const last = images[images.length - 1];
               return (
                 <div className="rounded-md border border-obsidian-border bg-obsidian-bg/40 p-2 flex flex-col gap-0.5">
-                  <span className="text-[9.5px] text-obsidian-muted/70 truncate">{last.name} — mode comparison</span>
+                  <span className="text-[11px] text-obsidian-muted/70 truncate">{last.name} — mode comparison</span>
                   {last.options.map((o) => (
-                    <div key={o.mode} className="flex items-center justify-between gap-2 text-[10px]">
+                    <div key={o.mode} className="flex items-center justify-between gap-2 text-[11px]">
                       <span className={o.mode === last.chosenMode ? 'text-[#dcb67a]' : 'text-obsidian-muted'}>
                         {o.mode === last.chosenMode ? '●' : '○'} {o.label}
                         {o.mode === 'economy' && last.textLike && (
@@ -321,7 +321,7 @@ export function CommandBar({
               <Paperclip size={12} />
               <span>Attach</span>
               {images.length > 0 && (
-                <span className="text-[10px] text-[#dcb67a]">{images.length} image{images.length > 1 ? 's' : ''}</span>
+                <span className="text-[11px] text-[#dcb67a]">{images.length} image{images.length > 1 ? 's' : ''}</span>
               )}
             </button>
           </div>

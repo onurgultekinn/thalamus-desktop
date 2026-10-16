@@ -54,7 +54,7 @@ export function AuthScreen({ onLogin }: AuthScreenProps) {
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
 
           <div className="flex flex-col gap-1.5">
-            <label className="text-[#A8A49E] font-mono text-[10px] tracking-wider uppercase">DISPLAY NAME (OPTIONAL)</label>
+            <label className="text-[#A8A49E] font-mono text-[11px] tracking-wider uppercase">DISPLAY NAME (OPTIONAL)</label>
             <div className="relative">
               <UserIcon size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#87857F]" />
               <input
@@ -69,7 +69,7 @@ export function AuthScreen({ onLogin }: AuthScreenProps) {
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <label className="text-[#A8A49E] font-mono text-[10px] tracking-wider uppercase">EMAIL (OPTIONAL)</label>
+            <label className="text-[#A8A49E] font-mono text-[11px] tracking-wider uppercase">EMAIL (OPTIONAL)</label>
             <input
               type="email"
               value={email}

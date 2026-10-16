@@ -180,7 +180,7 @@ export function CameraPanel({ onClose, onInterpret }: CameraPanelProps) {
         </div>
         <canvas ref={richCanvasRef} className="hidden" />
         <canvas ref={scopeCanvasRef} className="hidden" />
-        <div className="flex items-center gap-4 text-[10px] font-mono">
+        <div className="flex items-center gap-4 text-[11px] font-mono">
           <label className="flex items-center gap-1.5 text-[#87857F]">
             Sensitivity
             <input type="range" min={0.5} max={3} step={0.1} value={sens} onChange={(e) => setSens(Number(e.target.value))} className="w-24 accent-[#3AA99F]" />
@@ -194,7 +194,7 @@ export function CameraPanel({ onClose, onInterpret }: CameraPanelProps) {
         </div>
 
           {/* HIGH FPS live indicators */}
-          <div className="flex items-center gap-3 font-mono text-[10px]">
+          <div className="flex items-center gap-3 font-mono text-[11px]">
             <div className="flex-1">
               <div className="flex justify-between text-[#87857F] mb-1"><span>LIVE MOTION (every frame)</span><span>%{Math.round(live.motion)}</span></div>
               <div className="h-2 bg-white/5 rounded overflow-hidden">
@@ -216,7 +216,7 @@ export function CameraPanel({ onClose, onInterpret }: CameraPanelProps) {
           {error ? (
             <div className="text-[11px] text-rose-300 font-mono">{error}</div>
           ) : facts ? (
-            <div className="flex flex-col gap-1 font-mono text-[10.5px] leading-relaxed text-[#CECDC3]">
+            <div className="flex flex-col gap-1 font-mono text-[11px] leading-relaxed text-[#CECDC3]">
               <div className="flex items-center gap-1.5 text-[#3AA99F]"><ScanLine size={11} /> LIVE SCENE (processed every frame, LLM-ready, few tokens)</div>
               <div className="text-[#CECDC3]">{sceneStatus}</div>
               {sceneEvents.length > 0 && (
