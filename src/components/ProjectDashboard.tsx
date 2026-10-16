@@ -103,23 +103,38 @@ interface PendingMove {
 export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardProps) {
   const { showToast } = useToast();
 
-  // Load editor settings dynamically
-  let fontSize = '13px';
-  let tabSize = 4;
-  let showLineNumbers = true;
-  try {
-    const configStr = localStorage.getItem('thalamus_config');
-    if (configStr) {
-      const config = JSON.parse(configStr);
-      if (config.appearance) {
-        if (config.appearance.fontSize) fontSize = config.appearance.fontSize;
-        if (config.appearance.tabSize) tabSize = config.appearance.tabSize;
-        if (config.appearance.showLineNumbers !== undefined) {
-          showLineNumbers = config.appearance.showLineNumbers;
+  /** Ayarlarla canlı senkron: localStorage config'ini okur. */
+  const readAppearance = () => {
+    let fz = '13px', tab = 4, lines = true;
+    try {
+      const configStr = localStorage.getItem('thalamus_config');
+      if (configStr) {
+        const config = JSON.parse(configStr);
+        if (config.appearance) {
+          if (config.appearance.fontSize) fz = config.appearance.fontSize;
+          if (config.appearance.tabSize) tab = config.appearance.tabSize;
+          if (config.appearance.showLineNumbers !== undefined) lines = config.appearance.showLineNumbers;
         }
       }
-    }
-  } catch {}
+    } catch {}
+    return { fontSize: fz, tabSize: tab, showLineNumbers: lines };
+  };
+
+  // Editör görünüm ayarları state'tedir; Settings kaydettiğinde
+  // 'thalamus_config_changed' olayıyla 20 sn / remount beklemeden uygulanır.
+  const [fontSize, setFontSize] = useState<string>(() => readAppearance().fontSize);
+  const [tabSize, setTabSize] = useState<number>(() => readAppearance().tabSize);
+  const [showLineNumbers, setShowLineNumbers] = useState<boolean>(() => readAppearance().showLineNumbers);
+  useEffect(() => {
+    const sync = () => {
+      const a = readAppearance();
+      setFontSize(a.fontSize);
+      setTabSize(a.tabSize);
+      setShowLineNumbers(a.showLineNumbers);
+    };
+    window.addEventListener('thalamus_config_changed', sync);
+    return () => window.removeEventListener('thalamus_config_changed', sync);
+  }, []);
   const sortNodes = (nodes: FileNode[]): FileNode[] => {
     return [...nodes].sort((a, b) => {
       if (a.isFolder && !b.isFolder) return -1;

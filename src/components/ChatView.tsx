@@ -172,11 +172,11 @@ export function ChatView({
                     <svg className="msg-avatar" viewBox="0 0 24 24">
                       <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
                     </svg>
-                    <span>{msg.role === 'user' ? (userName || 'Anonymous User') : 'Thalamus Engine'}</span>
+                    <span>{msg.role === 'user' ? (userName || 'Anonymous User') : 'Thalamus'}</span>
                   </div>
                   <div className="msg-header-right">
-                    {/* D1: modelName yoksa pazarlama modeli uydurma — motoru soyle */}
-                    <span className="msg-model-name">{msg.modelName || 'Local Compression Engine'}</span>
+                    {/* D1: modelName yoksa pazarlama modeli uydurma */}
+                    <span className="msg-model-name">{msg.modelName || 'Local message'}</span>
                     <span className="dot-separator">·</span>
                     <span>
                       {msg.metrics?.executionTimeMs

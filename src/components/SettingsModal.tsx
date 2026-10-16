@@ -311,6 +311,9 @@ export function SettingsModal({
 
     showToast('Saved', 'Settings applied.', 'success');
     onSaved?.();
+    // Editor ayağı (ProjectDashboard) fontSize/tabSize'ı anında alabilsin diye
+    // config değişti bilgisini yay (remount beklemeden uygulanır).
+    window.dispatchEvent(new Event('thalamus_config_changed'));
   }
 
   /** Clears stored keys + preferences; chats and files are kept. */
