@@ -160,15 +160,46 @@ fn build_workspace_info(root_dir: &Path) -> WorkspaceInfo {
     }
 }
 
+/// Dizin adlari: agir/alakasiz klasorler taranmaz. Acilis suresi ve file_count
+/// anlami icin node_modules/target/.git gibi agaclar sayilmaz (repo_map ile ayni mantik).
+const COUNT_SKIP_DIRS: [&str; 12] = [
+    "node_modules",
+    ".git",
+    "target",
+    "dist",
+    "build",
+    "__pycache__",
+    ".venv",
+    "venv",
+    ".next",
+    ".cache",
+    "vendor",
+    ".idea",
+];
+
+/// Bir workspace icin sayilan dosya ust siniri: 200k dosyali bir agacta
+/// acilis beklenmez, sayim yeterli bilgi verir.
+const COUNT_FILES_CAP: usize = 100_000;
+
 fn count_files(dir: &Path, count: &mut usize) -> std::io::Result<()> {
+    if *count >= COUNT_FILES_CAP {
+        return Ok(());
+    }
     if dir.is_dir() {
         for entry in fs::read_dir(dir)? {
+            if *count >= COUNT_FILES_CAP {
+                return Ok(());
+            }
             let entry = entry?;
             let path = entry.path();
             let ty = entry.file_type()?;
             if ty.is_file() {
                 *count += 1;
             } else if ty.is_dir() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if COUNT_SKIP_DIRS.contains(&name.as_str()) {
+                    continue;
+                }
                 count_files(&path, count)?;
             }
         }
@@ -273,10 +304,29 @@ fn thalamus_compress_prompt(
     Ok(engine::process_with_metrics(&prompt, bpe, veto_override))
 }
 
+/// Duzenleyici okumasi icin bayt ust siniri: cok buyuk dosya textarea'yi
+/// kilitler. Asilirsa net bir hata doner (AI araciyla ayni limit: 200 KB).
+const MAX_EDITOR_READ_BYTES: u64 = 200_000;
+
 #[tauri::command]
 fn thalamus_read_file(path: String, state: State<'_, AppState>) -> Result<String, String> {
     let base = workspace_base(&state);
     let safe_path = is_safe_path(&path, &base)?;
+
+    // Boyut kontrolu okumadan once: 1 GB'lik bir dosyayi string'e cevirmeye
+    // calismak UI'i kilitler.
+    let meta = fs::metadata(&safe_path).map_err(|e| format!("Could not read file: {}", e))?;
+    if meta.is_dir() {
+        return Err("The given path is a directory, not a file.".to_string());
+    }
+    if meta.len() > MAX_EDITOR_READ_BYTES {
+        return Err(format!(
+            "File is too large for the editor ({} KB, limit {} KB). Open it externally.",
+            meta.len() / 1024,
+            MAX_EDITOR_READ_BYTES / 1024
+        ));
+    }
+
     fs::read_to_string(safe_path).map_err(|e| format!("Could not read file: {}", e))
 }
 
@@ -302,6 +352,21 @@ fn list_dir(path: String, state: State<'_, AppState>) -> Result<Vec<DirEntry>, S
         return Err("The given path is not a directory.".to_string());
     }
 
+    // Agir klasorler agacta hic gorunmez (on yuzdeki FILTERED_DIRS ile ayni
+    // mantik): IPC yuku ve agac boyutu dusar, kullanici deneyimi degismez.
+    const SKIP_DIRS: [&str; 8] = [
+        "node_modules",
+        "target",
+        "dist",
+        ".git",
+        ".vscode",
+        "__pycache__",
+        "src_backup_before_copy",
+        ".cache",
+    ];
+    // Tek klasorde ust sinir: binlerce girdili bir dizin agaci kilitlemesin.
+    const MAX_ENTRIES: usize = 2000;
+
     let mut entries: Vec<DirEntry> = Vec::new();
     for entry in fs::read_dir(&safe_path).map_err(|e| format!("Could not read directory: {}", e))? {
         let entry = entry.map_err(|e| format!("Could not read entry: {}", e))?;
@@ -309,6 +374,9 @@ fn list_dir(path: String, state: State<'_, AppState>) -> Result<Vec<DirEntry>, S
         let ft = entry
             .file_type()
             .map_err(|e| format!("Could not read entry type: {}", e))?;
+        if ft.is_dir() && SKIP_DIRS.contains(&name.as_str()) {
+            continue;
+        }
         entries.push(DirEntry {
             name,
             is_dir: ft.is_dir(),
@@ -321,6 +389,10 @@ fn list_dir(path: String, state: State<'_, AppState>) -> Result<Vec<DirEntry>, S
             .cmp(&a.is_dir)
             .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
     });
+
+    if entries.len() > MAX_ENTRIES {
+        entries.truncate(MAX_ENTRIES);
+    }
 
     Ok(entries)
 }

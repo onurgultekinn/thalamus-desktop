@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, type FormEvent } from 'react';
+import { useState, useRef, useEffect, useCallback, type FormEvent } from 'react';
 import { ts } from './lib/format';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
@@ -225,6 +225,9 @@ export default function App() {
   const activeChat = chats.find(c => c.id === activeChatId) || chats[0] || { id: '', title: 'New Chat Session' };
 
   const [messages, setMessages] = useState<Message[]>([]);
+  // Perf: acilista okunan sohbetin hemen geri yazilmasini engelleyen isaret
+  // (bkz. kalicilik efektindeki loadedChatRef).
+  const loadedChatRef = useRef<string | null>(null);
 
   // Load messages whenever activeChatId changes
   useEffect(() => {
@@ -235,6 +238,7 @@ export default function App() {
     const savedMsg = localStorage.getItem(`thalamus_chat_messages_${activeChatId}`);
     if (savedMsg) {
       try {
+        loadedChatRef.current = activeChatId;
         setMessages(JSON.parse(savedMsg));
       } catch {
         setMessages(getDefaultMessages());
@@ -249,21 +253,26 @@ export default function App() {
   // Save messages whenever they change. The stored copy is capped (UI keeps
   // everything in memory) and quota failures degrade to a toast instead of
   // crashing the app — localStorage's 5 MB limit is a real boundary.
+  // Perf: a freshly LOADED chat must not be written straight back — that cost
+  // a full JSON.stringify per open for zero benefit (loadedChatRef marks it).
   useEffect(() => {
     if (activeChatId && messages.length > 0) {
-      const toStore = (
-        messages.length > MAX_STORED_MESSAGES ? messages.slice(-MAX_STORED_MESSAGES) : messages
+      if (loadedChatRef.current === activeChatId) {
+        loadedChatRef.current = null;
+        return;
+      }
+      const capped = messages.length > MAX_STORED_MESSAGES ? messages.slice(-MAX_STORED_MESSAGES) : messages;
       // Görseller (data URL'ler) kalıcı depoya gitmez — 5 MB kota rekoru
-      // (Storage Full) sohbet kaydını komple öldürür. Regenerate görselleri
-      // yalnızca aynı oturum içi Bellek üzerinde çalışır.
-      ).map(m => (m.images ? { ...m, images: undefined } : m));
+      // (Storage Full) sohbet kaydını komple öldürür. Klon yerine replacer ile
+      // atılır: O(n) kopya çıkar.
+      const dropImages = (key: string, value: unknown) => (key === 'images' ? undefined : value);
       try {
-        localStorage.setItem(`thalamus_chat_messages_${activeChatId}`, JSON.stringify(toStore));
+        localStorage.setItem(`thalamus_chat_messages_${activeChatId}`, JSON.stringify(capped, dropImages));
       } catch {
         try {
           localStorage.setItem(
             `thalamus_chat_messages_${activeChatId}`,
-            JSON.stringify(toStore.slice(-50))
+            JSON.stringify(capped.slice(-50), dropImages)
           );
         } catch {
           showToast('Storage Full', 'Chat history could not be saved — storage quota exceeded.', 'error', undefined, '[507] localStorage quota exceeded');
@@ -572,6 +581,37 @@ export default function App() {
     if (abortControllerRef.current) abortControllerRef.current.abort();
   };
 
+  /**
+   * ChatView memo'lu: bu handler'lar sabit kimlikli olmali, yoksa her tus
+   * vurusunde yeni referans uretilir ve tum mesajlar yeniden reconcile edilir.
+   */
+  const handleSampleCode = useCallback((code: string) => {
+    setInput(code);
+    showToast('Snippet Loaded', 'Sample code loaded into input. Hit send to analyze compression.', 'info');
+  }, [showToast]);
+
+  const handleOpenProjectView = useCallback(() => setCurrentView('project'), []);
+  const handleOpenSettings = useCallback(() => setIsSettingsOpen(true), []);
+
+  const handleInspectDiff = useCallback((msg: Message) => {
+    // Silinen/olmayan sohbetten gelen eski mesajda İncele artık ölü veriyle
+    // diff açmaz — dürüst mesaj görüntülenir.
+    if (!chats.some(c => c.id === activeChatId)) {
+      showToast('No Chat', 'This message is no longer attached to a chat session — Inspect cannot open.', 'info');
+      return;
+    }
+    setSelectedDiffData({
+      originalCode: msg.originalCodeSnippet || msg.content,
+      optimizedCode: msg.compressedCodeSnippet || '',
+      originalTokens: msg.metrics?.originalTokens,
+      compressedTokens: msg.metrics?.compressedTokens,
+      savingsPercentage: msg.metrics?.savingsPercentage,
+      engineTimeMs: msg.metrics?.executionTimeMs,
+      losslessVerified: msg.metrics?.losslessVerified
+    });
+    setCurrentView('diff');
+  }, [chats, activeChatId, showToast]);
+
   const handleSend = async (e: FormEvent) => {
     e.preventDefault();
     // An image alone is a valid message; only block when there is neither text nor image.
@@ -687,32 +727,13 @@ export default function App() {
                   onlinePricing={onlinePricing}
                   projectName={projectName}
                   chatEndRef={chatEndRef}
-                  onSampleCode={(code) => {
-                    setInput(code);
-                    showToast('Snippet Loaded', 'Sample code loaded into input. Hit send to analyze compression.', 'info');
-                  }}
-                  onOpenProject={() => setCurrentView('project')}
-                  onOpenSettings={() => setIsSettingsOpen(true)}
+                  chatKey={activeChatId}
+                  onSampleCode={handleSampleCode}
+                  onOpenProject={handleOpenProjectView}
+                  onOpenSettings={handleOpenSettings}
                   onEngineDiagnostic={handleEngineDiagnostic}
                   onRegenerate={handleRegenerate}
-                  onInspectDiff={(msg) => {
-                    // Silinen/olmayan sohbetten gelen eski mesajda İncele artık
-                    // ölü veriyle diff açmaz — dürüst mesaj görüntülenir.
-                    if (!chats.some(c => c.id === activeChatId)) {
-                      showToast('No Chat', 'This message is no longer attached to a chat session — Inspect cannot open.', 'info');
-                      return;
-                    }
-                    setSelectedDiffData({
-                      originalCode: msg.originalCodeSnippet || msg.content,
-                      optimizedCode: msg.compressedCodeSnippet || '',
-                      originalTokens: msg.metrics?.originalTokens,
-                      compressedTokens: msg.metrics?.compressedTokens,
-                      savingsPercentage: msg.metrics?.savingsPercentage,
-                      engineTimeMs: msg.metrics?.executionTimeMs,
-                      losslessVerified: msg.metrics?.losslessVerified
-                    });
-                    setCurrentView('diff');
-                  }}
+                  onInspectDiff={handleInspectDiff}
                 />
               </div>
 

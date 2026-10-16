@@ -256,25 +256,29 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
     } catch {}
   };
 
-  // Tamponlari her degisiklikte localStorage'a yansit; kaydedilen dosyalardan
-  // sonra temizle.
+  // Tamponlari localStorage'a yansit; kaydedilen dosyalardan sonra temizle.
+  // Perf: her tus vurusunda degil, yazma durduktan 400 ms sonra calisir —
+  // tamponlar dosya icerigi tasidigi icin burada tam parse+stringify var.
   useEffect(() => {
-    try {
-      const map: Record<string, string> = JSON.parse(localStorage.getItem(DIRTY_BUFFER_KEY) || '{}');
-      let changed = false;
-      for (const f of Object.keys(fileContents)) {
-        if (isDirty(f)) {
-          if (map[f] !== fileContents[f]) {
-            map[f] = fileContents[f];
+    const timer = window.setTimeout(() => {
+      try {
+        const map: Record<string, string> = JSON.parse(localStorage.getItem(DIRTY_BUFFER_KEY) || '{}');
+        let changed = false;
+        for (const f of Object.keys(fileContents)) {
+          if (isDirty(f)) {
+            if (map[f] !== fileContents[f]) {
+              map[f] = fileContents[f];
+              changed = true;
+            }
+          } else if (map[f] !== undefined) {
+            delete map[f];
             changed = true;
           }
-        } else if (map[f] !== undefined) {
-          delete map[f];
-          changed = true;
         }
-      }
-      if (changed) localStorage.setItem(DIRTY_BUFFER_KEY, JSON.stringify(map));
-    } catch {}
+        if (changed) localStorage.setItem(DIRTY_BUFFER_KEY, JSON.stringify(map));
+      } catch {}
+    }, 400);
+    return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fileContents, savedContents]);
 
@@ -408,12 +412,17 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
     return undefined;
   };
 
-  const activeNode = findFileNode(fileTree, activeTab);
+  // Perf: agac taramalari her render'da degil, yalniz agac/sekme degisince.
+  const activeNode = React.useMemo(() => findFileNode(fileTree, activeTab), [fileTree, activeTab]);
+  const workspaceFiles = React.useMemo(() => collectFilePaths(fileTree), [fileTree]);
   const noFileOpen = !activeTab || !activeNode;
   const currentCode = activeNode ? (fileContents[activeTab] ?? '') : '';
-  const codeLines = currentCode.split('\n');
+  const codeLines = React.useMemo(() => currentCode.split('\n'), [currentCode]);
   const editorLanguage = editorLanguageFor(activeTab);
   const highlightEnabled = currentCode.length <= 100000;
+  // Cok satirli dosyada satir numarasi sutunu da binlerce DOM dugumu uretir.
+  const MAX_GUTTER_LINES = 2000;
+  const gutterLines = codeLines.length <= MAX_GUTTER_LINES ? codeLines : null;
   // Highlighting the whole file on every keystroke is expensive on large files.
   // Deferring it keeps typing responsive: the textarea updates immediately and
   // the colors catch up on the next idle render.
@@ -1246,9 +1255,16 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
               style={{ fontSize }}
               className="pr-4 border-r border-[#34332F]/50 text-[#87857F] text-right select-none flex flex-col min-w-[32px] overflow-hidden"
             >
-              {codeLines.map((_, i) => (
-                <span key={i} className="hover:text-[#CECDC3]">{i + 1}</span>
-              ))}
+              {/* Cok satirli dosyada sutun uretilmez: binlerce span yazmayi kilitler. */}
+              {gutterLines ? (
+                gutterLines.map((_, i) => (
+                  <span key={i} className="hover:text-[#CECDC3]">{i + 1}</span>
+                ))
+              ) : (
+                <span className="text-[10px] pr-1 text-[#5F5C57]" title={`Line numbers hidden above ${MAX_GUTTER_LINES} lines for speed`}>
+                  {codeLines.length} ln
+                </span>
+              )}
             </div>
             )}
           <div className="relative flex-1 min-w-0">
@@ -1395,7 +1411,7 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
     <ThalamusCopilot 
       activeFile={activeTab}
       activeFileCode={currentCode}
-      workspaceFiles={collectFilePaths(fileTree)}
+                workspaceFiles={workspaceFiles}
       onApplyCode={handleApplyCode}
       onOpenTerminal={() => setIsTerminalOpen(true)}
     />

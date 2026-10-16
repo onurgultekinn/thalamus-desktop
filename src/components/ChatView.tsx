@@ -1,4 +1,4 @@
-import { Fragment, type RefObject } from 'react';
+import { Fragment, memo, useEffect, useState, type RefObject } from 'react';
 import { FileCode2, FolderOpen, KeyRound, Gauge } from 'lucide-react';
 import { MarkdownMessage } from './MarkdownMessage';
 import { TextDivider } from './TextDivider';
@@ -6,17 +6,27 @@ import { useToast } from './Toast';
 import type { Message } from '../types';
 
 /**
+ * Rendering window: opening a long chat mounts every message, and each mount
+ * runs react-markdown + Prism on the main thread while JSON.parse/stringify run
+ * for persistence - so a 200-message chat freezes the open path. We render only
+ * the tail and let the user pull older messages in, page by page.
+ */
+const WINDOW_INITIAL = 30;
+const WINDOW_STEP = 30;
+
+/**
  * Chat view: welcome cards + message list + loading indicator.
  * Pure presentational component; all behavior comes in via props (App.tsx keeps
  * ownership). Message cards are not re-rendered unless the `msg` object changes.
  */
-export function ChatView({
+function ChatViewInner({
   messages,
   loading,
   userName,
   onlinePricing,
   projectName,
   chatEndRef,
+  chatKey,
   onSampleCode,
   onOpenProject,
   onOpenSettings,
@@ -31,6 +41,8 @@ export function ChatView({
   onlinePricing: boolean;
   projectName: string;
   chatEndRef: RefObject<HTMLDivElement | null>;
+  /** Identity of the open chat; resets the render window when it changes. */
+  chatKey: string;
   onSampleCode: (code: string) => void;
   onOpenProject: () => void;
   onOpenSettings: () => void;
@@ -38,7 +50,21 @@ export function ChatView({
   onRegenerate: (idx: number) => void;
   onInspectDiff: (msg: Message, idx: number) => void;
 }) {
+  const [visibleCount, setVisibleCount] = useState(WINDOW_INITIAL);
+
+  // Yeni sohbete gecince pencere sifirlanir: eski sohbette acilan 200 mesaj
+  // yeni sohbete tasinip ayni donmayi yaratmasin.
+  useEffect(() => {
+    setVisibleCount(WINDOW_INITIAL);
+  }, [chatKey]);
+
   const { showToast } = useToast();
+
+  // Pencere: son N mesaj render edilir; eskiler kullanicinin istegiyle gelir.
+  const windowStart = Math.max(0, messages.length - visibleCount);
+  const visibleMessages = windowStart > 0 ? messages.slice(windowStart) : messages;
+  const hiddenCount = windowStart;
+
   return (
     <>
       {messages.length <= 1 && !loading ? (
@@ -116,7 +142,23 @@ export function ChatView({
           </div>
         </div>
       ) : (
-        messages.map((msg, idx) => (
+        <>
+          {/* Eskiler burada durur: tek tusla bir sayfa daha getirilir. */}
+          {hiddenCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setVisibleCount(c => c + WINDOW_STEP)}
+              className="mx-auto mt-1 mb-2 px-3 py-1.5 rounded-md border border-white/[0.08] bg-white/[0.03] text-[11px] text-[#A8A49E] hover:text-[#F2F0E5] hover:bg-white/[0.06] cursor-pointer transition-colors"
+              title={`${hiddenCount} earlier message${hiddenCount === 1 ? '' : 's'} hidden for speed`}
+            >
+              Load {Math.min(WINDOW_STEP, hiddenCount)} older message{Math.min(WINDOW_STEP, hiddenCount) === 1 ? '' : 's'}
+              <span className="text-[#6F6C66]"> · {hiddenCount} hidden</span>
+            </button>
+          )}
+
+          {visibleMessages.map((msg, i) => {
+            const idx = windowStart + i;
+            return (
           <Fragment key={idx}>
 
             {msg.role === 'assistant' && msg.metrics && (
@@ -243,7 +285,9 @@ export function ChatView({
             )}
 
           </Fragment>
-        ))
+            );
+          })}
+        </>
       )}
 
       {loading && (
@@ -267,3 +311,21 @@ export function ChatView({
     </>
   );
 }
+
+/**
+ * Memoized: keystrokes in the composer re-render App, but message cards are
+ * expensive (markdown + Prism). Callbacks are intentionally excluded from the
+ * comparison — they are recreated per render, and every piece of state they
+ * close over (messages, loading, active chat) is already a compared prop, so a
+ * stale callback cannot observe anything the current render would not.
+ */
+export const ChatView = memo(ChatViewInner, (prev, next) =>
+  prev.messages === next.messages &&
+  prev.loading === next.loading &&
+  prev.userName === next.userName &&
+  prev.targetModel === next.targetModel &&
+  prev.onlinePricing === next.onlinePricing &&
+  prev.projectName === next.projectName &&
+  prev.chatEndRef === next.chatEndRef &&
+  prev.chatKey === next.chatKey
+);
