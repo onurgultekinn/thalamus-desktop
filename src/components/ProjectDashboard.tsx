@@ -910,8 +910,9 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
         </div>
       </div>
 
-      {/* SECTION 2: EDITOR AND TERMINAL */}
-      <div className="flex-1 flex flex-col min-w-0 bg-[#282726]">
+      {/* SECTION 2: EDITOR AND TERMINAL — M8: dar pencerede editör 0px'e
+          ezilmesin; alt sinir sabit (pencere küçülünce taşma tercih edilir). */}
+      <div className="flex-1 flex flex-col min-w-[280px] bg-[#282726]">
         <div className="h-9 bg-[#282726] border-b border-[#34332F] flex items-center px-1 overflow-x-auto gap-0.5 flex-shrink-0">
           {openTabs.map(fileName => {
             const isActive = activeTab === fileName;
@@ -936,10 +937,11 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
                 )}
                 <button
                   type="button"
+                  aria-label={`Close ${fileName}`}
                   onClick={(e) => handleCloseTab(e, fileName)}
-                  className="hover:text-[#D14D41] p-0.5 rounded cursor-pointer"
+                  className="hover:text-[#D14D41] p-1 -m-0.5 rounded cursor-pointer"
                 >
-                  <X size={12} />
+                  <X size={14} />
                 </button>
               </div>
             );
@@ -1051,11 +1053,13 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
             </div>
           </div>
 
-          {isTerminalOpen && (
-            <div className="flex-1 w-full h-[173px] bg-[#1C1B1A] overflow-hidden">
-              <RealTerminal />
-            </div>
-          )}
+          {/* M2: katlama terminali UNMOUNT etmez — unmount temizligi
+              close_terminal cagirisıyla calisan prosesi OLDURUYORDU.
+              hidden ile PTY + xterm tamponu yasiya kalir; acilinda
+              ResizeObserver yeniden fit eder. */}
+          <div className={`flex-1 w-full bg-[#1C1B1A] overflow-hidden ${isTerminalOpen ? 'h-[173px]' : 'hidden'}`}>
+            <RealTerminal />
+          </div>
         </div>
       </div>
 

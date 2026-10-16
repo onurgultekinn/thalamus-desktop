@@ -248,6 +248,21 @@ export default function App() {
   }, [activeChatId]);
 
   const handleNewChat = () => {
+    // C1: uzerinde hic mesaj olmayan bir sohbet zaten aciksa yenisini
+    // olusturma (listede ust uste "New Chat Session" satirlari birikiyordu);
+    // mevcut bos sohbeti resetleyip kullan.
+    if (activeChatId && messages.length <= 1) {
+      let storedEmpty = true;
+      try {
+        const raw = localStorage.getItem(`thalamus_chat_messages_${activeChatId}`);
+        const parsed = raw ? JSON.parse(raw) : [];
+        storedEmpty = !Array.isArray(parsed) || parsed.length <= 1;
+      } catch { storedEmpty = true; }
+      if (storedEmpty) {
+        setMessages(getDefaultMessages());
+        return;
+      }
+    }
     const newId = 'chat_' + Date.now();
     const newChat: ChatItem = {
       id: newId,
