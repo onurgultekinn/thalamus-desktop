@@ -812,5 +812,13 @@ html[data-theme='nord-red'] .pretty-scrollbar::-webkit-scrollbar-thumb {
 }
 
 .toast-timer {
-  display: none;
+  width: 100%;
+  animation-name: toast_timer_shrink;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
+@keyframes toast_timer_shrink {
+  from { width: 100%; }
+  to { width: 0%; }
 }

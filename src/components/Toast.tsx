@@ -29,6 +29,18 @@ const restOf = (detail?: string): string | undefined => {
   return m ? m[1] : detail;
 };
 
+/**
+ * Explanations are written as "what happened. What to do." — the second part is
+ * the actionable instruction. Split it so the toast can show the cause and the
+ * action as two visually distinct lines.
+ */
+const splitMessage = (message?: string): { cause?: string; action?: string } => {
+  if (!message) return {};
+  const parts = message.split(/(?<=[.!?])\s+/);
+  if (parts.length < 2) return { cause: message };
+  return { cause: parts[0], action: parts.slice(1).join(' ') };
+};
+
 /** Single accent per type; everything else stays neutral. */
 const ACCENT: Record<ToastType, string> = {
   success: '#8F9D77',
@@ -68,10 +80,11 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
           const accent = ACCENT[toast.type];
           const code = codeOf(toast.detail);
           const bodyDetail = restOf(toast.detail);
+          const { cause, action } = splitMessage(toast.message);
           return (
             <div
               key={toast.id}
-              className="pointer-events-auto w-full rounded-md bg-[#201F1D] border border-[#3A3835] shadow-2xl px-3.5 py-3 flex flex-col gap-1.5 animate-in fade-in slide-in-from-bottom-1 duration-150"
+              className="pointer-events-auto relative w-full rounded-md bg-[#201F1D] border border-[#3A3835] shadow-2xl px-3.5 py-3 pb-3.5 flex flex-col gap-1.5 overflow-hidden animate-in fade-in slide-in-from-bottom-1 duration-150"
             >
               <div className="flex items-baseline gap-2">
                 {toast.type === 'error' && code ? (
@@ -99,9 +112,17 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                 </button>
               </div>
 
-              {/* Açıklama: asıl okunacak satır - parlak, rahat satır aralığı. */}
-              {toast.message && (
-                <span className="text-[12px] text-[#CFCAC2] leading-[19px] tracking-[-0.01em]">{toast.message}</span>
+              {/* Ne oldu: sakin, okunur gri ton. */}
+              {cause && (
+                <span className="text-[12px] text-[#CFCAC2] leading-[19px] tracking-[-0.01em]">{cause}</span>
+              )}
+
+              {/* Ne yapmalısın: girintili, aksan yaylı aksiyon satırı - göz ilk buraya gider. */}
+              {action && (
+                <span className="flex items-start gap-1.5 text-[12px] leading-[19px] tracking-[-0.01em] text-[#E7E3DB]">
+                  <span className="flex-shrink-0" style={{ color: accent }}>→</span>
+                  <span className="flex-1 min-w-0">{action}</span>
+                </span>
               )}
 
               {/* Teknik detay: mono, okunur gri ton - netleştirici ince ayırıcı üstünde. */}
@@ -114,6 +135,14 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                   {bodyDetail && code ? '  ·  ' : ''}
                   {toast.type === 'error' && code ? `wiki › ${code}` : ''}
                 </span>
+              )}
+
+              {/* Kalan süre çubuğu: kırık beyaz, alttan iner. */}
+              {toast.durationMs && toast.durationMs > 0 && (
+                <div
+                  className="absolute bottom-0 left-0 h-[1.5px] toast-timer"
+                  style={{ background: 'rgba(244,242,237,0.34)', animationDuration: `${toast.durationMs}ms` }}
+                />
               )}
             </div>
           );
