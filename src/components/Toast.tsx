@@ -71,11 +71,11 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
           return (
             <div
               key={toast.id}
-              className="pointer-events-auto w-full rounded-md bg-[#201F1D] border border-[#3A3835] shadow-2xl px-3 py-2.5 flex flex-col gap-1 animate-in fade-in slide-in-from-bottom-1 duration-150"
+              className="pointer-events-auto w-full rounded-md bg-[#201F1D] border border-[#3A3835] shadow-2xl px-3.5 py-3 flex flex-col gap-1.5 animate-in fade-in slide-in-from-bottom-1 duration-150"
             >
               <div className="flex items-baseline gap-2">
                 {toast.type === 'error' && code ? (
-                  <span className="font-mono text-[11px] font-bold tracking-tight flex-shrink-0" style={{ color: accent }}>
+                  <span className="font-mono text-[12px] font-bold tracking-tight flex-shrink-0" style={{ color: accent }}>
                     {code}
                   </span>
                 ) : (
@@ -85,28 +85,33 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                   />
                 )}
 
-                <span className="text-[12px] font-medium tracking-tight text-[#F1EFEA] leading-[18px] flex-1 min-w-0">
+                <span className="text-[12.5px] font-semibold tracking-tight text-[#F4F2ED] leading-[19px] flex-1 min-w-0">
                   {toast.title}
                 </span>
 
                 <button
                   type="button"
                   onClick={() => removeToast(toast.id)}
-                  className="text-[#6F6C66] hover:text-[#F1EFEA] cursor-pointer transition-colors flex-shrink-0 self-center"
+                  className="text-[#807C74] hover:text-[#F4F2ED] cursor-pointer transition-colors flex-shrink-0 self-center"
                   aria-label="Close"
                 >
-                  <X size={12} />
+                  <X size={13} />
                 </button>
               </div>
 
+              {/* Açıklama: asıl okunacak satır - parlak, rahat satır aralığı. */}
               {toast.message && (
-                <span className="text-[11px] text-[#ACA79F] leading-snug">{toast.message}</span>
+                <span className="text-[12px] text-[#CFCAC2] leading-[19px] tracking-[-0.01em]">{toast.message}</span>
               )}
 
+              {/* Teknik detay: mono, okunur gri ton - netleştirici ince ayırıcı üstünde. */}
               {(bodyDetail || (toast.type === 'error' && code)) && (
-                <span className="text-[10px] text-[#6B6862] font-mono leading-snug line-clamp-2 cursor-help pt-0.5" title={bodyDetail}>
+                <span
+                  className="text-[10.5px] text-[#928D85] font-mono leading-[16px] line-clamp-2 cursor-help mt-0.5 pt-1.5 border-t border-[#312F2C]"
+                  title={bodyDetail}
+                >
                   {bodyDetail}
-                  {bodyDetail && code ? ' · ' : ''}
+                  {bodyDetail && code ? '  ·  ' : ''}
                   {toast.type === 'error' && code ? `wiki › ${code}` : ''}
                 </span>
               )}
