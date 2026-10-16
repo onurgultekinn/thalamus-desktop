@@ -1,0 +1,74 @@
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import './App.css'; // Ensure the stylesheet loads first
+import App from './App';
+import { ToastProvider } from './components/Toast';
+
+/**
+ * Any uncaught render/effect error shows this recoverable screen instead of a
+ * blank (or "closed") window. Clicking Restart reloads the webview in place.
+ */
+class AppErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {
+  state = { error: null as Error | null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidCatch(error: Error) {
+    console.error('[Thalamus] uncaught UI error:', error);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div
+          style={{
+            height: '100vh',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 12,
+            background: '#100F0F',
+            color: '#F2F0E5',
+            fontFamily: 'Segoe UI Variable, system-ui, sans-serif',
+            padding: 24,
+            textAlign: 'center',
+          }}
+        >
+          <div style={{ fontSize: 13, fontWeight: 600 }}>Thalamus hit a rendering problem</div>
+          <div style={{ fontSize: 11, color: '#A8A49E', maxWidth: 520 }}>
+            {String(this.state.error.message || this.state.error)}
+          </div>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            style={{
+              border: '1px solid rgba(255,255,255,0.15)',
+              background: 'none',
+              color: '#F2F0E5',
+              padding: '8px 16px',
+              borderRadius: 6,
+              cursor: 'pointer',
+              fontSize: 12,
+            }}
+          >
+            Restart
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+ReactDOM.createRoot(document.getElementById('root')!).render(
+  <React.StrictMode>
+    <AppErrorBoundary>
+      <ToastProvider>
+        <App />
+      </ToastProvider>
+    </AppErrorBoundary>
+  </React.StrictMode>
+);

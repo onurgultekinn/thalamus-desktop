@@ -1,0 +1,11 @@
+# Bağımlılık ve derleme artıkları (depolanmaz, yeniden üretilir)
+node_modules/
+dist/
+src-tauri/target/
+
+# İşletim sistemi / editör
+Thumbs.db
+Desktop.ini
+
+# Denetim geçici ekran görüntüleri
+_denetim_shot.png

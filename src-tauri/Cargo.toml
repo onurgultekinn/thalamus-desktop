@@ -1,0 +1,58 @@
+[package]
+name = "app"
+version = "0.1.0"
+description = "A Tauri App"
+authors = ["you"]
+license = ""
+repository = ""
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.6.3", features = [] }
+
+[dependencies]
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+log = "0.4"
+tauri = { version = "2.11.3", features = [] }
+tauri-plugin-log = "2"
+
+# Thalamus local compression engine (pure Rust — no external crate/model)
+tiktoken-rs = "0.5"
+
+# HTTP backend — a local axum server for browser preview and desktop
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "net"] }
+tower-http = { version = "0.6", features = ["cors"] }
+
+# AI provider calls (Rust side — no CORS, the key never reaches the webview)
+reqwest = { version = "0.12", default-features = false, features = ["json", "blocking", "rustls-tls"] }
+
+# Real PTY terminal (ConPTY on Windows) — ANSI + interactive programs
+portable-pty = "0.8"
+
+# To locate the app-data directory without opening the Tauri window (--serve-only)
+dirs = "6"
+
+# To write API keys into the Windows Credential Manager (secrets.rs FFI)
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Security_Credentials", "Win32_Foundation"] }
+
+[dev-dependencies]
+# For the HTTP router integration tests (CORS origin checks).
+tower = { version = "0.5", features = ["util"] }
+
+# Dev builds are unoptimized by default, which makes the local tokenizer and
+# compression engine feel sluggish. Optimize dependencies even in dev, while
+# keeping the app crate itself cheap to recompile.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2
+

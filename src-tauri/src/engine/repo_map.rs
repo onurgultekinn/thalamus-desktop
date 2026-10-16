@@ -1,0 +1,201 @@
+// Repo map — aider'dan ilham: çok-dosyalı depoda şemaların token-bütçeli,
+// önem-sıralı haritası. (aider: tree-sitter etiketleri + PageRank; burada
+// şema çıkarıcımız + referans-sayımı sıralaması. PageRank sonraki adım.)
+//
+// Sıralama mantığı:
+//   - bir tanım başka dosyada referans ediliyorsa → tanımın sahibi dosya puan alır
+//   - `focus` (aktif dosya) ve onun referans ettiği dosyalar ekstra puan alır
+//   - bütçeye göre greedy doldurma; sığmayan dosyalar "(bütçe dışı)" notuyla işaretlenir
+
+use crate::engine::schema::{extract_schema, render_schema};
+use std::collections::HashMap;
+use tiktoken_rs::CoreBPE;
+
+pub struct RepoFile {
+    pub name: String,
+    pub code: String,
+}
+
+pub struct RepoMapResult {
+    pub map: String,
+    pub tokens: usize,
+    pub included: usize,
+    pub total: usize,
+}
+
+fn definition_names(code: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    for line in code.lines() {
+        let t = line.trim_start();
+        if let Some(rest) = t
+            .strip_prefix("def ")
+            .or_else(|| t.strip_prefix("async def "))
+            .or_else(|| t.strip_prefix("class "))
+        {
+            let name: String = rest
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                .collect();
+            if !name.is_empty() {
+                names.push(name);
+            }
+        }
+    }
+    names
+}
+
+pub fn build_repo_map(
+    files: &[RepoFile],
+    bpe: &CoreBPE,
+    budget: usize,
+    focus: Option<&str>,
+) -> RepoMapResult {
+    // 1) Şemalar + tanım sahipliği
+    //    Şema çıkarıcı şimdilik Python; .py olmayan dosyalar "şema desteklenmiyor"
+    //    olarak işaretlenir (tree-sitter ile dil genelleştirme sonraki adım).
+    //    Bu sınırlama yanlış-pozitifi de engeller: .rs içindeki Python string'i
+    //    şema sanılmaz.
+    let mut schemas: HashMap<String, Option<String>> = HashMap::new();
+    let mut def_owner: HashMap<String, String> = HashMap::new();
+    for f in files {
+        let is_python = f.name.ends_with(".py");
+        let rendered = if is_python {
+            extract_schema(&f.code).map(|s| {
+                for name in definition_names(&f.code) {
+                    def_owner.entry(name).or_insert_with(|| f.name.clone());
+                }
+                // @C başlık satırını at (harita başına bir kez yeter)
+                let body = render_schema(&s);
+                match body.find('\n') {
+                    Some(i) => body[i + 1..].to_string(),
+                    None => body,
+                }
+            })
+        } else {
+            None
+        };
+        schemas.insert(f.name.clone(), rendered);
+    }
+
+    // 2) Önem puanı: başka dosyada referans edilen tanımlar + focus yakınlığı
+    let mut score: HashMap<String, usize> = files
+        .iter()
+        .map(|f| (f.name.clone(), 0usize))
+        .collect();
+    for f in files {
+        for (def_name, owner) in &def_owner {
+            if *owner != f.name && f.code.contains(def_name.as_str()) {
+                *score.entry(owner.clone()).or_insert(0) += 1;
+            }
+        }
+    }
+    if let Some(focus) = focus {
+        *score.entry(focus.to_string()).or_insert(0) += 50;
+        if let Some(f) = files.iter().find(|f| f.name == focus) {
+            for (def_name, owner) in &def_owner {
+                if *owner != *focus && f.code.contains(def_name.as_str()) {
+                    *score.entry(owner.clone()).or_insert(0) += 20;
+                }
+            }
+        }
+    }
+
+    // 3) Skora göre sırala, bütçeye greedy doldur
+    let mut order: Vec<&String> = files.iter().map(|f| &f.name).collect();
+    order.sort_by(|a, b| {
+        let sa = score.get(*a).copied().unwrap_or(0);
+        let sb = score.get(*b).copied().unwrap_or(0);
+        sb.cmp(&sa).then_with(|| a.cmp(b))
+    });
+
+    let mut map = String::new();
+    let mut used = 0usize;
+    let mut included = 0usize;
+    for name in &order {
+        let f = files.iter().find(|f| &f.name == *name).unwrap();
+        let candidate = match schemas.get(name.as_str()) {
+            Some(Some(schema_body)) => format!("## {}\n{}\n", name, schema_body),
+            _ => format!("## {} (şema desteklenmiyor)\n", name),
+        };
+        let tok = count(bpe, &candidate);
+        if used + tok <= budget {
+            map.push_str(&candidate);
+            used += tok;
+            included += 1;
+        } else {
+            // Bütçe dışı dosyalar da LLM'in görüş alanında kalmalı:
+            // varlığını bilmeden get_code_body isteyemez. Not koşulsuz eklenir.
+            let note = format!(
+                "## {} — bütçe dışı ({} tanım; get_code_body ile istenebilir)\n",
+                name,
+                definition_names(&f.code).len()
+            );
+            map.push_str(&note);
+            used += count(bpe, &note);
+        }
+    }
+
+    RepoMapResult {
+        map,
+        tokens: used,
+        included,
+        total: files.len(),
+    }
+}
+
+fn count(bpe: &CoreBPE, text: &str) -> usize {
+    bpe.encode_with_special_tokens(text).len()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn bpe() -> tiktoken_rs::CoreBPE {
+        tiktoken_rs::cl100k_base().unwrap()
+    }
+
+    #[test]
+    fn referenced_files_rank_higher_and_budget_is_respected() {
+        let files = vec![
+            RepoFile {
+                name: "notes.py".into(),
+                code: "x = 1\n".into(),
+            },
+            RepoFile {
+                name: "utils.py".into(),
+                code: "def validate_token(token):\n    return token.startswith('tok_')\n".into(),
+            },
+            RepoFile {
+                name: "api.py".into(),
+                code: "def dispatch(h):\n    if not validate_token(h):\n        raise ValueError\n    return h\n".into(),
+            },
+        ];
+        let b = bpe();
+        let r = build_repo_map(&files, &b, 2000, Some("api.py"));
+        assert_eq!(r.total, 3);
+        assert!(r.map.contains("validate_token"));
+        // utils.py hem referans ediliyor hem focus'un kullandığı şey → önde
+        let i_utils = r.map.find("## utils.py").unwrap();
+        let i_notes = r.map.find("## notes.py").unwrap();
+        assert!(i_utils < i_notes, "referans edilen dosya önde olmalı");
+    }
+
+    #[test]
+    fn tiny_budget_marks_files_out_of_budget() {
+        let files = vec![
+            RepoFile {
+                name: "a.py".into(),
+                code: "def f1():\n    pass\n\ndef f2():\n    pass\n\ndef f3():\n    pass\n".into(),
+            },
+            RepoFile {
+                name: "b.py".into(),
+                code: "def g1():\n    pass\n".into(),
+            },
+        ];
+        let b = bpe();
+        let r = build_repo_map(&files, &b, 60, None);
+        assert!(r.included < r.total, "küçük bütçede hepsi sığmamalı");
+        assert!(r.map.contains("bütçe dışı"));
+    }
+}
