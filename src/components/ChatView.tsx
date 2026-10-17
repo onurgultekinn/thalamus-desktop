@@ -81,7 +81,9 @@ function ChatViewInner({
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
+          {/* İçeriğe göre akar: önizleme paneli açıkken daralan sütunda 2 kolona
+              zorlanıp kartlar ezilmez, gerektiğinde tek kolona düşer. */}
+          <div className="grid gap-4 w-full" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))' }}>
             {/* CARD 1: Sample prompt */}
             <button
               type="button"

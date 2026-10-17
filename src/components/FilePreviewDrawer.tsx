@@ -131,18 +131,41 @@ export function FilePreviewDrawer({ item, onClose, inline = false }: { item: Pre
         ) : item.body !== undefined ? (
           <pre className="p-3 text-[11.5px] leading-relaxed font-mono text-obsidian-text whitespace-pre-wrap break-words">{item.body}</pre>
         ) : canUseViewer ? (
+            <div className="fv-themed" style={{ width: '100%', height: '100%' }}>
+            {/* @file-viewer araç çubuğunu uygulama paletine çek (mavi/kalabalık
+                varsayılan görünümü sadeleştirir). styleIsolation:'none' gerekir. */}
+            <style>{`
+              .fv-themed .file-viewer-web-shell, .fv-themed .file-viewer-web-content { background: #100F0F !important; }
+              .fv-themed .file-viewer-web-toolbar {
+                background: #1C1B1A !important; border-bottom: 1px solid #34332F !important;
+                padding: 4px 6px !important; gap: 4px !important; min-height: 0 !important;
+                position: sticky; top: 0; z-index: 5;
+              }
+              .fv-themed .file-viewer-web-toolbar-group { background: transparent !important; border: 0 !important; gap: 2px !important; }
+              .fv-themed .file-viewer-web-icon-button {
+                border-radius: 6px !important; color: #87857F !important; background: transparent !important;
+              }
+              .fv-themed .file-viewer-web-icon-button:hover { background: #282726 !important; color: #F2F0E5 !important; }
+              .fv-themed .file-viewer-web-icon-button[aria-pressed="true"],
+              .fv-themed .file-viewer-web-icon-button[data-active="true"] { background: rgba(220,182,122,0.14) !important; color: #dcb67a !important; }
+              .fv-themed .file-viewer-web-zoom-meter { color: #A8A49E !important; font-family: ui-monospace, monospace !important; }
+            `}</style>
             <FileViewer
               url={viewerUrl}
               filename={item.name}
               options={{
                 theme: 'dark',
-                // Araç çubuğunu sadeleştir + zemini uygulama paletine çek:
-                // varsayılan mavi/kalabalık görünüm sakinleşir.
+                // Shadow DOM'u kapat → araç çubuğunu kendi paletimize boyayabilelim.
+                styleIsolation: 'none',
+                locale: 'tr-TR',
                 ui: { density: 'compact', surfaceBackground: '#100F0F' },
-                toolbar: { position: 'top', download: true, zoom: true, search: true, print: false, exportHtml: false, theme: false },
+                toolbar: { position: 'top', download: true, zoom: true, search: false, print: false, exportHtml: false, theme: false },
+                // PDF: yan gezinme paneli varsayılan kapalı (teal/mavi sekmeler gider).
+                pdf: { navigation: false },
               }}
               style={{ width: '100%', height: '100%' }}
             />
+            </div>
         ) : (
           <p className="p-4 text-[12px] text-obsidian-muted leading-relaxed">
             {item.kind === 'large' ? t('composer.previewTooLarge') : t('composer.previewBinary')}
