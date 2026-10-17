@@ -21,12 +21,9 @@ import {
   Code2,
   Server,
   CircleUser,
-  Keyboard,
-  Info,
   Database,
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
-import { getVersion } from '@tauri-apps/api/app';
 import { useToast } from './Toast';
 import { MODELS, DEFAULT_MODEL_NAME } from '../constants';
 import type { User } from '../types';
@@ -48,8 +45,6 @@ export type SettingsTab =
   | 'editor'
   | 'providers'
   | 'profile'
-  | 'shortcuts'
-  | 'about'
   | 'data';
 
 const FAMILY_LABEL: Record<ProviderFamily, TranslationKey> = {
@@ -80,11 +75,7 @@ const NAV_GROUPS: { groupKey: TranslationKey; items: { id: SettingsTab; labelKey
   },
   {
     groupKey: 'settings.group.system',
-    items: [
-      { id: 'shortcuts', labelKey: 'settings.tab.shortcuts', icon: Keyboard },
-      { id: 'about', labelKey: 'settings.tab.about', icon: Info },
-      { id: 'data', labelKey: 'settings.tab.data', icon: Database },
-    ],
+    items: [{ id: 'data', labelKey: 'settings.tab.data', icon: Database }],
   },
 ];
 
@@ -109,11 +100,6 @@ const SEARCH_INDEX: { section: SettingsTab; labelKey: TranslationKey }[] = [
   { section: 'providers', labelKey: 'settings.defaultModel' },
   { section: 'providers', labelKey: 'settings.livePrices' },
   { section: 'profile', labelKey: 'settings.displayName' },
-  { section: 'shortcuts', labelKey: 'settings.shortcut.send' },
-  { section: 'about', labelKey: 'settings.aboutVersion' },
-  { section: 'about', labelKey: 'settings.aboutEngine' },
-  { section: 'about', labelKey: 'settings.aboutWorkspace' },
-  { section: 'about', labelKey: 'settings.aboutChats' },
   { section: 'data', labelKey: 'settings.resetTitle' },
   { section: 'data', labelKey: 'settings.clearChats' },
 ];
@@ -146,15 +132,6 @@ function Card({ title, desc, children }: { title?: string; desc?: string; childr
       )}
       <div className="divide-y divide-white/[0.05]">{children}</div>
     </section>
-  );
-}
-
-/** Small in-card heading used to group rows by context (keyboard shortcuts). */
-function GroupLabel({ children }: { children: ReactNode }) {
-  return (
-    <div className="pt-3 pb-0.5 text-[10px] font-medium uppercase tracking-wider text-[#575654]">
-      {children}
-    </div>
   );
 }
 
@@ -241,14 +218,6 @@ function Segmented<T extends string>({
         </button>
       ))}
     </div>
-  );
-}
-
-function Kbd({ children }: { children: ReactNode }) {
-  return (
-    <kbd className="rounded border border-white/[0.1] bg-white/[0.04] px-1.5 py-0.5 font-mono text-[10.5px] text-[#CECDC3]">
-      {children}
-    </kbd>
   );
 }
 
@@ -339,14 +308,6 @@ export function SettingsModal({
   const [displayName, setDisplayName] = useState('');
   const [avatar, setAvatar] = useState('');
 
-  // About
-  const [appVersion, setAppVersion] = useState('');
-  const [engineReady, setEngineReady] = useState<boolean | null>(null);
-  const [engineModel, setEngineModel] = useState('');
-  const [workspaceInfo, setWorkspaceInfo] = useState<{ name: string; file_count: number } | null>(null);
-  const [chatCount, setChatCount] = useState(0);
-  const [storageKb, setStorageKb] = useState(0);
-
   useEffect(() => {
     if (!isOpen) return;
     let cancelled = false;
@@ -403,39 +364,16 @@ export function SettingsModal({
       .then((info) => {
         if (cancelled) return;
         if (info?.root) setWorkspaceRoot(info.root);
-        if (info?.root) setWorkspaceInfo({ name: info.name, file_count: info.file_count });
       })
       .catch(() => {});
-
-    // About: version, engine and local data (all honest — never assumed ready).
-    getVersion().then((v) => { if (!cancelled) setAppVersion(v); }).catch(() => {});
-    invoke<{ is_ready: boolean; model_loaded?: boolean; model_path?: string }>('thalamus_get_engine_status')
-      .then((s) => {
-        if (cancelled) return;
-        setEngineReady(!!s?.is_ready);
-        if (s?.model_path) setEngineModel(s.model_path.split(/[\\/]/).pop() || '');
-      })
-      .catch(() => { if (!cancelled) setEngineReady(null); });
-
-    // Local data footprint: chat sessions + approximate localStorage usage.
-    try {
-      const chats = JSON.parse(localStorage.getItem('thalamus_chats') || '[]');
-      setChatCount(Array.isArray(chats) ? chats.length : 0);
-      let bytes = 0;
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i) || '';
-        bytes += k.length + (localStorage.getItem(k)?.length || 0);
-      }
-      setStorageKb(Math.round(bytes / 1024));
-    } catch {}
 
     return () => { cancelled = true; };
   }, [isOpen]);
 
   useEffect(() => setActiveSection(initialTab), [initialTab]);
 
-  // D10: tema düğmesi anlık önizleme uygular; kaydetmeden kapatırken (Cancel,
-  // X, overlay) modalin AÇILIŞTAKİ temasına dönülür. Cancel gerçekten iptal.
+  // D10: tema seçimi ANINDA kalıcıdır (previewTheme ref'i günceller), bu yüzden
+  // kapatmak temayı geri almaz. Diğer (Kaydet'e bağlı) alanlar için Cancel iptal sayılır.
   const requestClose = useCallback(() => {
     if (theme !== themeAtOpenRef.current) {
       setTheme(themeAtOpenRef.current);
@@ -483,9 +421,14 @@ export function SettingsModal({
     window.dispatchEvent(new Event('thalamus_config_changed'));
   };
 
-  /** Applies a theme immediately (live preview) so the dialog itself restyles. */
+  /**
+   * Applies the theme immediately AND commits it: a display preference must
+   * stick even if the dialog is dismissed without pressing Save. Updating the
+   * "theme at open" ref stops requestClose() from snapping back to the old theme.
+   */
   const previewTheme = (next: 'dark' | 'nord-red') => {
     setTheme(next);
+    themeAtOpenRef.current = next;
     try { localStorage.setItem('tlm_theme', next); } catch {}
     const el = document.documentElement;
     if (next === 'nord-red') el.setAttribute('data-theme', 'nord-red');
@@ -833,6 +776,10 @@ export function SettingsModal({
                         const target = API_PROVIDERS.find((x) => x.id === e.target.value);
                         if (target && target.available === false) return;
                         setActiveProvider(e.target.value);
+                        // Sağlayıcı seçimi ANINDA etki eder (Kaydet beklemez):
+                        // getActiveProvider bu anahtarı okur.
+                        try { localStorage.setItem(activeProviderStorageKey, e.target.value); } catch {}
+                        window.dispatchEvent(new Event('thalamus_config_changed'));
                         setVisibleProvider(null);
                       }}
                       className={selectCls}
@@ -855,7 +802,13 @@ export function SettingsModal({
                       <input
                         type="text"
                         value={baseUrls[p.id] || ''}
-                        onChange={(e) => setBaseUrls((prev) => ({ ...prev, [p.id]: e.target.value }))}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setBaseUrls((prev) => ({ ...prev, [p.id]: v }));
+                          // Temel URL de anında kalıcıdır.
+                          try { if (v.trim()) localStorage.setItem(baseStorageKey(p.id), v); else localStorage.removeItem(baseStorageKey(p.id)); } catch {}
+                          window.dispatchEvent(new Event('thalamus_config_changed'));
+                        }}
                         placeholder={p.defaultBaseUrl || 'http://localhost:8000/v1'}
                         className={inputCls}
                         spellCheck={false}
@@ -1016,67 +969,6 @@ export function SettingsModal({
               )
             )}
 
-            {/* ── SHORTCUTS ── */}
-            {!q && activeSection === 'shortcuts' && (
-              <Card>
-                <GroupLabel>{t('settings.shortcut.groupComposer')}</GroupLabel>
-                <Row label={t('settings.shortcut.send')} control={<Kbd>Enter</Kbd>} />
-                <Row
-                  label={t('settings.shortcut.newline')}
-                  control={
-                    <span className="flex items-center gap-1">
-                      <Kbd>Shift</Kbd>
-                      <span className="text-[#575654]">+</span>
-                      <Kbd>Enter</Kbd>
-                    </span>
-                  }
-                />
-                <GroupLabel>{t('settings.shortcut.groupEditor')}</GroupLabel>
-                <Row label={t('settings.shortcut.save')} control={<Kbd>Ctrl + S</Kbd>} />
-                <Row label={t('settings.shortcut.run')} control={<Kbd>Ctrl + R</Kbd>} />
-                <GroupLabel>{t('settings.shortcut.groupAnywhere')}</GroupLabel>
-                <Row label={t('settings.shortcut.close')} control={<Kbd>Esc</Kbd>} />
-              </Card>
-            )}
-
-            {/* ── ABOUT ── */}
-            {!q && activeSection === 'about' && (
-              <Card>
-                <Row label={t('settings.aboutVersion')} control={<span className="font-mono text-[12px] text-[#CECDC3]">{appVersion || '—'}</span>} />
-                <Row
-                  label={t('settings.aboutEngine')}
-                  hint={engineReady && engineModel ? t('settings.aboutEngineModel', { model: engineModel }) : undefined}
-                  control={
-                    <span className={`text-[12px] ${engineReady ? 'text-emerald-400' : 'text-[#87857F]'}`}>
-                      {engineReady === null
-                        ? '—'
-                        : engineReady
-                          ? t('settings.aboutEngineReady')
-                          : t('settings.aboutEngineOffline')}
-                    </span>
-                  }
-                />
-                <Row
-                  label={t('settings.aboutWorkspace')}
-                  control={
-                    <span className="max-w-[320px] truncate text-right text-[12px] text-[#CECDC3]">
-                      {workspaceInfo
-                        ? `${workspaceInfo.name} · ${t('settings.aboutFiles', { n: workspaceInfo.file_count })}`
-                        : t('settings.aboutNoWorkspace')}
-                    </span>
-                  }
-                />
-                <Row
-                  label={t('settings.aboutChats')}
-                  control={<span className="text-[12px] text-[#CECDC3]">{t('settings.aboutChatCount', { n: chatCount })}</span>}
-                />
-                <Row
-                  label={t('settings.aboutStorage')}
-                  control={<span className="font-mono text-[12px] text-[#CECDC3]">{t('settings.aboutStorageVal', { n: storageKb })}</span>}
-                />
-              </Card>
-            )}
-
             {/* ── DATA & RESET ── */}
             {!q && activeSection === 'data' && (
               <Card>
@@ -1138,7 +1030,7 @@ export function SettingsModal({
               onClick={requestClose}
               className="rounded-md border border-white/[0.08] px-3.5 py-1.5 text-[11.5px] text-[#87857F] transition-colors hover:border-white/[0.14] hover:text-[#CECDC3] cursor-pointer"
             >
-              {t('settings.cancel')}
+              {t('common.close')}
             </button>
             <button
               type="button"

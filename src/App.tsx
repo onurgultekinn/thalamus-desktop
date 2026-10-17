@@ -103,7 +103,11 @@ export default function App() {
   // T1 close-guard: Rust CloseRequested'i önler ve bu olayı iletir; kirli
   // editör tamponu varsa kullanıcıya sorulur, aksi hâlde destroy ile kapatılır.
   useEffect(() => {
-    const win = getCurrentWebviewWindow();
+    // Tauri yoksa (tarayıcı önizlemesi) close-guard atlanır — aksi halde
+    // getCurrentWebviewWindow() __TAURI_INTERNALS__ üzerinden çöküp tüm
+    // arayüzü düşürür.
+    let win: ReturnType<typeof getCurrentWebviewWindow>;
+    try { win = getCurrentWebviewWindow(); } catch { return; }
     let off: (() => void) | undefined;
     let disposed = false;
     win.listen('close-requested', () => {
@@ -118,7 +122,7 @@ export default function App() {
       }
       const names = dirtyFiles.map((f) => f.split('/').pop()).join(', ');
       const proceed = window.confirm(
-        `${dirtyFiles.length} file(s) have unsaved changes: ${names}. Close anyway and lose them? (Tip: Ctrl+S saves.)`
+        t('chat.unsavedCloseMany', { n: dirtyFiles.length, names })
       );
       if (proceed) void win.destroy();
     }).then((unlisten) => {
