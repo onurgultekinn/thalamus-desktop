@@ -159,7 +159,9 @@ export function FilePreviewDrawer({ item, onClose, inline = false }: { item: Pre
                 styleIsolation: 'none',
                 locale: 'tr-TR',
                 ui: { density: 'compact', surfaceBackground: '#100F0F' },
-                toolbar: { position: 'top', download: true, zoom: true, search: false, print: false, exportHtml: false, theme: false },
+                // Üst düzey (web) araç çubuğu KAPALI: çift zoom'u önler; biçime
+                // özgü araç çubuğu (ör. PDF sayfa+zoom) tek kontrol yüzeyi olur.
+                toolbar: false,
                 // PDF: yan gezinme paneli varsayılan kapalı (teal/mavi sekmeler gider).
                 pdf: { navigation: false },
               }}
