@@ -456,7 +456,7 @@ export function SettingsModal({
                   </div>
 
                   <div className="flex flex-col gap-1.5">
-                    <label className={labelCls} htmlFor="profile-display-name">Display name</label>
+                    <label className={labelCls} htmlFor="profile-display-name">{t('settings.displayName')}</label>
                     <input
                       id="profile-display-name"
                       type="text"
@@ -466,11 +466,11 @@ export function SettingsModal({
                       className={inputCls}
                       spellCheck={false}
                     />
-                    <span className="text-[11px] text-[#87857F]">Shown in the sidebar and on your messages.</span>
+                    <span className="text-[11px] text-[#87857F]">{t('settings.displayNameHint')}</span>
                   </div>
 
                   <div className="flex flex-col gap-1.5">
-                    <label className={labelCls} htmlFor="profile-email">Email</label>
+                    <label className={labelCls} htmlFor="profile-email">{t('settings.email')}</label>
                     <input
                       id="profile-email"
                       type="text"
@@ -478,7 +478,7 @@ export function SettingsModal({
                       readOnly
                       className={`${inputCls} cursor-not-allowed opacity-60`}
                     />
-                    <span className="text-[11px] text-[#87857F]">Part of your local profile; it cannot be changed here.</span>
+                    <span className="text-[11px] text-[#87857F]">{t('settings.emailHint')}</span>
                   </div>
                 </div>
               )
@@ -488,7 +488,7 @@ export function SettingsModal({
             {activeSection === 'providers' && (
               <div className="flex flex-col gap-4">
                 <div className="flex flex-col gap-1.5">
-                  <label className={labelCls}>Provider</label>
+                  <label className={labelCls}>{t('settings.provider')}</label>
                   <select
                     value={activeProvider}
                     onChange={e => {
@@ -505,23 +505,23 @@ export function SettingsModal({
                     {API_PROVIDERS.map(x => (
                       <option key={x.id} value={x.id} disabled={x.available === false}>
                         {x.name}
-                        {x.available === false ? ' — coming soon' : ` — ${FAMILY_LABEL[x.family]}`}
+                        {x.available === false ? t('settings.comingSoon') : ` — ${FAMILY_LABEL[x.family]}`}
                       </option>
                     ))}
                   </select>
                   {p.available === false && (
                     <p className="text-[11px] text-amber-300/90">
-                      {p.name} is listed but not wired yet: the local proxy only speaks the OpenAI chat/completions format. Choose an OpenAI-compatible provider until then.
+                      {t('settings.providerNotWired', { name: p.name })}
                     </p>
                   )}
                   <p className="text-[11px] text-[#87857F]">
-                    {configuredCount} of {availableProviders.length} providers have a key saved. Keys are stored in the OS credential vault — never in plain text.
+                    {t('settings.keyCount', { configured: configuredCount, total: availableProviders.length })}
                   </p>
                 </div>
 
                 {p.needsBaseUrl && (
                   <div className="flex flex-col gap-1.5">
-                    <label className={labelCls}>Base URL</label>
+                    <label className={labelCls}>{t('settings.baseUrl')}</label>
                     <input
                       type="text"
                       value={baseUrls[p.id] || ''}
@@ -535,7 +535,7 @@ export function SettingsModal({
 
                 <div className="flex flex-col gap-1.5">
                   <label className={labelCls}>
-                    API key{providerRequiresKey(p) ? '' : ' — optional for local'}
+                    {providerRequiresKey(p) ? t('settings.apiKey') : t('settings.apiKeyOptional')}
                   </label>
                   <div className="relative">
                     <input
@@ -550,7 +550,7 @@ export function SettingsModal({
                     <button
                       type="button"
                       onClick={() => setVisibleProvider(visibleProvider === p.id ? null : p.id)}
-                      aria-label={visibleProvider === p.id ? 'Hide API key' : 'Show API key'}
+                      aria-label={visibleProvider === p.id ? t('settings.hideKey') : t('settings.showKey')}
                       className="absolute right-3 top-1/2 -translate-y-1/2 text-[#575654] transition-colors hover:text-[#CECDC3] cursor-pointer"
                       tabIndex={-1}
                     >
