@@ -171,6 +171,17 @@ fn finalize_edits(content: &str, blocks: &[(String, String, String)]) -> Vec<Val
         .collect()
 }
 
+/// Whole-file yedeğinin denenip denenmeyeceğine karar verir. Yedek YALNIZCA
+/// model gerçekten SEARCH/REPLACE ürettiyse (düzenleme denediyse) ve o bloklar
+/// mevcut kodla eşleşmediyse anlamlıdır. Soru-cevap turunda bağlam için
+/// eklenen `code_blocks` yüzünden tetiklenip ikinci bir LLM çağrısıyla dosyayı
+/// habersizce baştan yazmamalıdır (sahte "applied" raporunun kaynağı buydu).
+fn should_try_whole_file_fallback(content: &str, edits: &[Value], has_blocks: bool) -> bool {
+    let all_failed = edits.is_empty() || edits.iter().all(|e| e["applied"] == Value::Bool(false));
+    let edit_attempted = !edits::parse_edit_blocks(content).is_empty();
+    all_failed && edit_attempted && has_blocks
+}
+
 /// Markdown kod bloğunun içeriğini çıkarır (```lang … ```).
 fn extract_code_block(content: &str) -> Option<String> {
     let start = content.find("```")?;
@@ -428,13 +439,7 @@ pub async fn ai_chat(
     // Aider stratejisi: SEARCH/REPLACE eşleşmediyse whole-file yedeği dene.
     // Blocking client async çalışanda çağrılamaz — spawn_blocking'e taşındı
     // (aksi halde uzun provider gecikmesi tüm HTTP sunucusunu kilitler).
-    let all_failed = edits.is_empty() || edits.iter().all(|e| e["applied"] == Value::Bool(false));
-    // Yedek YALNIZCA model gerçekten düzenleme denediyse (SEARCH/REPLACE
-    // ürettiyse) çalışır. Soru-cevap turunda bağlam için eklenen code_blocks
-    // yüzünden yedek tetiklenip ikinci bir LLM çağrısıyla dosyayı habersizce
-    // baştan yazmasın (sahte "applied" raporunun kaynağı buydu).
-    let edit_attempted = !edits::parse_edit_blocks(&result.0).is_empty();
-    let edits = if all_failed && edit_attempted && !blocks.is_empty() {
+    let edits = if should_try_whole_file_fallback(&result.0, &edits, !blocks.is_empty()) {
         let fallback_messages = messages_before_context;
         let fallback_url = url.clone();
         let fallback_key = req.api_key.clone();
@@ -694,5 +699,40 @@ mod tests {
         .unwrap();
         assert_eq!(out[0]["applied"], Value::Bool(true));
         assert!(out[0]["new_body"].as_str().unwrap().contains("return 2"));
+    }
+
+    #[test]
+    fn fallback_skipped_for_plain_question_with_context_blocks() {
+        // Bağlam için code_blocks var ama model SEARCH/REPLACE üretmedi
+        // (düz soru-cevap) → yedek DENENMEMELİ: ikinci LLM çağrısı + sahte
+        // "applied" olmamalı.
+        let edits: Vec<Value> = vec![];
+        assert!(!should_try_whole_file_fallback(
+            "Cevap: fonksiyon doğru görünüyor, değişiklik gerekmez.",
+            &edits,
+            true
+        ));
+    }
+
+    #[test]
+    fn fallback_runs_when_edit_attempted_but_failed() {
+        // Model düzenleme denedi ama SEARCH bloğu eşleşmedi → yedek denenmeli.
+        let edits = vec![json!({"file":"f.py","applied":false,"message":"no match","new_body":null})];
+        let content = "f.py\n<<<<<<< SEARCH\n    return 9\n=======\n    return 2\n>>>>>>> REPLACE\n";
+        assert!(should_try_whole_file_fallback(content, &edits, true));
+    }
+
+    #[test]
+    fn fallback_skipped_when_edit_already_applied() {
+        let edits = vec![json!({"file":"f.py","applied":true,"message":"ok","new_body":"x"})];
+        let content = "f.py\n<<<<<<< SEARCH\n    return 1\n=======\n    return 2\n>>>>>>> REPLACE\n";
+        assert!(!should_try_whole_file_fallback(content, &edits, true));
+    }
+
+    #[test]
+    fn fallback_skipped_without_blocks() {
+        let edits: Vec<Value> = vec![];
+        let content = "f.py\n<<<<<<< SEARCH\n a\n=======\n b\n>>>>>>> REPLACE\n";
+        assert!(!should_try_whole_file_fallback(content, &edits, false));
     }
 }
