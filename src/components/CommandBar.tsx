@@ -13,10 +13,16 @@ const MAX_READ_BYTES = 8 * 1024 * 1024;
 export interface UploadedFile {
   name: string;
   size: string;
-  /** 'text' taşınabilir bağlam; 'binary'/'large' yalnız not olarak gösterilir. */
-  kind: 'text' | 'binary' | 'large';
+  /**
+   * 'text' taşınabilir bağlam (modele gider). 'pdf'/'audio'/'video' yerel
+   * önizleme (object URL) — modele metin olarak gönderilmez. 'binary'/'large'
+   * yalnız not.
+   */
+  kind: 'text' | 'binary' | 'large' | 'pdf' | 'audio' | 'video';
   /** Metin dosyasının içeriği (modele görünmez bağlam olarak gider). */
   body?: string;
+  /** pdf/audio/video için yerel önizleme URL'i (blob). */
+  url?: string;
   /**
    * Eklenen dosya input'a YAZILMAZ (eski davranış prompt'u dosya metniyle
    * dolduruyordu). Dosyalar input üstünde çip olarak durur; çipe tıklayınca
@@ -58,7 +64,7 @@ export function CommandBar({
   const [isDragging, setIsDragging] = useState(false);
   const [imageMode] = useState<ImageMode>(DEFAULT_IMAGE_MODE);
   /** Çipe tıklanınca sağda açılan önizleme. */
-  const [preview, setPreview] = useState<{ name: string; kind: 'text' | 'binary' | 'large' | 'image'; body?: string; url?: string; size?: string } | null>(null);
+  const [preview, setPreview] = useState<{ name: string; kind: 'text' | 'binary' | 'large' | 'image' | 'pdf' | 'audio' | 'video'; body?: string; url?: string; size?: string } | null>(null);
 
   const popoverRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -67,6 +73,8 @@ export function CommandBar({
   // Shared by the file-picker input and drag&drop → the exact same rules apply.
   // NOTE: nothing is written into the textarea; the file becomes a chip.
   const handleFile = async (file: File) => {
+    // Yükleme paneli ekleme sonrası kapanır; yeniden açmak için tekrar basılır.
+    setIsFileMenuOpen(false);
     const size = `${(file.size / 1024).toFixed(1)} KB`;
 
     if (file.type.startsWith('image/')) {
@@ -76,6 +84,20 @@ export function CommandBar({
       } catch {
         setUploadedFiles(prev => [...prev, { name: file.name, size, kind: 'binary' }]);
       }
+      return;
+    }
+
+    // PDF ve medya: tarayıcıda yerel olarak önizlenir (modele metin olarak gitmez).
+    if (file.type === 'application/pdf') {
+      setUploadedFiles(prev => [...prev, { name: file.name, size, kind: 'pdf', url: URL.createObjectURL(file) }]);
+      return;
+    }
+    if (file.type.startsWith('audio/')) {
+      setUploadedFiles(prev => [...prev, { name: file.name, size, kind: 'audio', url: URL.createObjectURL(file) }]);
+      return;
+    }
+    if (file.type.startsWith('video/')) {
+      setUploadedFiles(prev => [...prev, { name: file.name, size, kind: 'video', url: URL.createObjectURL(file) }]);
       return;
     }
 
@@ -147,6 +169,7 @@ export function CommandBar({
   const removeFile = (index: number) => {
     setUploadedFiles(prev => {
       const removed = prev[index];
+      if (removed?.url) { try { URL.revokeObjectURL(removed.url); } catch {} }
       if (removed && preview?.name === removed.name) setPreview(null);
       return prev.filter((_, i) => i !== index);
     });
@@ -160,6 +183,8 @@ export function CommandBar({
 
   const submitWithFiles = () => {
     const files = buildFileContext();
+    // Serbest bırak: yerel önizleme blob URL'leri artık gerekmiyor.
+    uploadedFiles.forEach(f => { if (f.url) { try { URL.revokeObjectURL(f.url); } catch {} } });
     setUploadedFiles([]);
     setPreview(null);
     onSend({ preventDefault: () => {} } as unknown as FormEvent, files);
@@ -261,6 +286,12 @@ export function CommandBar({
           <div className="flex-1 overflow-auto pretty-scrollbar p-3">
             {preview.kind === 'image' && preview.url ? (
               <img src={preview.url} alt={preview.name} className="w-full rounded-md border border-obsidian-border" />
+            ) : preview.kind === 'pdf' && preview.url ? (
+              <iframe src={preview.url} title={preview.name} className="w-full h-full min-h-[70vh] rounded-md border border-obsidian-border bg-white" />
+            ) : preview.kind === 'video' && preview.url ? (
+              <video src={preview.url} controls className="w-full rounded-md border border-obsidian-border" />
+            ) : preview.kind === 'audio' && preview.url ? (
+              <audio src={preview.url} controls className="w-full" />
             ) : preview.body !== undefined ? (
               <pre className="text-[11.5px] leading-relaxed font-mono text-obsidian-text whitespace-pre-wrap break-words">{preview.body}</pre>
             ) : (
@@ -300,7 +331,7 @@ export function CommandBar({
               <div
                 key={`file-${file.name}-${idx}`}
                 className="group flex items-center gap-1.5 rounded-md border border-obsidian-border bg-obsidian-bg/60 pl-2 pr-1.5 py-1 cursor-pointer hover:border-[#dcb67a]/50 transition-colors"
-                onClick={() => setPreview({ name: file.name, kind: file.kind, body: file.body, size: file.size })}
+                onClick={() => setPreview({ name: file.name, kind: file.kind, body: file.body, url: file.url, size: file.size })}
                 title={file.name}
               >
                 <FileCode size={12} className="text-obsidian-muted flex-shrink-0" />
