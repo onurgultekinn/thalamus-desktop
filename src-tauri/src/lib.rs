@@ -671,6 +671,26 @@ impl Utf8Stream {
     }
 }
 
+/// PTY çocuğunu kapatırken SÜREÇ AĞACINI öldürür. Windows ConPTY'de düz
+/// `child.kill()` yalnız doğrudan süreci (powershell.exe) öldürür; terminalde
+/// başlatılan alt süreçler (dev-server, node, python… ) yetim kalıp sızar.
+/// `taskkill /T /F` tüm ağacı kapatır. Diğer platformlarda normal kill yeterli.
+fn kill_child_tree(child: &mut Box<dyn portable_pty::Child + Send + Sync>) {
+    #[cfg(windows)]
+    {
+        if let Some(pid) = child.process_id() {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            let _ = std::process::Command::new("taskkill")
+                .args(["/PID", &pid.to_string(), "/T", "/F"])
+                .creation_flags(CREATE_NO_WINDOW)
+                .output();
+            return;
+        }
+    }
+    let _ = child.kill();
+}
+
 #[tauri::command]
 fn start_terminal(
     app_handle: tauri::AppHandle,
@@ -713,7 +733,7 @@ fn start_terminal(
     {
         let mut slot = state.terminal.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(mut prev) = slot.take() {
-            let _ = prev.child.kill();
+            kill_child_tree(&mut prev.child);
         }
         *slot = Some(TerminalSession {
             master: pair.master,
@@ -755,7 +775,7 @@ fn write_terminal(data: String, state: State<'_, AppState>) -> Result<(), String
     let mut slot = state.terminal.lock().unwrap_or_else(|e| e.into_inner());
     let session = slot
         .as_mut()
-        .ok_or_else(|| "Terminal henüz başlatılmadı.".to_string())?;
+        .ok_or_else(|| "Terminal has not been started yet.".to_string())?;
     session
         .writer
         .write_all(data.as_bytes())
@@ -788,7 +808,7 @@ fn close_terminal(state: State<'_, AppState>) -> Result<(), String> {
         .unwrap_or_else(|e| e.into_inner())
         .take()
     {
-        let _ = session.child.kill();
+        kill_child_tree(&mut session.child);
     }
     Ok(())
 }
