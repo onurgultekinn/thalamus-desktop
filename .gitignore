@@ -9,3 +9,11 @@ Desktop.ini
 
 # Denetim geçici ekran görüntüleri
 _denetim_shot.png
+
+# @file-viewer offline asset kopyaları (üretilir)
+public/file-viewer/
+
+# @file-viewer kopyalanan assetleri (kök düzeyinde de olusabiliyor)
+public/file-viewer/
+public/vendor/
+public/flyfish-viewer-*.json

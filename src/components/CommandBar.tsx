@@ -3,6 +3,7 @@ import { Paperclip, ArrowUp, FileCode, X, UploadCloud, ChevronUp, Square } from 
 import { MODELS } from '../constants';
 import { prepareImageFile, DEFAULT_IMAGE_MODE, type AttachedImage, type ImageMode } from '../lib/imageAttach';
 import { useT } from '../lib/i18n';
+import { FilePreviewDrawer, type PreviewItem } from './FilePreviewDrawer';
 
 // Attachments must never dump raw bytes into the prompt. Images become a compact
 // on-device measurement summary; binary files are noted but omitted; oversized
@@ -23,6 +24,10 @@ export interface UploadedFile {
   body?: string;
   /** pdf/audio/video için yerel önizleme URL'i (blob). */
   url?: string;
+  /** Ham baytlar — geniş format görüntüleyici (@file-viewer) için. */
+  buffer?: ArrayBuffer;
+  /** MIME türü (görüntüleyici yönlendirmesi + indirme). */
+  mime?: string;
   /**
    * Eklenen dosya input'a YAZILMAZ (eski davranış prompt'u dosya metniyle
    * dolduruyordu). Dosyalar input üstünde çip olarak durur; çipe tıklayınca
@@ -64,7 +69,7 @@ export function CommandBar({
   const [isDragging, setIsDragging] = useState(false);
   const [imageMode] = useState<ImageMode>(DEFAULT_IMAGE_MODE);
   /** Çipe tıklanınca sağda açılan önizleme. */
-  const [preview, setPreview] = useState<{ name: string; kind: 'text' | 'binary' | 'large' | 'image' | 'pdf' | 'audio' | 'video'; body?: string; url?: string; size?: string } | null>(null);
+  const [preview, setPreview] = useState<PreviewItem | null>(null);
 
   const popoverRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -77,59 +82,58 @@ export function CommandBar({
     setIsFileMenuOpen(false);
     const size = `${(file.size / 1024).toFixed(1)} KB`;
 
-    if (file.type.startsWith('image/')) {
+    const mime = file.type || '';
+
+    if (mime.startsWith('image/')) {
       try {
         const attached = await prepareImageFile(file, imageMode);
         setImages(prev => [...prev, attached]);
       } catch {
-        setUploadedFiles(prev => [...prev, { name: file.name, size, kind: 'binary' }]);
+        setUploadedFiles(prev => [...prev, { name: file.name, size, kind: 'binary', mime }]);
       }
       return;
     }
 
-    // PDF ve medya: tarayıcıda yerel olarak önizlenir (modele metin olarak gitmez).
-    if (file.type === 'application/pdf') {
-      setUploadedFiles(prev => [...prev, { name: file.name, size, kind: 'pdf', url: URL.createObjectURL(file) }]);
-      return;
-    }
-    if (file.type.startsWith('audio/')) {
-      setUploadedFiles(prev => [...prev, { name: file.name, size, kind: 'audio', url: URL.createObjectURL(file) }]);
-      return;
-    }
-    if (file.type.startsWith('video/')) {
-      setUploadedFiles(prev => [...prev, { name: file.name, size, kind: 'video', url: URL.createObjectURL(file) }]);
-      return;
-    }
-
+    // Çok büyük: önizleme yok, yalnız İndir.
     if (file.size > MAX_READ_BYTES) {
-      setUploadedFiles(prev => [...prev, { name: file.name, size, kind: 'large' }]);
+      setUploadedFiles(prev => [...prev, { name: file.name, size, kind: 'large', mime, url: URL.createObjectURL(file) }]);
       return;
     }
 
-    // Read as bytes first so binary files are never decoded into garbage text.
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    const probe = bytes.subarray(0, 1024);
+    const buffer = await file.arrayBuffer();
+
+    // PDF ve medya: native/görüntüleyici önizlemesi (modele metin olarak gitmez).
+    if (mime === 'application/pdf') {
+      setUploadedFiles(prev => [...prev, { name: file.name, size, kind: 'pdf', mime, buffer, url: URL.createObjectURL(file) }]);
+      return;
+    }
+    if (mime.startsWith('audio/')) {
+      setUploadedFiles(prev => [...prev, { name: file.name, size, kind: 'audio', mime, buffer, url: URL.createObjectURL(file) }]);
+      return;
+    }
+    if (mime.startsWith('video/')) {
+      setUploadedFiles(prev => [...prev, { name: file.name, size, kind: 'video', mime, buffer, url: URL.createObjectURL(file) }]);
+      return;
+    }
+
+    // Binary mi? (NUL taraması) — binary ise metin olarak çözmeyiz; görüntüleyici çizer.
+    const probe = new Uint8Array(buffer, 0, Math.min(1024, buffer.byteLength));
     let binary = false;
     for (let i = 0; i < probe.length; i++) {
       if (probe[i] === 0) { binary = true; break; }
     }
     if (binary) {
-      setUploadedFiles(prev => [...prev, { name: file.name, size, kind: 'binary' }]);
+      setUploadedFiles(prev => [...prev, { name: file.name, size, kind: 'binary', mime, buffer }]);
       return;
     }
 
-    let text = new TextDecoder().decode(bytes);
+    let text = new TextDecoder().decode(buffer);
     let truncated = false;
     if (text.length > MAX_TEXT_CHARS) {
       text = text.slice(0, MAX_TEXT_CHARS);
       truncated = true;
     }
-    setUploadedFiles(prev => [...prev, {
-      name: file.name,
-      size,
-      kind: truncated ? 'large' : 'text',
-      body: truncated ? text : text,
-    }]);
+    setUploadedFiles(prev => [...prev, { name: file.name, size, kind: truncated ? 'large' : 'text', mime, body: text }]);
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -271,37 +275,7 @@ export function CommandBar({
 
       {/* Main Command Input Box */}
       {/* Preview drawer (right side) — opens when a chip is clicked. */}
-      {preview && (
-        <div className="fixed top-0 right-0 h-full w-[420px] max-w-[90vw] bg-obsidian-panel border-l border-obsidian-border shadow-2xl z-[60] flex flex-col">
-          <div className="flex items-center justify-between px-3 py-2 border-b border-obsidian-border flex-shrink-0">
-            <div className="flex items-center gap-2 min-w-0">
-              <FileCode size={13} className="text-obsidian-muted flex-shrink-0" />
-              <span className="text-[12px] font-semibold text-obsidian-text truncate">{preview.name}</span>
-              {preview.size && <span className="text-[11px] text-obsidian-muted font-mono flex-shrink-0">{preview.size}</span>}
-            </div>
-            <button type="button" onClick={() => setPreview(null)} className="text-obsidian-muted hover:text-obsidian-text cursor-pointer p-0.5" title={t('common.close')}>
-              <X size={14} />
-            </button>
-          </div>
-          <div className="flex-1 overflow-auto pretty-scrollbar p-3">
-            {preview.kind === 'image' && preview.url ? (
-              <img src={preview.url} alt={preview.name} className="w-full rounded-md border border-obsidian-border" />
-            ) : preview.kind === 'pdf' && preview.url ? (
-              <iframe src={preview.url} title={preview.name} className="w-full h-full min-h-[70vh] rounded-md border border-obsidian-border bg-white" />
-            ) : preview.kind === 'video' && preview.url ? (
-              <video src={preview.url} controls className="w-full rounded-md border border-obsidian-border" />
-            ) : preview.kind === 'audio' && preview.url ? (
-              <audio src={preview.url} controls className="w-full" />
-            ) : preview.body !== undefined ? (
-              <pre className="text-[11.5px] leading-relaxed font-mono text-obsidian-text whitespace-pre-wrap break-words">{preview.body}</pre>
-            ) : (
-              <p className="text-[12px] text-obsidian-muted leading-relaxed">
-                {preview.kind === 'large' ? t('composer.previewTooLarge') : t('composer.previewBinary')}
-              </p>
-            )}
-          </div>
-        </div>
-      )}
+      {preview && <FilePreviewDrawer item={preview} onClose={() => setPreview(null)} />}
 
       <form onSubmit={(e) => { e.preventDefault(); submitWithFiles(); }} className="w-full bg-obsidian-panel border border-obsidian-border rounded-xl flex flex-col p-3 gap-2 shadow-2xl transition-all duration-200 focus-within:border-[#dcb67a]/40">
         {/* Attachment chips — the row sits just above the input; nothing is
@@ -331,7 +305,7 @@ export function CommandBar({
               <div
                 key={`file-${file.name}-${idx}`}
                 className="group flex items-center gap-1.5 rounded-md border border-obsidian-border bg-obsidian-bg/60 pl-2 pr-1.5 py-1 cursor-pointer hover:border-[#dcb67a]/50 transition-colors"
-                onClick={() => setPreview({ name: file.name, kind: file.kind, body: file.body, url: file.url, size: file.size })}
+                onClick={() => setPreview({ name: file.name, kind: file.kind, body: file.body, url: file.url, buffer: file.buffer, mime: file.mime, size: file.size })}
                 title={file.name}
               >
                 <FileCode size={12} className="text-obsidian-muted flex-shrink-0" />
