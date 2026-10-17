@@ -259,7 +259,7 @@ export function CommandBar({
                       type="button"
                       onClick={() => setImages(prev => prev.filter((_, i) => i !== idx))}
                       className="absolute -top-1.5 -right-1.5 bg-obsidian-panel border border-obsidian-border rounded-full p-0.5 text-obsidian-muted hover:text-rose-400 cursor-pointer"
-                      title="Remove image"
+                      title={t('cop.removeImage')}
                     >
                       <X size={10} />
                     </button>
@@ -277,7 +277,7 @@ export function CommandBar({
                       <span className={o.mode === last.chosenMode ? 'text-[#dcb67a]' : 'text-obsidian-muted'}>
                         {o.mode === last.chosenMode ? '●' : '○'} {o.label}
                         {o.mode === 'economy' && last.textLike && (
-                          <span title="This image looks like text/UI — low detail may hurt legibility"> ⚠</span>
+                          <span title={t('composer.imageTextWarn')}> ⚠</span>
                         )}
                       </span>
                       <span className="font-mono text-obsidian-muted whitespace-nowrap">

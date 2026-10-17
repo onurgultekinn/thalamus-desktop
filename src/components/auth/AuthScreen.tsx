@@ -63,7 +63,7 @@ export function AuthScreen({ onLogin }: AuthScreenProps) {
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="Anonymous User"
+                placeholder={t('sidebar.anonymous')}
                 className="w-full bg-[#100F0F] border border-[#34332F] focus:border-[#403E3C] rounded-md pl-9 pr-3 py-2 text-[#F2F0E5] text-xs focus:outline-none transition-all"
                 autoFocus
               />

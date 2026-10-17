@@ -1392,7 +1392,7 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
       onMouseDown={() => setIsResizingCopilot(true)}
       onDoubleClick={() => setCopilotWidth(DEFAULT_COPILOT_WIDTH)}
       className="absolute top-0 -left-1.5 bottom-0 w-3 cursor-col-resize hover:bg-[#4385BE]/40 transition-colors z-20 group flex items-center justify-center"
-      title="Drag (340px - 470px) or double-click to reset the size"
+      title={t('ide.resizeTitle')}
     >
       <div className="w-[2px] h-full bg-transparent group-hover:bg-[#4385BE]" />
     </div>
