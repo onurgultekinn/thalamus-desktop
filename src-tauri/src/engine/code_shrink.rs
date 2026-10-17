@@ -11,6 +11,11 @@
 // shrink None döner → çağıran ham kodu kullanır (hata-güvenli). Bu modül
 // pipeline'a bağlı DEĞİLDİR — ölçüm deneyidir.
 
+// Deney modülü: üretim hattına bağlanana kadar `shrink`/`expand` ve
+// yardımcıları yalnızca testlerden çağrılır. Silmek yerine ölü-kod uyarısını
+// burada susturuyoruz — niyet belgelenmiş, ölçüm kodu korunur.
+#![allow(dead_code)]
+
 use std::collections::{HashMap, HashSet};
 use tiktoken_rs::CoreBPE;
 

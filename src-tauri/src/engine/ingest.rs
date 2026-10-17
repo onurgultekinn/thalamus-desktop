@@ -14,6 +14,9 @@
 use serde_json::{Map, Value};
 
 pub struct Ingested {
+    /// Tespit edilen biçim ("json"/"logfmt"/…). Üretimde okunmuyor; hata
+    /// ayıklama ve testler için taşınır.
+    #[allow(dead_code)]
     pub format: &'static str,
     pub value: Value,
 }

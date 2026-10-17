@@ -232,6 +232,7 @@ fn whole_file_fallback(
 
 /// Tool-call döngüsü. Araçlar `tools` kayıt sisteminden gelir (dosya/arama/
 /// şema); tümü workspace köküne sınırlıdır. Döndürür: (içerik, tur, usage).
+#[allow(clippy::too_many_arguments)] // iç çağrı: 8 bağımsız parametre; struct'a sarmak churn
 pub fn run_tool_loop(
     transport: &dyn Transport,
     url: &str,
@@ -312,7 +313,7 @@ fn project_memory(root: &str) -> Option<String> {
 /// yanıtları (assistant) NATURAL kalmak şartıyla dokunulmaz.
 /// Dönen değer toplu `(original_tokens, compressed_tokens, compressed_count)`.
 fn compress_messages_invisibly(
-    messages: &mut Vec<Value>,
+    messages: &mut [Value],
     bpe: &tiktoken_rs::CoreBPE,
 ) -> (usize, usize, usize) {
     let mut original_total = 0usize;
