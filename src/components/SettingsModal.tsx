@@ -91,6 +91,8 @@ const NAV_GROUPS: { groupKey: TranslationKey; items: { id: SettingsTab; labelKey
 const ALL_SECTIONS = NAV_GROUPS.flatMap((g) => g.items);
 const sectionLabelKey = (id: SettingsTab): TranslationKey =>
   ALL_SECTIONS.find((s) => s.id === id)?.labelKey ?? 'settings.tab.general';
+/** One-line, section-specific description shown under the header. */
+const sectionDescKey = (id: SettingsTab): TranslationKey => `settings.desc.${id}` as TranslationKey;
 
 /** Flat index of individual rows so the search box can jump across sections. */
 const SEARCH_INDEX: { section: SettingsTab; labelKey: TranslationKey }[] = [
@@ -107,10 +109,11 @@ const SEARCH_INDEX: { section: SettingsTab; labelKey: TranslationKey }[] = [
   { section: 'providers', labelKey: 'settings.defaultModel' },
   { section: 'providers', labelKey: 'settings.livePrices' },
   { section: 'profile', labelKey: 'settings.displayName' },
-  { section: 'shortcuts', labelKey: 'settings.card.shortcutsTitle' },
+  { section: 'shortcuts', labelKey: 'settings.shortcut.send' },
   { section: 'about', labelKey: 'settings.aboutVersion' },
   { section: 'about', labelKey: 'settings.aboutEngine' },
   { section: 'about', labelKey: 'settings.aboutWorkspace' },
+  { section: 'about', labelKey: 'settings.aboutChats' },
   { section: 'data', labelKey: 'settings.resetTitle' },
   { section: 'data', labelKey: 'settings.clearChats' },
 ];
@@ -128,16 +131,67 @@ function Row({ label, hint, control }: { label: string; hint?: string; control: 
   );
 }
 
-/** A titled group of rows ("card"), matching the section-card layout. */
-function Card({ title, desc, children }: { title: string; desc?: string; children: ReactNode }) {
+/**
+ * A group of rows. The header is optional: sections whose heading already names
+ * the content use a bare group so the title is never repeated on the rows.
+ */
+function Card({ title, desc, children }: { title?: string; desc?: string; children: ReactNode }) {
   return (
     <section className="mb-4 rounded-lg border border-white/[0.06] bg-white/[0.02] px-4 py-1">
-      <div className="pt-3.5">
-        <h3 className="text-[12.5px] font-semibold text-[#F2F0E5]">{title}</h3>
-        {desc && <p className="mt-0.5 text-[11px] leading-snug text-[#87857F]">{desc}</p>}
-      </div>
+      {title && (
+        <div className="pt-3.5">
+          <h3 className="text-[12.5px] font-semibold text-[#F2F0E5]">{title}</h3>
+          {desc && <p className="mt-0.5 text-[11px] leading-snug text-[#87857F]">{desc}</p>}
+        </div>
+      )}
       <div className="divide-y divide-white/[0.05]">{children}</div>
     </section>
+  );
+}
+
+/** Small in-card heading used to group rows by context (keyboard shortcuts). */
+function GroupLabel({ children }: { children: ReactNode }) {
+  return (
+    <div className="pt-3 pb-0.5 text-[10px] font-medium uppercase tracking-wider text-[#575654]">
+      {children}
+    </div>
+  );
+}
+
+/** Theme picker with a live mini-preview so the choice is obvious at a glance. */
+function ThemeSwatches({
+  value,
+  onChange,
+}: {
+  value: 'dark' | 'nord-red';
+  onChange: (v: 'dark' | 'nord-red') => void;
+}) {
+  const swatches = [
+    { id: 'dark' as const, label: 'Obsidian', bg: '#100F0F', panel: '#1C1B1A', accent: '#3AA99F' },
+    { id: 'nord-red' as const, label: 'Nord Red', bg: '#17100F', panel: '#211A18', accent: '#D99A6C' },
+  ];
+  return (
+    <div className="flex gap-2">
+      {swatches.map((s) => {
+        const active = value === s.id;
+        return (
+          <button
+            key={s.id}
+            type="button"
+            onClick={() => onChange(s.id)}
+            className={`flex cursor-pointer flex-col gap-1.5 rounded-md border p-1.5 transition-colors ${
+              active ? 'border-[#3AA99F]/70' : 'border-white/[0.08] hover:border-white/[0.16]'
+            }`}
+          >
+            <span className="flex h-6 w-16 items-center gap-1 rounded-sm px-1.5" style={{ backgroundColor: s.bg }}>
+              <span className="h-3.5 w-3.5 rounded-sm" style={{ backgroundColor: s.panel }} />
+              <span className="h-2 w-2 rounded-full" style={{ backgroundColor: s.accent }} />
+            </span>
+            <span className={`text-[11px] ${active ? 'text-[#F2F0E5]' : 'text-[#87857F]'}`}>{s.label}</span>
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -288,7 +342,10 @@ export function SettingsModal({
   // About
   const [appVersion, setAppVersion] = useState('');
   const [engineReady, setEngineReady] = useState<boolean | null>(null);
+  const [engineModel, setEngineModel] = useState('');
   const [workspaceInfo, setWorkspaceInfo] = useState<{ name: string; file_count: number } | null>(null);
+  const [chatCount, setChatCount] = useState(0);
+  const [storageKb, setStorageKb] = useState(0);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -313,7 +370,7 @@ export function SettingsModal({
         // Anahtarlar okunamadı: inputlar BOŞ kalır ama bu "sil" demek değildir.
         keysStatusRef.current = 'error';
         setKeysLoaded(true);
-        showToast('Key Load Failed', 'Stored API keys could not be read. Saving will NOT touch them. Restart the app if this repeats — the vault may be locked.', 'error', undefined, '[500] secrets vault read failed');
+        showToast(t('settings.keyLoadFailed'), t('settings.keyLoadFailedMsg'), 'error', undefined, '[500] secrets vault read failed');
       });
     const loadedBases: Record<string, string> = {};
     for (const p of API_PROVIDERS) {
@@ -350,11 +407,27 @@ export function SettingsModal({
       })
       .catch(() => {});
 
-    // About: version + engine status (both honest — never assumed ready).
+    // About: version, engine and local data (all honest — never assumed ready).
     getVersion().then((v) => { if (!cancelled) setAppVersion(v); }).catch(() => {});
-    invoke<{ is_ready: boolean }>('thalamus_get_engine_status')
-      .then((s) => { if (!cancelled) setEngineReady(!!s?.is_ready); })
+    invoke<{ is_ready: boolean; model_loaded?: boolean; model_path?: string }>('thalamus_get_engine_status')
+      .then((s) => {
+        if (cancelled) return;
+        setEngineReady(!!s?.is_ready);
+        if (s?.model_path) setEngineModel(s.model_path.split(/[\\/]/).pop() || '');
+      })
       .catch(() => { if (!cancelled) setEngineReady(null); });
+
+    // Local data footprint: chat sessions + approximate localStorage usage.
+    try {
+      const chats = JSON.parse(localStorage.getItem('thalamus_chats') || '[]');
+      setChatCount(Array.isArray(chats) ? chats.length : 0);
+      let bytes = 0;
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i) || '';
+        bytes += k.length + (localStorage.getItem(k)?.length || 0);
+      }
+      setStorageKb(Math.round(bytes / 1024));
+    } catch {}
 
     return () => { cancelled = true; };
   }, [isOpen]);
@@ -386,9 +459,8 @@ export function SettingsModal({
 
   const p = API_PROVIDERS.find((x) => x.id === activeProvider) || API_PROVIDERS[0];
   // Yalnız KULLANILABILIR sağlayıcılar sayılır: "coming soon" (ör. Anthropic)
-  // listelenir ama anahtarı olsa bile kullanılamaz — sayıma katmak yanıltıcıydı.
+  // listelenir ama anahtarı olsa bile kullanılamaz — durum listesine katmak yanıltıcıydı.
   const availableProviders = API_PROVIDERS.filter((x) => x.available !== false);
-  const configuredCount = availableProviders.filter((x) => !!(keys[x.id] || '').trim()).length;
 
   /**
    * Ayar değişikliğini ANINDA kalıcılaştırır ve uygular (Kaydet beklenmez).
@@ -425,13 +497,13 @@ export function SettingsModal({
     e.target.value = '';
     if (!file) return;
     if (!file.type.startsWith('image/')) {
-      showToast('Invalid file', 'Please choose an image file (PNG, JPG, WEBP or GIF).', 'error', undefined, '[400] wrong file type');
+      showToast(t('settings.invalidImage'), t('settings.invalidImageMsg'), 'error', undefined, '[400] wrong file type');
       return;
     }
     try {
       setAvatar(await fileToAvatarDataUrl(file));
     } catch {
-      showToast('Could not read image', 'The selected file could not be processed — it may be corrupt or in an unsupported format. Try another image.', 'error', undefined, '[400] image decode failed');
+      showToast(t('settings.imageReadFailed'), t('settings.imageReadFailedMsg'), 'error', undefined, '[400] image decode failed');
     }
   }
 
@@ -439,7 +511,7 @@ export function SettingsModal({
     // V4: anahtarlar henuz yuklenmediyse kaydetme anahtarlara DOKUNMAZ —
     // bos input yuzunden vault silinmesi (V4 yaris kosulu) artik imkansiz.
     if (keysStatusRef.current === 'loading') {
-      showToast('Not Ready', 'API keys are still loading from the vault — try again in a moment.', 'info');
+      showToast(t('settings.notReady'), t('settings.notReadyMsg'), 'info');
       return;
     }
     if (keysStatusRef.current === 'ok') {
@@ -450,7 +522,7 @@ export function SettingsModal({
       const removed = changed.filter((p) => !(keys[p.id] || '').trim());
       if (removed.length > 0) {
         const names = removed.map((p) => p.name).join(', ');
-        if (!window.confirm(`Remove the stored API key(s) for ${names}? Existing keys stay unless you confirm.`)) {
+        if (!window.confirm(t('settings.removeKeyConfirm', { names }))) {
           return;
         }
       }
@@ -481,7 +553,7 @@ export function SettingsModal({
       } catch (e) {
         console.error('Could not set workspace root:', e);
         const x = explainError(e, 'Workspace');
-        showToast('Workspace Error', `"${workspaceRoot.trim()}" is not a valid folder — the previous workspace is kept. ${x.explanation}`, 'error', undefined, `[${x.code}] ${x.detail ?? String(e)}]`);
+        showToast(t('settings.workspaceError'), `${t('settings.workspaceErrorMsg', { path: workspaceRoot.trim() })} ${x.explanation}`, 'error', undefined, `[${x.code}] ${x.detail ?? String(e)}]`);
       }
     }
 
@@ -508,7 +580,7 @@ export function SettingsModal({
       });
     }
 
-    showToast('Saved', 'Settings applied.', 'success');
+    showToast(t('settings.saved'), t('settings.savedMsg'), 'success');
     onSaved?.();
     // Editor ayağı (ProjectDashboard) fontSize/tabSize'ı anında alabilsin diye
     // config değişti bilgisini yay (remount beklemeden uygulanır).
@@ -523,13 +595,13 @@ export function SettingsModal({
     try {
       await invoke('reset_app_config');
     } catch (e) {
-      showToast('Reset Incomplete', 'Preferences were cleared but the backend config file could not be removed — it will be restored on next start.', 'error', undefined, `[500] ${String(e)}`);
+      showToast(t('settings.resetIncomplete'), t('settings.resetIncompleteMsg'), 'error', undefined, `[500] ${String(e)}`);
     }
     for (const key of Object.keys(localStorage)) {
       if (key.startsWith('tlm_')) localStorage.removeItem(key);
     }
     localStorage.removeItem('thalamus_config');
-    showToast('Settings reset', 'API keys and preferences cleared. Chats were kept.', 'info');
+    showToast(t('settings.resetDone'), t('settings.resetDoneMsg'), 'info');
     setTimeout(() => window.location.reload(), 600);
   }
 
@@ -621,14 +693,14 @@ export function SettingsModal({
               <span className="text-[14px] font-semibold tracking-tight text-[#F2F0E5]">
                 {q ? t('settings.title') : t(sectionLabelKey(activeSection))}
               </span>
-              <span className="mt-0.5 text-[11px] leading-snug text-[#87857F]">
-                {q ? t('settings.searchEmpty', { query: query.trim() }) : t('settings.subtitle')}
+              <span className="mt-0.5 max-w-[540px] text-[11px] leading-snug text-[#87857F]">
+                {q ? t('settings.searchEmpty', { query: query.trim() }) : t(sectionDescKey(activeSection))}
               </span>
             </div>
             <button
               type="button"
               onClick={requestClose}
-              aria-label="Close settings"
+              aria-label={t('settings.closeAria')}
               className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-[#575654] transition-colors hover:bg-white/[0.06] hover:text-[#CECDC3] cursor-pointer"
             >
               <X size={14} />
@@ -659,81 +731,65 @@ export function SettingsModal({
 
             {/* ── GENERAL ── */}
             {!q && activeSection === 'general' && (
-              <>
-                <Card title={t('settings.card.langTitle')} desc={t('settings.card.langDesc')}>
-                  <Row
-                    label={t('settings.language')}
-                    hint={t('settings.languageHint')}
-                    control={
-                      <select
-                        value={getLang()}
-                        onChange={(e) => setLang(e.target.value === 'tr' ? 'tr' : 'en')}
-                        className={selectCls}
-                      >
-                        {LANGUAGES.map((l) => (
-                          <option key={l.id} value={l.id}>{l.label}</option>
-                        ))}
-                      </select>
-                    }
-                  />
-                </Card>
-
-                <Card title={t('settings.startupScreen')} desc={t('settings.card.startupDesc')}>
-                  <Row
-                    label={t('settings.startupScreen')}
-                    hint={t('settings.startupScreenHint')}
-                    control={
-                      <Segmented
-                        value={startView}
-                        onChange={(v) => { setStartView(v); try { localStorage.setItem('tlm_start_view', v); } catch {} }}
-                        options={[
-                          { value: 'chat', label: t('sidebar.chat') },
-                          { value: 'project', label: t('sidebar.project') },
-                        ]}
-                      />
-                    }
-                  />
-                </Card>
-
-                <Card title={t('settings.workspaceRoot')} desc={t('settings.card.workspaceDesc')}>
-                  <div className="flex flex-col gap-1.5 py-3.5">
-                    <label className={labelCls} htmlFor="settings-workspace">{t('settings.workspaceRoot')}</label>
-                    <input
-                      id="settings-workspace"
-                      type="text"
-                      value={workspaceRoot}
-                      onChange={(e) => setWorkspaceRoot(e.target.value)}
-                      placeholder="C:/projects/my-app"
-                      className={inputCls}
+              <Card>
+                <Row
+                  label={t('settings.language')}
+                  hint={t('settings.languageHint')}
+                  control={
+                    <select
+                      value={getLang()}
+                      onChange={(e) => setLang(e.target.value === 'tr' ? 'tr' : 'en')}
+                      className={selectCls}
+                    >
+                      {LANGUAGES.map((l) => (
+                        <option key={l.id} value={l.id}>{l.label}</option>
+                      ))}
+                    </select>
+                  }
+                />
+                <Row
+                  label={t('settings.startupScreen')}
+                  hint={t('settings.startupScreenHint')}
+                  control={
+                    <Segmented
+                      value={startView}
+                      onChange={(v) => { setStartView(v); try { localStorage.setItem('tlm_start_view', v); } catch {} }}
+                      options={[
+                        { value: 'chat', label: t('sidebar.chat') },
+                        { value: 'project', label: t('sidebar.project') },
+                      ]}
                     />
-                    <p className="text-[11px] text-[#87857F]">{t('settings.workspaceRootHint')}</p>
-                  </div>
-                </Card>
-              </>
+                  }
+                />
+                <div className="flex flex-col gap-1.5 py-3.5">
+                  <label className={labelCls} htmlFor="settings-workspace">{t('settings.workspaceRoot')}</label>
+                  <input
+                    id="settings-workspace"
+                    type="text"
+                    value={workspaceRoot}
+                    onChange={(e) => setWorkspaceRoot(e.target.value)}
+                    placeholder="C:/projects/my-app"
+                    className={inputCls}
+                  />
+                  <p className="text-[11px] text-[#87857F]">{t('settings.workspaceRootHint')}</p>
+                </div>
+              </Card>
             )}
 
             {/* ── APPEARANCE ── */}
             {!q && activeSection === 'appearance' && (
-              <Card title={t('settings.card.interfaceTitle')} desc={t('settings.card.interfaceDesc')}>
+              <Card>
                 <Row
                   label={t('settings.theme')}
-                  control={
-                    <Segmented
-                      value={theme}
-                      onChange={previewTheme}
-                      options={[
-                        { value: 'dark', label: 'Obsidian' },
-                        { value: 'nord-red', label: 'Nord Red' },
-                      ]}
-                    />
-                  }
+                  hint={t('settings.themeHint')}
+                  control={<ThemeSwatches value={theme} onChange={previewTheme} />}
                 />
               </Card>
             )}
 
             {/* ── EDITOR ── */}
             {!q && activeSection === 'editor' && (
-              <Card title={t('settings.card.codeTitle')} desc={t('settings.card.codeDesc')}>
+              <Card>
                 <Row
                   label={t('settings.editorFontSize')}
                   control={
@@ -749,13 +805,14 @@ export function SettingsModal({
                   control={
                     <select value={tabSize} onChange={(e) => { setTabSize(e.target.value); persistConfig({ tabSize: e.target.value }); }} className={selectCls}>
                       {['2', '4', '8'].map((s) => (
-                        <option key={s} value={s}>{s} spaces</option>
+                        <option key={s} value={s}>{t('settings.tabSizeSpaces', { n: s })}</option>
                       ))}
                     </select>
                   }
                 />
                 <Row
                   label={t('settings.lineNumbers')}
+                  hint={t('settings.lineNumbersHint')}
                   control={<Switch checked={lineNumbers} onChange={(v) => { setLineNumbers(v); persistConfig({ lineNumbers: v }); }} />}
                 />
               </Card>
@@ -790,9 +847,6 @@ export function SettingsModal({
                     {p.available === false && (
                       <p className="text-[11px] text-amber-300/90">{t('settings.providerNotWired', { name: p.name })}</p>
                     )}
-                    <p className="text-[11px] text-[#87857F]">
-                      {t('settings.keyCount', { configured: configuredCount, total: availableProviders.length })}
-                    </p>
                   </div>
 
                   {p.needsBaseUrl && (
@@ -833,6 +887,7 @@ export function SettingsModal({
                         {visibleProvider === p.id ? <EyeOff size={13} /> : <Eye size={13} />}
                       </button>
                     </div>
+                    <p className="text-[11px] text-[#87857F]">{t('settings.apiKeyHint')}</p>
                     {p.docsUrl && (
                       <a
                         href={p.docsUrl}
@@ -840,9 +895,24 @@ export function SettingsModal({
                         rel="noopener noreferrer"
                         className="self-start text-[11.5px] text-[#3AA99F] hover:underline"
                       >
-                        Get an API key →
+                        {t('settings.getApiKey')}
                       </a>
                     )}
+                  </div>
+
+                  <div className="py-3.5">
+                    <ul className="flex flex-col gap-1.5">
+                      {availableProviders.map((x) => {
+                        const has = !!(keys[x.id] || '').trim();
+                        return (
+                          <li key={x.id} className="flex items-center gap-2 text-[12px]">
+                            <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${has ? 'bg-[#3AA99F]' : 'bg-white/20'}`} />
+                            <span className="text-[#CECDC3]">{x.name}</span>
+                            <span className="ml-auto text-[11px] text-[#87857F]">{has ? t('settings.keySaved') : t('settings.noKeySaved')}</span>
+                          </li>
+                        );
+                      })}
+                    </ul>
                   </div>
                 </Card>
 
@@ -889,10 +959,10 @@ export function SettingsModal({
             {!q && activeSection === 'profile' && (
               !user ? (
                 <p className="pt-2 text-[11.5px] leading-relaxed text-[#87857F]">
-                  Sign in with a local profile to edit your name and photo here.
+                  {t('settings.noProfile')}
                 </p>
               ) : (
-                <Card title={t('settings.card.identityTitle')} desc={t('settings.card.identityDesc')}>
+                <Card>
                   <div className="flex items-center gap-4 py-3.5">
                     <div className="flex h-16 w-16 flex-shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/[0.08] bg-white/[0.03] text-[#87857F]">
                       {avatar ? (
@@ -905,7 +975,7 @@ export function SettingsModal({
                       <div className="flex items-center gap-2">
                         <label className="flex cursor-pointer items-center gap-1.5 rounded-md border border-white/[0.08] px-3 py-1.5 text-[11.5px] text-[#CECDC3] transition-colors hover:border-white/[0.14]">
                           <Upload size={12} />
-                          {avatar ? 'Change photo' : 'Upload photo'}
+                          {avatar ? t('settings.changePhoto') : t('settings.uploadPhoto')}
                           <input type="file" accept="image/*" className="hidden" onChange={handleAvatarPick} />
                         </label>
                         {avatar && (
@@ -915,11 +985,11 @@ export function SettingsModal({
                             className="flex cursor-pointer items-center gap-1.5 rounded-md border border-white/[0.08] px-3 py-1.5 text-[11.5px] text-[#87857F] transition-colors hover:border-rose-600/50 hover:text-rose-300"
                           >
                             <Trash2 size={12} />
-                            Remove
+                            {t('common.remove')}
                           </button>
                         )}
                       </div>
-                      <span className="text-[11px] text-[#87857F]">Square JPG or PNG. Stored locally on this device.</span>
+                      <span className="text-[11px] text-[#87857F]">{t('settings.avatarHint')}</span>
                     </div>
                   </div>
 
@@ -930,7 +1000,7 @@ export function SettingsModal({
                       type="text"
                       value={displayName}
                       onChange={(e) => setDisplayName(e.target.value)}
-                      placeholder="Anonymous User"
+                      placeholder={t('sidebar.anonymous')}
                       className={inputCls}
                       spellCheck={false}
                     />
@@ -948,21 +1018,34 @@ export function SettingsModal({
 
             {/* ── SHORTCUTS ── */}
             {!q && activeSection === 'shortcuts' && (
-              <Card title={t('settings.card.shortcutsTitle')} desc={t('settings.card.shortcutsDesc')}>
+              <Card>
+                <GroupLabel>{t('settings.shortcut.groupComposer')}</GroupLabel>
                 <Row label={t('settings.shortcut.send')} control={<Kbd>Enter</Kbd>} />
-                <Row label={t('settings.shortcut.newline')} control={<Kbd>Shift</Kbd>} />
+                <Row
+                  label={t('settings.shortcut.newline')}
+                  control={
+                    <span className="flex items-center gap-1">
+                      <Kbd>Shift</Kbd>
+                      <span className="text-[#575654]">+</span>
+                      <Kbd>Enter</Kbd>
+                    </span>
+                  }
+                />
+                <GroupLabel>{t('settings.shortcut.groupEditor')}</GroupLabel>
                 <Row label={t('settings.shortcut.save')} control={<Kbd>Ctrl + S</Kbd>} />
                 <Row label={t('settings.shortcut.run')} control={<Kbd>Ctrl + R</Kbd>} />
+                <GroupLabel>{t('settings.shortcut.groupAnywhere')}</GroupLabel>
                 <Row label={t('settings.shortcut.close')} control={<Kbd>Esc</Kbd>} />
               </Card>
             )}
 
             {/* ── ABOUT ── */}
             {!q && activeSection === 'about' && (
-              <Card title={t('settings.card.aboutTitle')} desc={t('settings.card.aboutDesc')}>
+              <Card>
                 <Row label={t('settings.aboutVersion')} control={<span className="font-mono text-[12px] text-[#CECDC3]">{appVersion || '—'}</span>} />
                 <Row
                   label={t('settings.aboutEngine')}
+                  hint={engineReady && engineModel ? t('settings.aboutEngineModel', { model: engineModel }) : undefined}
                   control={
                     <span className={`text-[12px] ${engineReady ? 'text-emerald-400' : 'text-[#87857F]'}`}>
                       {engineReady === null
@@ -983,66 +1066,69 @@ export function SettingsModal({
                     </span>
                   }
                 />
+                <Row
+                  label={t('settings.aboutChats')}
+                  control={<span className="text-[12px] text-[#CECDC3]">{t('settings.aboutChatCount', { n: chatCount })}</span>}
+                />
+                <Row
+                  label={t('settings.aboutStorage')}
+                  control={<span className="font-mono text-[12px] text-[#CECDC3]">{t('settings.aboutStorageVal', { n: storageKb })}</span>}
+                />
               </Card>
             )}
 
             {/* ── DATA & RESET ── */}
             {!q && activeSection === 'data' && (
-              <>
-                <Card title={t('settings.resetTitle')} desc={t('settings.resetHint')}>
-                  <Row
-                    label={t('settings.resetTitle')}
-                    hint={t('settings.resetHint')}
-                    control={
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (!resetArmed) {
-                            setResetArmed(true);
-                            setTimeout(() => setResetArmed(false), 4000);
-                          } else {
-                            handleReset();
-                          }
-                        }}
-                        className={`flex-shrink-0 rounded-md border px-3 py-1.5 text-[11.5px] transition-colors cursor-pointer ${
-                          resetArmed
-                            ? 'border-rose-600/60 bg-rose-600/15 text-rose-300'
-                            : 'border-white/[0.08] text-[#87857F] hover:border-white/[0.14] hover:text-[#CECDC3]'
-                        }`}
-                      >
-                        {resetArmed ? t('settings.resetConfirm') : t('settings.reset')}
-                      </button>
-                    }
-                  />
-                </Card>
-
-                <Card title={t('settings.clearChats')} desc={t('settings.clearChatsHint')}>
-                  <Row
-                    label={t('settings.clearChats')}
-                    hint={t('settings.clearChatsHint')}
-                    control={
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (!clearChatsArmed) {
-                            setClearChatsArmed(true);
-                            setTimeout(() => setClearChatsArmed(false), 4000);
-                          } else {
-                            handleClearChats();
-                          }
-                        }}
-                        className={`flex-shrink-0 rounded-md border px-3 py-1.5 text-[11.5px] transition-colors cursor-pointer ${
-                          clearChatsArmed
-                            ? 'border-rose-600/60 bg-rose-600/15 text-rose-300'
-                            : 'border-white/[0.08] text-[#87857F] hover:border-white/[0.14] hover:text-[#CECDC3]'
-                        }`}
-                      >
-                        {clearChatsArmed ? t('settings.clearChatsConfirm') : t('settings.clearChats')}
-                      </button>
-                    }
-                  />
-                </Card>
-              </>
+              <Card>
+                <Row
+                  label={t('settings.resetTitle')}
+                  hint={t('settings.resetHint')}
+                  control={
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!resetArmed) {
+                          setResetArmed(true);
+                          setTimeout(() => setResetArmed(false), 4000);
+                        } else {
+                          handleReset();
+                        }
+                      }}
+                      className={`flex-shrink-0 rounded-md border px-3 py-1.5 text-[11.5px] transition-colors cursor-pointer ${
+                        resetArmed
+                          ? 'border-rose-600/60 bg-rose-600/15 text-rose-300'
+                          : 'border-white/[0.08] text-[#87857F] hover:border-white/[0.14] hover:text-[#CECDC3]'
+                      }`}
+                    >
+                      {resetArmed ? t('settings.resetConfirm') : t('settings.reset')}
+                    </button>
+                  }
+                />
+                <Row
+                  label={t('settings.clearChats')}
+                  hint={t('settings.clearChatsHint')}
+                  control={
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!clearChatsArmed) {
+                          setClearChatsArmed(true);
+                          setTimeout(() => setClearChatsArmed(false), 4000);
+                        } else {
+                          handleClearChats();
+                        }
+                      }}
+                      className={`flex-shrink-0 rounded-md border px-3 py-1.5 text-[11.5px] transition-colors cursor-pointer ${
+                        clearChatsArmed
+                          ? 'border-rose-600/60 bg-rose-600/15 text-rose-300'
+                          : 'border-white/[0.08] text-[#87857F] hover:border-white/[0.14] hover:text-[#CECDC3]'
+                      }`}
+                    >
+                      {clearChatsArmed ? t('settings.clearChatsConfirm') : t('settings.clearChats')}
+                    </button>
+                  }
+                />
+              </Card>
             )}
           </div>
 
@@ -1058,7 +1144,7 @@ export function SettingsModal({
               type="button"
               onClick={handleSave}
               disabled={!keysLoaded}
-              title={keysLoaded ? undefined : 'API keys are still loading from the vault…'}
+              title={keysLoaded ? undefined : t('settings.keysLoadingTitle')}
               className="flex items-center gap-1.5 rounded-md bg-[#3AA99F] px-4 py-1.5 text-[11.5px] font-semibold text-[#071310] transition-colors hover:bg-[#45B8AD] cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <Save size={12} />
