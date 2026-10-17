@@ -420,7 +420,9 @@ export default function App() {
   const handleSendMessage = async (
     userText: string,
     isRegenerate = false,
-    imagesFromRegenerate?: AttachedImage[]
+    imagesFromRegenerate?: AttachedImage[],
+    /** Ekli dosyalar: input'a YAZILMAZ, modele görünmez bağlam (code_blocks) olarak gider. */
+    fileContext?: { name: string; body: string }[]
   ) => {
     const nowTime = ts();
     let currentId = activeChatId;
@@ -467,7 +469,9 @@ export default function App() {
     // asistan yolu (motor backend'de sessizdir; P2 katmanı orada çalışır).
     const userMsg: Message = {
       role: 'user',
-      content: userText.trim() || (activeImages.length ? `[${activeImages.length} image${activeImages.length > 1 ? 's' : ''}]` : userText),
+      content: userText.trim()
+        || (activeImages.length ? `[${activeImages.length} image${activeImages.length > 1 ? 's' : ''}]` : '')
+        || (fileContext && fileContext.length ? `[${fileContext.length} file${fileContext.length > 1 ? 's' : ''}]` : userText),
       timestamp: nowTime,
       ...(activeImages.length > 0 ? { modelName: t('app.visionModel') } : {}),
       ...(activeImages.length > 0 ? { images: activeImages } : {}),
@@ -598,7 +602,7 @@ export default function App() {
           },
           ...history,
           userMessage(userText),
-        ], [], null, signal);
+        ], (fileContext ?? []).map((f, i) => ({ id: `file${i}`, name: f.name, body: f.body })), null, signal);
         applyMessages(prev => [...prev, {
           role: 'assistant',
           content: res.content,
@@ -678,13 +682,15 @@ export default function App() {
     setCurrentView('diff');
   }, [chats, activeChatId, showToast]);
 
-  const handleSend = async (e: FormEvent) => {
+  const handleSend = async (e: FormEvent, files?: { name: string; body: string }[]) => {
     e.preventDefault();
-    // An image alone is a valid message; only block when there is neither text nor image.
-    if ((!input.trim() && pendingImages.length === 0) || loading) return;
+    // Bir görsel ya da ekli dosya tek başına geçerli mesajdır; yalnızca hiçbiri
+    // yokken engelle.
+    const hasFiles = !!files && files.length > 0;
+    if ((!input.trim() && pendingImages.length === 0 && !hasFiles) || loading) return;
     const userText = input.trim();
     setInput('');
-    await handleSendMessage(userText, false);
+    await handleSendMessage(userText, false, undefined, files);
   };
 
   const handleRegenerate = async (assistantIdx: number) => {

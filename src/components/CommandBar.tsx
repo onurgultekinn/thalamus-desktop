@@ -10,17 +10,24 @@ import { useT } from '../lib/i18n';
 const MAX_TEXT_CHARS = 200_000;
 const MAX_READ_BYTES = 8 * 1024 * 1024;
 
-interface UploadedFile {
+export interface UploadedFile {
   name: string;
   size: string;
-  /** Operand injected into the textarea for this file; removed on delete. */
-  injected?: string;
+  /** 'text' taşınabilir bağlam; 'binary'/'large' yalnız not olarak gösterilir. */
+  kind: 'text' | 'binary' | 'large';
+  /** Metin dosyasının içeriği (modele görünmez bağlam olarak gider). */
+  body?: string;
+  /**
+   * Eklenen dosya input'a YAZILMAZ (eski davranış prompt'u dosya metniyle
+   * dolduruyordu). Dosyalar input üstünde çip olarak durur; çipe tıklayınca
+   * sağda önizleme açılır; gönderimde modele `code_blocks` olarak gider.
+   */
 }
 
 interface CommandBarProps {
   input: string;
   loading: boolean;
-  onSend: (e: FormEvent) => void;
+  onSend: (e: FormEvent, files?: { name: string; body: string }[]) => void;
   /** T2: istek sürerken gönder düğmesi Durdur'a döner ve fetch'i iptal eder. */
   onStop?: () => void;
   setInput: (value: string) => void;
@@ -50,12 +57,15 @@ export function CommandBar({
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [imageMode] = useState<ImageMode>(DEFAULT_IMAGE_MODE);
+  /** Çipe tıklanınca sağda açılan önizleme. */
+  const [preview, setPreview] = useState<{ name: string; kind: 'text' | 'binary' | 'large' | 'image'; body?: string; url?: string; size?: string } | null>(null);
 
   const popoverRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Shared by the file-picker input and drag&drop → the exact same rules apply.
+  // NOTE: nothing is written into the textarea; the file becomes a chip.
   const handleFile = async (file: File) => {
     const size = `${(file.size / 1024).toFixed(1)} KB`;
 
@@ -64,15 +74,13 @@ export function CommandBar({
         const attached = await prepareImageFile(file, imageMode);
         setImages(prev => [...prev, attached]);
       } catch {
-        setUploadedFiles(prev => [...prev, { name: `${file.name} (image — could not be read)`, size }]);
+        setUploadedFiles(prev => [...prev, { name: file.name, size, kind: 'binary' }]);
       }
       return;
     }
 
     if (file.size > MAX_READ_BYTES) {
-      const injected = `\n\n--- @${file.name} (${size}) ---\n[skipped — file is too large to attach]\n`;
-      setUploadedFiles(prev => [...prev, { name: file.name, size, injected }]);
-      setInput(input + injected);
+      setUploadedFiles(prev => [...prev, { name: file.name, size, kind: 'large' }]);
       return;
     }
 
@@ -84,9 +92,7 @@ export function CommandBar({
       if (probe[i] === 0) { binary = true; break; }
     }
     if (binary) {
-      const injected = `\n\n--- @${file.name} (binary, ${size}) ---\n[contents omitted — binary file]\n`;
-      setUploadedFiles(prev => [...prev, { name: file.name, size, injected }]);
-      setInput(input + injected);
+      setUploadedFiles(prev => [...prev, { name: file.name, size, kind: 'binary' }]);
       return;
     }
 
@@ -96,9 +102,12 @@ export function CommandBar({
       text = text.slice(0, MAX_TEXT_CHARS);
       truncated = true;
     }
-    const injected = `\n\n--- @${file.name} ---\n${text}${truncated ? '\n[truncated — file too large]' : ''}\n`;
-    setUploadedFiles(prev => [...prev, { name: file.name, size, injected }]);
-    setInput(input + injected);
+    setUploadedFiles(prev => [...prev, {
+      name: file.name,
+      size,
+      kind: truncated ? 'large' : 'text',
+      body: truncated ? text : text,
+    }]);
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -137,18 +146,30 @@ export function CommandBar({
 
   const removeFile = (index: number) => {
     setUploadedFiles(prev => {
-      const file = prev[index];
-      // Chip removal must also remove the injected operand from the input.
-      if (file?.injected) setInput(input.split(file.injected).join(''));
+      const removed = prev[index];
+      if (removed && preview?.name === removed.name) setPreview(null);
       return prev.filter((_, i) => i !== index);
     });
+  };
+
+  /** Metin dosyalarını modele gidecek görünmez bağlama çevirir. */
+  const buildFileContext = () =>
+    uploadedFiles
+      .filter((f) => f.kind === 'text' && f.body)
+      .map((f) => ({ name: f.name, body: f.body as string }));
+
+  const submitWithFiles = () => {
+    const files = buildFileContext();
+    setUploadedFiles([]);
+    setPreview(null);
+    onSend({ preventDefault: () => {} } as unknown as FormEvent, files);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      if (input.trim() && !loading) {
-        onSend(e as unknown as FormEvent);
+      if ((input.trim() || images.length > 0 || uploadedFiles.length > 0) && !loading) {
+        submitWithFiles();
       }
     }
   };
@@ -220,70 +241,84 @@ export function CommandBar({
             </span>
           </div>
 
-          <div className="flex flex-col gap-1 max-h-[120px] overflow-y-auto">
-            {images.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 pb-1">
-                {images.map((img, idx) => (
-                  <div key={`${img.name}-${idx}`} className="relative">
-                    <img
-                      src={img.url}
-                      alt={img.name}
-                      title={`${img.name} · ${img.width}×${img.height} · detail:${img.detail} · ${img.reason}${img.visionDiag ? ' · ' + img.visionDiag : ''}\n${img.options.map((o) => `${o.label}: ${Math.round(o.ratio * 100)}% · ≈${o.tokens} tok · ${o.retention}% detail`).join('\n')}`}
-                      className="h-12 w-12 rounded-md object-cover border border-obsidian-border"
-                    />
-                    <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 rounded bg-obsidian-panel/90 px-1 text-[8.5px] font-mono text-[#dcb67a] whitespace-nowrap">
-                      ≈{img.estTokens} · %{img.retention}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setImages(prev => prev.filter((_, i) => i !== idx))}
-                      className="absolute -top-1.5 -right-1.5 bg-obsidian-panel border border-obsidian-border rounded-full p-0.5 text-obsidian-muted hover:text-rose-400 cursor-pointer"
-                      title={t('cop.removeImage')}
-                    >
-                      <X size={10} />
-                    </button>
-                  </div>
-                ))}
-              </div>
+        </div>
+      )}
+
+      {/* Main Command Input Box */}
+      {/* Preview drawer (right side) — opens when a chip is clicked. */}
+      {preview && (
+        <div className="fixed top-0 right-0 h-full w-[420px] max-w-[90vw] bg-obsidian-panel border-l border-obsidian-border shadow-2xl z-[60] flex flex-col">
+          <div className="flex items-center justify-between px-3 py-2 border-b border-obsidian-border flex-shrink-0">
+            <div className="flex items-center gap-2 min-w-0">
+              <FileCode size={13} className="text-obsidian-muted flex-shrink-0" />
+              <span className="text-[12px] font-semibold text-obsidian-text truncate">{preview.name}</span>
+              {preview.size && <span className="text-[11px] text-obsidian-muted font-mono flex-shrink-0">{preview.size}</span>}
+            </div>
+            <button type="button" onClick={() => setPreview(null)} className="text-obsidian-muted hover:text-obsidian-text cursor-pointer p-0.5" title={t('common.close')}>
+              <X size={14} />
+            </button>
+          </div>
+          <div className="flex-1 overflow-auto pretty-scrollbar p-3">
+            {preview.kind === 'image' && preview.url ? (
+              <img src={preview.url} alt={preview.name} className="w-full rounded-md border border-obsidian-border" />
+            ) : preview.body !== undefined ? (
+              <pre className="text-[11.5px] leading-relaxed font-mono text-obsidian-text whitespace-pre-wrap break-words">{preview.body}</pre>
+            ) : (
+              <p className="text-[12px] text-obsidian-muted leading-relaxed">
+                {preview.kind === 'large' ? t('composer.previewTooLarge') : t('composer.previewBinary')}
+              </p>
             )}
-            {images.length > 0 && (() => {
-              const last = images[images.length - 1];
-              return (
-                <div className="rounded-md border border-obsidian-border bg-obsidian-bg/40 p-2 flex flex-col gap-0.5">
-                  <span className="text-[11px] text-obsidian-muted/70 truncate">{last.name} — mode comparison</span>
-                  {last.options.map((o) => (
-                    <div key={o.mode} className="flex items-center justify-between gap-2 text-[11px]">
-                      <span className={o.mode === last.chosenMode ? 'text-[#dcb67a]' : 'text-obsidian-muted'}>
-                        {o.mode === last.chosenMode ? '●' : '○'} {o.label}
-                        {o.mode === 'economy' && last.textLike && (
-                          <span title={t('composer.imageTextWarn')}> ⚠</span>
-                        )}
-                      </span>
-                      <span className="font-mono text-obsidian-muted whitespace-nowrap">
-                        {Math.round(o.ratio * 100)}% · ≈{o.tokens} tok · {o.retention}% detail
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              );
-            })()}
+          </div>
+        </div>
+      )}
+
+      <form onSubmit={(e) => { e.preventDefault(); submitWithFiles(); }} className="w-full bg-obsidian-panel border border-obsidian-border rounded-xl flex flex-col p-3 gap-2 shadow-2xl transition-all duration-200 focus-within:border-[#dcb67a]/40">
+        {/* Attachment chips — the row sits just above the input; nothing is
+            written into the textarea. Clicking a chip opens the right preview. */}
+        {(uploadedFiles.length > 0 || images.length > 0) && (
+          <div className="flex flex-wrap items-center gap-1.5 pb-1">
+            {images.map((img, idx) => (
+              <div
+                key={`img-${img.name}-${idx}`}
+                className="group flex items-center gap-1.5 rounded-md border border-obsidian-border bg-obsidian-bg/60 pl-1 pr-1.5 py-1 cursor-pointer hover:border-[#dcb67a]/50 transition-colors"
+                onClick={() => setPreview({ name: img.name, kind: 'image', url: img.url })}
+                title={img.name}
+              >
+                <img src={img.url} alt="" className="h-5 w-5 rounded object-cover border border-obsidian-border flex-shrink-0" />
+                <span className="max-w-[140px] truncate text-[11px] text-obsidian-text">{img.name}</span>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); setImages(prev => prev.filter((_, i) => i !== idx)); if (preview?.name === img.name) setPreview(null); }}
+                  className="text-obsidian-muted hover:text-rose-400 cursor-pointer p-0.5"
+                  title={t('cop.removeImage')}
+                >
+                  <X size={11} />
+                </button>
+              </div>
+            ))}
             {uploadedFiles.map((file, idx) => (
-              <div key={idx} className="flex items-center justify-between p-1.5 bg-obsidian-bg border border-obsidian-border rounded text-[11px]">
-                <div className="flex items-center gap-2 min-w-0">
-                  <FileCode size={12} className="text-obsidian-muted" />
-                  <span className="text-obsidian-text truncate font-mono">{file.name}</span>
-                </div>
-                <button type="button" onClick={() => removeFile(idx)} className="text-obsidian-muted hover:text-rose-400 cursor-pointer p-0.5">
+              <div
+                key={`file-${file.name}-${idx}`}
+                className="group flex items-center gap-1.5 rounded-md border border-obsidian-border bg-obsidian-bg/60 pl-2 pr-1.5 py-1 cursor-pointer hover:border-[#dcb67a]/50 transition-colors"
+                onClick={() => setPreview({ name: file.name, kind: file.kind, body: file.body, size: file.size })}
+                title={file.name}
+              >
+                <FileCode size={12} className="text-obsidian-muted flex-shrink-0" />
+                <span className="max-w-[180px] truncate text-[11px] font-mono text-obsidian-text">{file.name}</span>
+                <span className="text-[10.5px] text-obsidian-muted font-mono flex-shrink-0">{file.size}</span>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); removeFile(idx); }}
+                  className="text-obsidian-muted hover:text-rose-400 cursor-pointer p-0.5"
+                  title={t('common.remove')}
+                >
                   <X size={11} />
                 </button>
               </div>
             ))}
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Main Command Input Box */}
-      <form onSubmit={onSend} className="w-full bg-obsidian-panel border border-obsidian-border rounded-xl flex flex-col p-3 gap-2 shadow-2xl transition-all duration-200 focus-within:border-[#dcb67a]/40">
         <textarea
           ref={textareaRef}
           value={input}
