@@ -168,6 +168,19 @@ export default function App() {
     }
   }, [isSettingsOpen]);
 
+  // Ayar değişimi ANINDA uygulanır (Kaydet beklenmez): SettingsModal her
+  // değişiklikte 'thalamus_config_changed' yayar; model ve fiyatlandırma
+  // burada yeniden okunur. (Önceden bu değişiklikler yalnız Kaydet ile ya da
+  // uygulama yeniden başlatılınca etkili oluyordu.)
+  useEffect(() => {
+    const syncSettings = () => {
+      setTargetModel(localStorage.getItem('tlm_default_model') || DEFAULT_MODEL_NAME);
+      setOnlinePricing(localStorage.getItem('tlm_online_pricing') === 'true');
+    };
+    window.addEventListener('thalamus_config_changed', syncSettings);
+    return () => window.removeEventListener('thalamus_config_changed', syncSettings);
+  }, []);
+
   // 💰 Live / local price map state
   const [modelPricing, setModelPricing] = useState<Record<string, number>>(MODEL_PRICING);
 

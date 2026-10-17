@@ -226,6 +226,27 @@ export function SettingsModal({
   const availableProviders = API_PROVIDERS.filter(x => x.available !== false);
   const configuredCount = availableProviders.filter(x => !!(keys[x.id] || '').trim()).length;
 
+  /**
+   * Ayar değişikliğini ANINDA kalıcılaştırır ve uygular (Kaydet beklenmez).
+   * Görünüm ayarları 'thalamus_config' + 'thalamus_config_changed' ile
+   * ProjectDashboard'a, model/fiyatlandırma aynı olayla App'e iletilir.
+   */
+  const persistConfig = (
+    patch: Partial<{ fontSize: string; tabSize: string; lineNumbers: boolean; onlinePricing: boolean }> = {}
+  ) => {
+    const cfg = {
+      appearance: {
+        fontSize: `${patch.fontSize ?? fontSize}px`,
+        tabSize: Number(patch.tabSize ?? tabSize),
+        showLineNumbers: patch.lineNumbers ?? lineNumbers,
+      },
+      onlinePricing: patch.onlinePricing ?? livePricing,
+      workspace_root: getWorkspaceRoot() ?? '',
+    };
+    try { localStorage.setItem('thalamus_config', JSON.stringify(cfg)); } catch {}
+    window.dispatchEvent(new Event('thalamus_config_changed'));
+  };
+
   async function handleAvatarPick(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = '';
@@ -553,7 +574,7 @@ export function SettingsModal({
             {/* ── APPEARANCE ── */}
             {activeSection === 'appearance' && (
               <div className="divide-y divide-white/[0.05]">
-                <Row label="Theme" control={
+                <Row label={t('settings.theme')} control={
                   <div className="flex gap-1">
                     {(['dark', 'nord-red'] as const).map(t => (
                       <button
@@ -577,22 +598,22 @@ export function SettingsModal({
                     ))}
                   </div>
                 } />
-                <Row label="Editor font size" control={
-                  <select value={fontSize} onChange={e => setFontSize(e.target.value)} className={selectCls}>
+                <Row label={t('settings.editorFontSize')} control={
+                  <select value={fontSize} onChange={e => { setFontSize(e.target.value); persistConfig({ fontSize: e.target.value }); }} className={selectCls}>
                     {['11','12','13','14','15','16'].map(s => (
                       <option key={s} value={s}>{s}px</option>
                     ))}
                   </select>
                 } />
-                <Row label="Editor tab size" control={
-                  <select value={tabSize} onChange={e => setTabSize(e.target.value)} className={selectCls}>
+                <Row label={t('settings.editorTabSize')} control={
+                  <select value={tabSize} onChange={e => { setTabSize(e.target.value); persistConfig({ tabSize: e.target.value }); }} className={selectCls}>
                     {['2','4','8'].map(s => (
                       <option key={s} value={s}>{s} spaces</option>
                     ))}
                   </select>
                 } />
-                <Row label="Line numbers" control={
-                  <Switch checked={lineNumbers} onChange={setLineNumbers} />
+                <Row label={t('settings.lineNumbers')} control={
+                  <Switch checked={lineNumbers} onChange={(v) => { setLineNumbers(v); persistConfig({ lineNumbers: v }); }} />
                 } />
               </div>
             )}
@@ -635,7 +656,12 @@ export function SettingsModal({
                     control={
                       <select
                         value={defaultModel}
-                        onChange={e => setDefaultModel(e.target.value)}
+                        onChange={e => {
+                          const v = e.target.value;
+                          setDefaultModel(v);
+                          try { localStorage.setItem('tlm_default_model', v); } catch {}
+                          window.dispatchEvent(new Event('thalamus_config_changed'));
+                        }}
                         className={selectCls}
                       >
                         {MODELS.map(m => (
@@ -645,39 +671,39 @@ export function SettingsModal({
                     }
                   />
                   <Row
-                    label="Startup screen"
-                    hint="What opens when you launch the app."
+                    label={t('settings.startupScreen')}
+                    hint={t('settings.startupScreenHint')}
                     control={
                       <div className="flex gap-1">
                         {(['chat', 'project'] as const).map(v => (
                           <button
                             key={v}
                             type="button"
-                            onClick={() => setStartView(v)}
+                            onClick={() => { setStartView(v); try { localStorage.setItem('tlm_start_view', v); } catch {} }}
                             className={`rounded-md border px-3 py-1.5 text-[11.5px] transition-colors cursor-pointer ${
                               startView === v
                                 ? 'border-white/[0.12] bg-white/[0.07] text-[#F2F0E5]'
                                 : 'border-white/[0.07] bg-transparent text-[#87857F] hover:text-[#CECDC3]'
                             }`}
                           >
-                            {v === 'chat' ? 'Chat' : 'Project'}
+                            {v === 'chat' ? t('sidebar.chat') : t('sidebar.project')}
                           </button>
                         ))}
                       </div>
                     }
                   />
                   <Row
-                    label="Live prices"
-                    hint="Show up-to-date per-token costs from the public registry."
-                    control={<Switch checked={livePricing} onChange={setLivePricing} />}
+                    label={t('settings.livePrices')}
+                    hint={t('settings.livePricesHint')}
+                    control={<Switch checked={livePricing} onChange={(v) => { setLivePricing(v); try { localStorage.setItem('tlm_online_pricing', String(v)); } catch {} persistConfig({ onlinePricing: v }); }} />}
                   />
                 </div>
 
                 <div className="flex items-center justify-between border-t border-white/[0.05] pt-4">
                   <div className="flex flex-col gap-0.5">
-                    <span className="text-[12.5px] text-[#CECDC3]">Reset settings</span>
+                    <span className="text-[12.5px] text-[#CECDC3]">{t('settings.resetTitle')}</span>
                     <span className="text-[11px] leading-snug text-[#87857F]">
-                      Clears saved keys and preferences. Chats and files are kept.
+                      {t('settings.resetHint')}
                     </span>
                   </div>
                   <button
@@ -696,7 +722,7 @@ export function SettingsModal({
                         : 'border-white/[0.08] text-[#87857F] hover:border-white/[0.14] hover:text-[#CECDC3]'
                     }`}
                   >
-                    {resetArmed ? 'Confirm reset' : 'Reset'}
+                    {resetArmed ? t('settings.resetConfirm') : t('settings.reset')}
                   </button>
                 </div>
               </div>
