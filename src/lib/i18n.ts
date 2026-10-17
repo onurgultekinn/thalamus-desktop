@@ -92,6 +92,10 @@ const en = {
   'chat.nothingToRegenMsg': 'This reply has no preceding user message to resend.',
   'chat.noChat': 'No Chat',
   'chat.noChatMsg': 'This message is no longer attached to a chat session — Inspect cannot open.',
+  'chat.requestStopped': 'Request stopped.',
+  'chat.requestTimedOut': '**Request timed out** after 180 s — no response arrived.',
+  'toast.wiki': 'For more info, check the wiki',
+  'toast.wikiLink': 'For more info, check the wiki ↗',
 
   // ── Composer ──────────────────────────────────────────────────────────
   'composer.placeholder': 'Ask anything, paste code, or attach a file…',
@@ -384,6 +388,10 @@ const tr: Record<TranslationKey, string> = {
   'chat.nothingToRegenMsg': 'Bu yanıtın öncesinde yeniden gönderilecek bir kullanıcı mesajı yok.',
   'chat.noChat': 'Sohbet yok',
   'chat.noChatMsg': 'Bu mesaj artık bir sohbete bağlı değil — inceleme açılamaz.',
+  'chat.requestStopped': 'İstek durduruldu.',
+  'chat.requestTimedOut': '**İstek 180 sn sonra zaman aşımına uğradı** — yanıt gelmedi.',
+  'toast.wiki': 'Daha fazla bilgi için wiki’ye bakın',
+  'toast.wikiLink': 'Daha fazla bilgi için wiki’ye bakın ↗',
 
   // ── Composer ──────────────────────────────────────────────────────────
   'composer.placeholder': 'Bir şey sorun, kod yapıştırın veya dosya ekleyin…',
