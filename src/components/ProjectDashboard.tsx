@@ -26,6 +26,7 @@ import { RealTerminal } from './RealTerminal';
 import { ThalamusCopilot } from './ThalamusCopilot';
 import { useToast } from './Toast';
 import { fetchWorkspaceInfo, getWorkspaceName, getWorkspaceRoot, saveWorkspaceRoot } from '../lib/workspace';
+import { useT } from '../lib/i18n';
 
 export interface FileNode {
   id: string;
@@ -176,6 +177,7 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
   // V1: diske yazilan son icerigin anlik goruntusu. fileContents bundan
   // farkliysa dosya "dirty"dir (kaydedilmemis degisiklik var).
   const [savedContents, setSavedContents] = useState<Record<string, string>>({});
+  const t = useT();
   const [workspaceName, setWorkspaceName] = useState<string>(() => getWorkspaceName());
   const lineNumbersRef = useRef<HTMLDivElement>(null);
   const editorTextareaRef = useRef<HTMLTextAreaElement>(null);
@@ -965,14 +967,14 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
               onContextMenu={(e) => openCtxMenu(e, node)}
               onClick={() => handleToggleFolder(node.id)}
               style={{ paddingLeft }}
-              className="w-full flex items-center gap-1.5 py-1 rounded text-[12px] font-mono text-fg-soft cursor-pointer hover:bg-surface transition-all select-none"
+              className="w-full flex items-center gap-1.5 py-1 rounded text-[12px] font-mono text-[#CECDC3] cursor-pointer hover:bg-[#282726] transition-all select-none"
             >
               {node.isOpen ? (
-                <ChevronDown size={14} className="text-fg-faint" />
+                <ChevronDown size={14} className="text-[#87857F]" />
               ) : (
-                <ChevronRight size={14} className="text-fg-faint" />
+                <ChevronRight size={14} className="text-[#87857F]" />
               )}
-              {node.isOpen ? <FolderOpen size={14} className="text-gold" /> : <Folder size={14} className="text-gold" />}
+              {node.isOpen ? <FolderOpen size={14} className="text-[#dcb67a]" /> : <Folder size={14} className="text-[#dcb67a]" />}
               <span className="truncate font-medium">{node.name}</span>
             </div>
             {node.isOpen && node.children && (
@@ -993,12 +995,12 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
           style={{ paddingLeft }}
           className={`w-full flex items-center gap-1.5 py-1 rounded text-[12px] font-mono cursor-pointer transition-colors select-none ${
             isActive 
-              ? 'bg-line text-fg font-medium' 
-              : 'text-fg-muted hover:bg-surface hover:text-fg-soft'
+              ? 'bg-[#34332F] text-[#F2F0E5] font-medium' 
+              : 'text-[#A8A49E] hover:bg-[#282726] hover:text-[#CECDC3]'
           }`}
         >
           <div className="w-[14px] flex-shrink-0" />
-          <FileCode size={14} className={isActive ? 'text-aqua' : 'text-fg-faint'} />
+          <FileCode size={14} className={isActive ? 'text-[#3AA99F]' : 'text-[#87857F]'} />
           <span className="truncate">{node.name}</span>
         </div>
       );
@@ -1006,15 +1008,15 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
   };
 
   return (
-    <div className="w-full h-full flex bg-panel text-fg-soft font-sans overflow-hidden select-none border-t border-line relative">
+    <div className="w-full h-full flex bg-[#1C1B1A] text-[#CECDC3] font-sans overflow-hidden select-none border-t border-[#34332F] relative">
       
       {/* DRAGGED ITEM BADGE */}
       {draggedNode && (
         <div 
           style={{ left: `${dragPos.x + 12}px`, top: `${dragPos.y + 12}px` }}
-          className="fixed pointer-events-none z-50 bg-surface border border-accent px-2.5 py-1 rounded shadow-2xl flex items-center gap-2 text-[11px] font-mono text-white opacity-90"
+          className="fixed pointer-events-none z-50 bg-[#282726] border border-[#4385BE] px-2.5 py-1 rounded shadow-2xl flex items-center gap-2 text-[11px] font-mono text-white opacity-90"
         >
-          {draggedNode.isFolder ? <Folder size={13} className="text-gold" /> : <FileCode size={13} className="text-aqua" />}
+          {draggedNode.isFolder ? <Folder size={13} className="text-[#dcb67a]" /> : <FileCode size={13} className="text-[#3AA99F]" />}
           <span>{draggedNode.name}</span>
         </div>
       )}
@@ -1027,38 +1029,38 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
         return (
           <div
             style={{ left: Math.min(ctxMenu.x, window.innerWidth - 190), top: Math.min(ctxMenu.y, window.innerHeight - 180) }}
-            className="fixed z-50 w-[176px] bg-surface border border-line rounded-md shadow-2xl py-1 animate-in fade-in zoom-in-95 duration-100"
+            className="fixed z-50 w-[176px] bg-[#282726] border border-[#34332F] rounded-md shadow-2xl py-1 animate-in fade-in zoom-in-95 duration-100"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="px-2.5 py-1.5 text-[10px] font-mono text-fg-dim truncate border-b border-line/60">
-              {ctxMenu.node.isFolder ? <Folder size={11} className="inline mr-1 text-gold" /> : <FileCode size={11} className="inline mr-1 text-aqua" />}
+            <div className="px-2.5 py-1.5 text-[10px] font-mono text-[#575654] truncate border-b border-[#34332F]/60">
+              {ctxMenu.node.isFolder ? <Folder size={11} className="inline mr-1 text-[#dcb67a]" /> : <FileCode size={11} className="inline mr-1 text-[#3AA99F]" />}
               {ctxMenu.node.name}
             </div>
             <button
               type="button"
               onClick={() => { setCtxMenu(null); startCreate('file', dir); }}
-              className="w-full text-left px-2.5 py-1.5 text-[11.5px] font-sans text-fg-soft hover:bg-line hover:text-white cursor-pointer transition-colors"
+              className="w-full text-left px-2.5 py-1.5 text-[11.5px] font-sans text-[#CECDC3] hover:bg-[#34332F] hover:text-white cursor-pointer transition-colors"
             >
-              <Plus size={11} className="mr-1.5 inline text-aqua" /> New File Here
+              <Plus size={11} className="mr-1.5 inline text-[#3AA99F]" /> {t('ide.newFileHere')}
             </button>
             <button
               type="button"
               onClick={() => { setCtxMenu(null); startCreate('folder', dir); }}
-              className="w-full text-left px-2.5 py-1.5 text-[11.5px] font-sans text-fg-soft hover:bg-line hover:text-white cursor-pointer transition-colors"
+              className="w-full text-left px-2.5 py-1.5 text-[11.5px] font-sans text-[#CECDC3] hover:bg-[#34332F] hover:text-white cursor-pointer transition-colors"
             >
-              <FolderPlus size={11} className="mr-1.5 inline text-gold" /> New Folder Here
+              <FolderPlus size={11} className="mr-1.5 inline text-[#dcb67a]" /> {t('ide.newFolderHere')}
             </button>
             <button
               type="button"
               onClick={() => { setCtxMenu(null); void handleRenameEntry(ctxMenu.node); }}
-              className="w-full text-left px-2.5 py-1.5 text-[11.5px] font-sans text-fg-soft hover:bg-line hover:text-white cursor-pointer transition-colors"
+              className="w-full text-left px-2.5 py-1.5 text-[11.5px] font-sans text-[#CECDC3] hover:bg-[#34332F] hover:text-white cursor-pointer transition-colors"
             >
-              <Pencil size={11} className="mr-1.5 inline text-accent" /> Rename…
+              <Pencil size={11} className="mr-1.5 inline text-[#4385BE]" /> Rename…
             </button>
             <button
               type="button"
               onClick={() => { setCtxMenu(null); void handleDeleteEntry(ctxMenu.node); }}
-              className="w-full text-left px-2.5 py-1.5 text-[11.5px] font-sans text-danger hover:bg-line hover:text-danger-soft cursor-pointer transition-colors"
+              className="w-full text-left px-2.5 py-1.5 text-[11.5px] font-sans text-[#D14D41] hover:bg-[#34332F] hover:text-[#E0685C] cursor-pointer transition-colors"
             >
               <Trash2 size={11} className="mr-1.5 inline" /> Delete…
             </button>
@@ -1069,16 +1071,16 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
       {/* CONFIRMATION MODAL */}
       {pendingMove && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-surface border border-line rounded-lg shadow-2xl w-[360px] p-4 flex flex-col gap-3 font-sans animate-in fade-in zoom-in-95 duration-100">
+          <div className="bg-[#282726] border border-[#34332F] rounded-lg shadow-2xl w-[360px] p-4 flex flex-col gap-3 font-sans animate-in fade-in zoom-in-95 duration-100">
             <div className="flex items-start gap-3">
-              <div className="p-2 bg-gold/10 rounded-full text-gold flex-shrink-0">
+              <div className="p-2 bg-[#dcb67a]/10 rounded-full text-[#dcb67a] flex-shrink-0">
                 <AlertTriangle size={20} />
               </div>
               <div className="flex flex-col gap-1">
-                <h3 className="text-[13px] font-semibold text-white">Confirm Move</h3>
-                <p className="text-[11.5px] text-fg-muted leading-relaxed">
-                  Move <span className="font-mono text-aqua font-medium">{pendingMove.targetNodeName}</span>{' '}
-                  into <span className="font-mono text-gold font-medium">{pendingMove.targetFolderName}</span>?
+                <h3 className="text-[13px] font-semibold text-white">{t('ide.confirmMove')}</h3>
+                <p className="text-[11.5px] text-[#A8A49E] leading-relaxed">
+                  Move <span className="font-mono text-[#3AA99F] font-medium">{pendingMove.targetNodeName}</span>{' '}
+                  into <span className="font-mono text-[#dcb67a] font-medium">{pendingMove.targetFolderName}</span>?
                 </p>
               </div>
             </div>
@@ -1087,14 +1089,14 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
               <button
                 type="button"
                 onClick={() => setPendingMove(null)}
-                className="px-3 py-1.5 rounded text-[11px] font-medium bg-line hover:bg-line text-fg-soft cursor-pointer transition-colors"
+                className="px-3 py-1.5 rounded text-[11px] font-medium bg-[#34332F] hover:bg-[#34332F] text-[#CECDC3] cursor-pointer transition-colors"
               >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={confirmMove}
-                className="px-3 py-1.5 rounded text-[11px] font-medium bg-accent-deep hover:bg-accent text-white cursor-pointer transition-colors"
+                className="px-3 py-1.5 rounded text-[11px] font-medium bg-[#205EA6] hover:bg-[#4385BE] text-white cursor-pointer transition-colors"
               >
                 Yes, Move
               </button>
@@ -1106,25 +1108,25 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
       {/* SECTION 1: EXPLORER */}
       <div 
         data-root-zone="true"
-        className="w-[220px] bg-panel border-r border-line flex flex-col justify-between flex-shrink-0"
+        className="w-[220px] bg-[#1C1B1A] border-r border-[#34332F] flex flex-col justify-between flex-shrink-0"
       >
         <div className="flex flex-col w-full h-full">
-          <div className="px-3 py-2 text-[11px] font-bold text-fg-faint tracking-wider uppercase flex items-center justify-between border-b border-line">
-            <span>EXPLORER</span>
-            <div className="flex items-center gap-1 text-fg-soft">
+          <div className="px-3 py-2 text-[11px] font-bold text-[#87857F] tracking-wider uppercase flex items-center justify-between border-b border-[#34332F]">
+            <span>{t('ide.explorer')}</span>
+            <div className="flex items-center gap-1 text-[#CECDC3]">
               <button 
-                title="New File (workspace root)" 
+                title={t('ide.newFileRoot')} 
                 type="button" 
                 onClick={() => startCreate('file', '')}
-                className="p-1 hover:bg-surface rounded cursor-pointer text-fg-soft hover:text-white transition-colors"
+                className="p-1 hover:bg-[#282726] rounded cursor-pointer text-[#CECDC3] hover:text-white transition-colors"
               >
                 <Plus size={13} />
               </button>
               <button 
-                title="New Folder (workspace root)" 
+                title={t('ide.newFolderRoot')} 
                 type="button" 
                 onClick={() => startCreate('folder', '')}
-                className="p-1 hover:bg-surface rounded cursor-pointer text-fg-soft hover:text-white transition-colors"
+                className="p-1 hover:bg-[#282726] rounded cursor-pointer text-[#CECDC3] hover:text-white transition-colors"
               >
                 <FolderPlus size={13} />
               </button>
@@ -1135,10 +1137,10 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
             type="button"
             data-root-zone="true"
             onClick={() => setRootExpanded(v => !v)}
-            className="px-2 py-1.5 flex items-center gap-1 text-[11px] font-semibold border-b border-line bg-surface text-fg-soft hover:bg-line cursor-pointer transition-all select-none w-full text-left"
-            title={rootExpanded ? 'Collapse workspace tree' : 'Expand workspace tree'}
+            className="px-2 py-1.5 flex items-center gap-1 text-[11px] font-semibold border-b border-[#34332F] bg-[#282726] text-[#CECDC3] hover:bg-[#34332F] cursor-pointer transition-all select-none w-full text-left"
+            title={rootExpanded ? t('ide.collapseTree') : t('ide.expandTree')}
           >
-            <ChevronDown size={14} className={`text-fg-faint transition-transform duration-150 ${rootExpanded ? '' : 'rotate-180'}`} />
+            <ChevronDown size={14} className={`text-[#87857F] transition-transform duration-150 ${rootExpanded ? '' : 'rotate-180'}`} />
             <span className="truncate">{workspaceName}</span>
           </button>
 
@@ -1146,28 +1148,28 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
             data-root-zone="true"
             className="p-1 flex flex-col gap-0.5 flex-1 overflow-y-auto pretty-scrollbar"
           >
-            <div className="px-1 pb-1 flex items-center gap-1 border-b border-line/50 pb-1.5 mb-0.5">
-              <SearchIcon size={11} className="text-fg-faint flex-shrink-0" />
+            <div className="px-1 pb-1 flex items-center gap-1 border-b border-[#34332F]/50 pb-1.5 mb-0.5">
+              <SearchIcon size={11} className="text-[#87857F] flex-shrink-0" />
               <input
                 type="text"
                 value={treeSearch}
                 onChange={(e) => setTreeSearch(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Escape') setTreeSearch(''); }}
-                placeholder="Search files…"
-                className="w-full bg-ink border border-line focus:border-accent/60 text-fg font-mono text-[11px] px-1.5 py-0.5 rounded outline-none placeholder-fg-dim"
+                placeholder={t('ide.searchFiles')}
+                className="w-full bg-[#100F0F] border border-[#34332F] focus:border-[#4385BE]/60 text-[#F2F0E5] font-mono text-[11px] px-1.5 py-0.5 rounded outline-none placeholder-[#575654]"
                 spellCheck={false}
               />
             </div>
             {creationMode && (
               <form onSubmit={handleCreateItem} className="px-1 py-0.5 flex items-center gap-1">
                 {creationMode === 'folder' ? (
-                  <Folder size={14} className="text-gold" />
+                  <Folder size={14} className="text-[#dcb67a]" />
                 ) : (
-                  <FileCode size={14} className="text-aqua" />
+                  <FileCode size={14} className="text-[#3AA99F]" />
                 )}
                 {/* F7b: hedef klasör düz yazıyla görünür — "aktif sekmenin
                     klasörüne gizlice yaz" davranışı kalktı. */}
-                <span className="truncate font-mono text-[10px] text-fg-dim" title={creatingIn || 'workspace root'}>
+                <span className="truncate font-mono text-[10px] text-[#575654]" title={creatingIn || 'workspace root'}>
                   {creatingIn ? `${creatingIn.split('/').pop()}/` : './'}
                 </span>
                 <input
@@ -1182,7 +1184,7 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
                     }
                   }}
                   placeholder={creationMode === 'folder' ? 'folder_name' : 'file.py'}
-                  className="w-full bg-ink border border-accent text-white font-mono text-[11px] px-1.5 py-0.5 rounded outline-none"
+                  className="w-full bg-[#100F0F] border border-[#4385BE] text-white font-mono text-[11px] px-1.5 py-0.5 rounded outline-none"
                 />
               </form>
             )}
@@ -1191,27 +1193,27 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
           </div>
         </div>
 
-        <div className="p-2 border-t border-line text-[11px] font-mono text-fg-faint flex items-center justify-between bg-panel">
+        <div className="p-2 border-t border-[#34332F] text-[11px] font-mono text-[#87857F] flex items-center justify-between bg-[#1C1B1A]">
           <span className="flex items-center gap-1">
             <span
               className={`w-1.5 h-1.5 rounded-full ${
                 engineOnline === null
-                  ? 'bg-fg-dim'
+                  ? 'bg-[#575654]'
                   : engineOnline
-                    ? 'bg-aqua'
-                    : 'bg-warn'
+                    ? 'bg-[#3AA99F]'
+                    : 'bg-[#D0A215]'
               }`}
             />
             {engineOnline === null ? 'Engine check…' : engineOnline ? 'Engine active' : 'Engine offline'}
           </span>
-          <span className="text-aqua">{workspaceName}</span>
+          <span className="text-[#3AA99F]">{workspaceName}</span>
         </div>
       </div>
 
       {/* SECTION 2: EDITOR AND TERMINAL — M8: dar pencerede editör 0px'e
           ezilmesin; alt sinir sabit (pencere küçülünce taşma tercih edilir). */}
-      <div className="flex-1 flex flex-col min-w-[280px] bg-surface">
-        <div className="h-9 bg-surface border-b border-line flex items-center px-1 overflow-x-auto gap-0.5 flex-shrink-0">
+      <div className="flex-1 flex flex-col min-w-[280px] bg-[#282726]">
+        <div className="h-9 bg-[#282726] border-b border-[#34332F] flex items-center px-1 overflow-x-auto gap-0.5 flex-shrink-0">
           {openTabs.map(fileName => {
             const isActive = activeTab === fileName;
             return (
@@ -1220,25 +1222,25 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
                 onClick={() => setActiveTab(fileName)}
                 className={`h-9 px-3 flex items-center gap-2 text-[12px] font-mono cursor-pointer border-t-2 transition-colors ${
                   isActive 
-                    ? 'bg-surface border-accent text-fg' 
-                    : 'bg-line border-transparent text-fg-muted hover:bg-surface'
+                    ? 'bg-[#282726] border-[#4385BE] text-[#F2F0E5]' 
+                    : 'bg-[#34332F] border-transparent text-[#A8A49E] hover:bg-[#282726]'
                 }`}
               >
-                <FileCode size={13} className={isActive ? 'text-aqua' : 'text-fg-faint'} />
+                <FileCode size={13} className={isActive ? 'text-[#3AA99F]' : 'text-[#87857F]'} />
                 <span>{fileName.split('/').pop()}</span>
                 {/* V1: kaydedilmemis degisiklik gostergesi (VS Code tarzı nokta) */}
                 {isDirty(fileName) && (
                   <span
-                    className="w-2 h-2 rounded-full bg-gold flex-shrink-0"
-                    title="Unsaved changes"
+                    className="w-2 h-2 rounded-full bg-[#dcb67a] flex-shrink-0"
+                    title={t('ide.unsaved')}
                   />
                 )}
                 <button
                   type="button"
                   aria-label={`Close ${fileName}`}
                   onClick={(e) => handleCloseTab(e, fileName)}
-                  title="Close tab"
-                  className="w-[18px] h-[18px] flex items-center justify-center flex-shrink-0 rounded hover:text-danger hover:bg-line/40 cursor-pointer transition-colors"
+                  title={t('ide.closeTab')}
+                  className="w-[18px] h-[18px] flex items-center justify-center flex-shrink-0 rounded hover:text-[#D14D41] hover:bg-[#34332F]/40 cursor-pointer transition-colors"
                 >
                   <X size={14} />
                 </button>
@@ -1247,16 +1249,16 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
           })}
         </div>
 
-        <div className="h-6 bg-surface border-b border-line/60 px-3 flex items-center gap-1 text-[11px] font-mono text-fg-faint flex-shrink-0">
+        <div className="h-6 bg-[#282726] border-b border-[#34332F]/60 px-3 flex items-center gap-1 text-[11px] font-mono text-[#87857F] flex-shrink-0">
           <span>{workspaceName}</span>
           <ChevronRight size={12} />
-          <span className="text-fg-soft font-medium flex-1 truncate">{activeTab}</span>
+          <span className="text-[#CECDC3] font-medium flex-1 truncate">{activeTab}</span>
           {!noFileOpen && (
             <button
               type="button"
               onClick={handleRenameActiveFile}
-              className="p-0.5 rounded text-fg-faint hover:text-accent hover:bg-surface cursor-pointer transition-colors flex-shrink-0"
-              title="Rename active file"
+              className="p-0.5 rounded text-[#87857F] hover:text-[#4385BE] hover:bg-[#282726] cursor-pointer transition-colors flex-shrink-0"
+              title={t('ide.renameActive')}
             >
               <Pencil size={12} />
             </button>
@@ -1265,18 +1267,18 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
             <button
               type="button"
               onClick={handleDeleteActiveFile}
-              className="p-0.5 rounded text-fg-faint hover:text-danger hover:bg-surface cursor-pointer transition-colors flex-shrink-0"
-              title="Delete active file (moves to recycle bin)"
+              className="p-0.5 rounded text-[#87857F] hover:text-[#D14D41] hover:bg-[#282726] cursor-pointer transition-colors flex-shrink-0"
+              title={t('ide.deleteActive')}
             >
               <Trash2 size={12} />
             </button>
           )}
         </div>
 
-        <div className="flex-1 overflow-hidden p-2 font-mono leading-[1.6] bg-surface text-fg-soft flex">
+        <div className="flex-1 overflow-hidden p-2 font-mono leading-[1.6] bg-[#282726] text-[#CECDC3] flex">
           {noFileOpen ? (
-            <div className="flex-1 flex items-center justify-center text-[12px] text-fg-faint select-none">
-              <span>No file open — pick one from the explorer, or create a new file.</span>
+            <div className="flex-1 flex items-center justify-center text-[12px] text-[#87857F] select-none">
+              <span>{t('ide.noFileOpen')}</span>
             </div>
           ) : (
             <>
@@ -1284,15 +1286,15 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
             <div 
               ref={lineNumbersRef}
               style={{ fontSize }}
-              className="pr-4 border-r border-line/50 text-fg-faint text-right select-none flex flex-col min-w-[32px] overflow-hidden"
+              className="pr-4 border-r border-[#34332F]/50 text-[#87857F] text-right select-none flex flex-col min-w-[32px] overflow-hidden"
             >
               {/* Cok satirli dosyada sutun uretilmez: binlerce span yazmayi kilitler. */}
               {gutterLines ? (
                 gutterLines.map((_, i) => (
-                  <span key={i} className="hover:text-fg-soft">{i + 1}</span>
+                  <span key={i} className="hover:text-[#CECDC3]">{i + 1}</span>
                 ))
               ) : (
-                <span className="text-[10px] pr-1 text-fg-dim" title={`Line numbers hidden above ${MAX_GUTTER_LINES} lines for speed`}>
+                <span className="text-[10px] pr-1 text-[#5F5C57]" title={`Line numbers hidden above ${MAX_GUTTER_LINES} lines for speed`}>
                   {codeLines.length} ln
                 </span>
               )}
@@ -1328,7 +1330,7 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
               onKeyDown={handleEditorKeyDown}
               wrap="off"
               style={{ fontSize, lineHeight: 1.6, paddingLeft: '1rem', tabSize, caretColor: 'rgb(var(--tlm-fg))', color: 'transparent' }}
-              className="absolute inset-0 bg-transparent font-mono outline-none border-none resize-none whitespace-pre overflow-auto pretty-scrollbar selection:bg-accent/30"
+              className="absolute inset-0 bg-transparent font-mono outline-none border-none resize-none whitespace-pre overflow-auto pretty-scrollbar selection:bg-[#4385BE]/30"
               spellCheck={false}
             />
           </div>
@@ -1337,32 +1339,32 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
         </div>
 
         {/* TERMINAL */}
-        <div className={`border-t border-line bg-panel flex flex-col flex-shrink-0 ${
+        <div className={`border-t border-[#34332F] bg-[#1C1B1A] flex flex-col flex-shrink-0 ${
           isTerminalOpen ? 'h-[200px] min-h-[200px]' : 'h-7'
         }`}>
-          <div className="h-7 px-3 flex items-center justify-between text-[11px] font-mono border-b border-line bg-surface flex-shrink-0">
+          <div className="h-7 px-3 flex items-center justify-between text-[11px] font-mono border-b border-[#34332F] bg-[#282726] flex-shrink-0">
             <button
               type="button"
-              className="flex items-center gap-2 cursor-pointer bg-transparent border-none outline-none focus:outline-none focus:ring-1 focus:ring-accent/40 rounded px-1 text-left"
+              className="flex items-center gap-2 cursor-pointer bg-transparent border-none outline-none focus:outline-none focus:ring-1 focus:ring-[#4385BE]/40 rounded px-1 text-left"
               onClick={() => setIsTerminalOpen(!isTerminalOpen)}
             >
-              <TerminalIcon size={13} className="text-accent" />
-              <span className="font-semibold text-fg-soft">TERMINAL (PowerShell Native)</span>
+              <TerminalIcon size={13} className="text-[#4385BE]" />
+              <span className="font-semibold text-[#CECDC3]">{t('ide.terminal')}</span>
             </button>
             
             <div className="flex items-center gap-2">
               <button 
                 type="button" 
                 onClick={handleSaveActiveFile}
-                className="flex items-center gap-1 px-2 py-0.5 bg-surface hover:bg-line text-fg-soft hover:text-white border border-line rounded text-[11px] font-sans font-medium cursor-pointer"
-                title="Save File (Ctrl+S)"
+                className="flex items-center gap-1 px-2 py-0.5 bg-[#282726] hover:bg-[#34332F] text-[#CECDC3] hover:text-white border border-[#34332F] rounded text-[11px] font-sans font-medium cursor-pointer"
+                title={t('ide.saveFile')}
               >
                 <Save size={10} /> Save
               </button>
               <button 
                 type="button" 
                 onClick={handleRunActiveFile}
-                className="flex items-center gap-1 px-2 py-0.5 bg-accent-deep hover:bg-accent text-white rounded text-[11px] font-sans font-medium cursor-pointer"
+                className="flex items-center gap-1 px-2 py-0.5 bg-[#205EA6] hover:bg-[#4385BE] text-white rounded text-[11px] font-sans font-medium cursor-pointer"
               >
                 <Play size={10} /> Run Active Code
               </button>
@@ -1373,7 +1375,7 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
               close_terminal cagirisıyla calisan prosesi OLDURUYORDU.
               hidden ile PTY + xterm tamponu yasiya kalir; acilinda
               ResizeObserver yeniden fit eder. */}
-          <div className={`flex-1 w-full bg-panel overflow-hidden ${isTerminalOpen ? 'h-[173px]' : 'hidden'}`}>
+          <div className={`flex-1 w-full bg-[#1C1B1A] overflow-hidden ${isTerminalOpen ? 'h-[173px]' : 'hidden'}`}>
             <RealTerminal />
           </div>
         </div>
@@ -1382,7 +1384,7 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
       {/* 🎯 SECTION 3: COPILOT PANEL (MINIMAL CLOSED STATE & FULLY FIXED DRAGGING) */}
 <div 
   style={{ width: isCopilotOpen ? `${copilotWidth}px` : '36px' }}
-  className={`bg-ink border-l border-surface flex flex-col flex-shrink-0 relative select-none ${
+  className={`bg-[#100F0F] border-l border-[#282726] flex flex-col flex-shrink-0 relative select-none ${
     isResizingCopilot ? '' : 'transition-[width] duration-150 ease-out'
   }`}
 >
@@ -1391,10 +1393,10 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
     <div
       onMouseDown={() => setIsResizingCopilot(true)}
       onDoubleClick={() => setCopilotWidth(DEFAULT_COPILOT_WIDTH)}
-      className="absolute top-0 -left-1.5 bottom-0 w-3 cursor-col-resize hover:bg-accent/40 transition-colors z-20 group flex items-center justify-center"
+      className="absolute top-0 -left-1.5 bottom-0 w-3 cursor-col-resize hover:bg-[#4385BE]/40 transition-colors z-20 group flex items-center justify-center"
       title="Drag (340px - 470px) or double-click to reset the size"
     >
-      <div className="w-[2px] h-full bg-transparent group-hover:bg-accent" />
+      <div className="w-[2px] h-full bg-transparent group-hover:bg-[#4385BE]" />
     </div>
   )}
 
@@ -1402,7 +1404,7 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
   <button
     type="button"
     onClick={() => setIsCopilotOpen(!isCopilotOpen)}
-    className="absolute top-1/2 -translate-y-1/2 -left-3 w-6 h-6 bg-surface border border-line hover:border-accent rounded-full flex items-center justify-center text-fg-soft hover:text-white shadow-xl cursor-pointer z-30 transition-all hover:scale-110"
+    className="absolute top-1/2 -translate-y-1/2 -left-3 w-6 h-6 bg-[#282726] border border-[#34332F] hover:border-[#4385BE] rounded-full flex items-center justify-center text-[#CECDC3] hover:text-white shadow-xl cursor-pointer z-30 transition-all hover:scale-110"
     title={isCopilotOpen ? "Collapse Panel" : "Expand Panel"}
   >
     {isCopilotOpen ? (
@@ -1414,19 +1416,19 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
 
   {/* Panel header or sleek minimal closed state */}
   {isCopilotOpen ? (
-    <div className="h-8 border-b border-surface px-2.5 flex items-center justify-between font-mono text-[11px] text-fg-soft flex-shrink-0 bg-panel">
-      <div className="flex items-center gap-1 font-bold text-aqua pl-1">
+    <div className="h-8 border-b border-[#282726] px-2.5 flex items-center justify-between font-mono text-[11px] text-[#CECDC3] flex-shrink-0 bg-[#1C1B1A]">
+      <div className="flex items-center gap-1 font-bold text-[#3AA99F] pl-1">
         <span>Thalamus</span>
       </div>
     </div>
   ) : (
     /* 🎯 CLEAN CLOSED STATE: a single icon centered on the strip */
-    <div className="h-full w-full flex flex-col items-center pt-2.5 bg-panel">
+    <div className="h-full w-full flex flex-col items-center pt-2.5 bg-[#1C1B1A]">
       <button
         type="button"
         onClick={() => setIsCopilotOpen(true)}
-        className="p-1 hover:bg-surface rounded text-accent hover:text-white transition-colors cursor-pointer"
-        title="Open Thalamus Copilot"
+        className="p-1 hover:bg-[#282726] rounded text-[#4385BE] hover:text-white transition-colors cursor-pointer"
+        title={t('ide.openCopilot')}
       >
         <MessageSquare size={15} />
       </button>
