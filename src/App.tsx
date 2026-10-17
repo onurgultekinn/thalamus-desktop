@@ -19,6 +19,7 @@ import { getWorkspaceName, getWorkspaceRoot, openProject, pruneRecentProjects, r
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { explainError, splitExplanation } from './lib/errors';
 import { markSwitchStart, reportSwitchPaint } from './lib/perfTrace';
+import { useT } from './lib/i18n';
 import type { Message, ChatItem, User } from './types';
 export type { Message, MessageMetrics, ChatItem } from './types';
 import './App.css';
@@ -44,6 +45,7 @@ const MAX_STORED_MESSAGES = 200;
 
 export default function App() {
   const { showToast } = useToast();
+  const t = useT();
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
   // Bumped whenever the active project changes so the sidebar list and the
   // project dashboard both refresh.
@@ -87,7 +89,9 @@ export default function App() {
    * A single attribute swap replaces the old document.head <style> injection.
    */
   const applyTheme = (theme: 'dark' | 'nord-red') => {
-    document.documentElement.setAttribute('data-theme', theme === 'nord-red' ? 'nord-red' : 'dark');
+    const el = document.documentElement;
+    if (theme === 'nord-red') el.setAttribute('data-theme', 'nord-red');
+    else el.removeAttribute('data-theme');
   };
 
   useEffect(() => {
@@ -310,7 +314,7 @@ export default function App() {
             JSON.stringify(capped.slice(-50), dropImages)
           );
         } catch {
-          showToast('Storage Full', 'Chat history could not be saved — storage quota exceeded.', 'error', undefined, '[507] localStorage quota exceeded');
+          showToast(t('toast.storageFull'), t('toast.storageFullMsg'), 'error', undefined, '[507] localStorage quota exceeded');
         }
       }
     }
@@ -374,12 +378,12 @@ export default function App() {
         setMessages([]);
       }
     }
-    showToast('Chat Deleted', 'The chat session has been permanently removed.', 'success');
+    showToast(t('toast.chatDeleted'), t('toast.chatDeletedMsg'), 'success');
   };
 
   const handleRenameChat = (chatId: string, newTitle: string) => {
     setChats(prev => prev.map(c => c.id === chatId ? { ...c, title: newTitle } : c));
-    showToast('Chat Renamed', 'The chat title was updated successfully.', 'success');
+    showToast(t('toast.chatRenamed'), t('toast.chatRenamedMsg'), 'success');
   };
 
 // Optimized scroll: only in 'chat' view, with instant (auto) scrolling
@@ -632,7 +636,7 @@ export default function App() {
    */
   const handleSampleCode = useCallback((code: string) => {
     setInput(code);
-    showToast('Snippet Loaded', 'Sample code loaded into input. Hit send to analyze compression.', 'info');
+    showToast(t('preset.snippetLoaded'), t('preset.snippetLoadedMsg'), 'info');
   }, [showToast]);
 
   const handleOpenProjectView = useCallback(() => setCurrentView('project'), []);
@@ -642,7 +646,7 @@ export default function App() {
     // Silinen/olmayan sohbetten gelen eski mesajda İncele artık ölü veriyle
     // diff açmaz — dürüst mesaj görüntülenir.
     if (!chats.some(c => c.id === activeChatId)) {
-      showToast('No Chat', 'This message is no longer attached to a chat session — Inspect cannot open.', 'info');
+      showToast(t('chat.noChat'), t('chat.noChatMsg'), 'info');
       return;
     }
     setSelectedDiffData({
@@ -680,7 +684,7 @@ export default function App() {
     if (!userText && !userImages) {
       // Selamlama gibi kendinden önce kullanıcı mesajı olmayan yanıtlar
       // yeniden üretilemez: sessiz no-op yerine dürüst bilgi.
-      showToast('Nothing to Regenerate', 'This reply has no preceding user message to resend.', 'info');
+      showToast(t('chat.nothingToRegen'), t('chat.nothingToRegenMsg'), 'info');
       return;
     }
     setMessages(prev => prev.slice(0, assistantIdx));

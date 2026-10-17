@@ -18,6 +18,7 @@ import {
 import type { ChatItem, User } from '../types';
 import { getWorkspaceName, getWorkspaceRoot, listRecentProjects, forgetProject } from '../lib/workspace';
 import { visiblePlanLabel } from '../lib/plan';
+import { useT } from '../lib/i18n';
 
 interface SidebarProps {
   currentView: 'chat' | 'diff' | 'project';
@@ -56,6 +57,7 @@ export function Sidebar({
   onOpenProject,
   projectsVersion
 }: SidebarProps) {
+  const t = useT();
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [isNewBtnHovered, setIsNewBtnHovered] = useState(false);
   const [projects, setProjects] = useState(() => listRecentProjects());
@@ -123,7 +125,7 @@ export function Sidebar({
   // legacy "Guest User" value (the person may want to stay anonymous — no "guest" tag).
   const rawName = user?.name?.trim();
   const displayName =
-    rawName && rawName.toLowerCase() !== 'guest user' ? rawName : 'Anonymous User';
+    rawName && rawName.toLowerCase() !== 'guest user' ? rawName : t('sidebar.anonymous');
   // Optional plan label; hidden entirely while the plan feature is off.
   const planLabel = visiblePlanLabel(user);
 
@@ -140,7 +142,7 @@ export function Sidebar({
         type="button"
         onClick={() => setIsOpen(!isOpen)} 
         className="absolute top-1/2 -right-2.5 -translate-y-1/2 w-5 h-5 bg-obsidian-panel border border-obsidian-border rounded-full flex items-center justify-center text-obsidian-muted hover:border-obsidian-muted/40 hover:text-obsidian-text cursor-pointer z-50 transition-colors duration-150"
-        title={isOpen ? "Collapse Sidebar" : "Expand Sidebar"}
+        title={isOpen ? t('sidebar.collapse') : t('sidebar.expand')}
       >
         {isOpen ? <ChevronLeft size={11} /> : <ChevronRight size={11} />}
       </button>
@@ -160,7 +162,7 @@ export function Sidebar({
               onMouseEnter={() => setIsNewBtnHovered(true)}
               onMouseLeave={() => setIsNewBtnHovered(false)}
               aria-expanded={sessionMenu !== 'closed'}
-              title="New session"
+              title={t('sidebar.newSession')}
               className={`absolute inset-0 flex items-center gap-2 p-2 rounded-md border transition-all duration-300 ease-out ${
                 isOpen ? 'justify-start pl-3' : 'justify-center'
               } ${
@@ -169,13 +171,13 @@ export function Sidebar({
                   : 'pointer-events-none opacity-0 scale-90'
               }`}
               style={{
-                backgroundColor: isNewBtnHovered ? 'rgb(var(--tlm-fg-dim))' : 'rgb(var(--tlm-surface))',
-                borderColor: isNewBtnHovered ? 'rgb(var(--tlm-fg-dim))' : 'rgb(var(--tlm-line))',
-                color: isNewBtnHovered ? 'rgb(var(--tlm-fg))' : 'rgb(var(--tlm-fg-muted))'
+                backgroundColor: isNewBtnHovered ? '#575654' : '#282f3d',
+                borderColor: isNewBtnHovered ? '#575654' : '#353f4f',
+                color: isNewBtnHovered ? '#F2F0E5' : '#A8A49E'
               }}
             >
               <Plus size={14} className="flex-shrink-0" />
-              {isOpen && <span className="text-[12px] font-medium">New session</span>}
+              {isOpen && <span className="text-[12px] font-medium">{t('sidebar.newSession')}</span>}
             </button>
 
             {/* split: chat | project */}
@@ -191,35 +193,35 @@ export function Sidebar({
                   setCurrentView('chat');
                   if (onNewChat) onNewChat();
                 }}
-                title="New chat session"
-                className={`flex-1 min-w-0 flex items-center justify-center gap-1.5 rounded-md border border-line bg-surface text-fg-muted hover:border-fg-dim hover:bg-fg-dim hover:text-fg cursor-pointer transition-colors ${
+                title={t('sidebar.newChat')}
+                className={`flex-1 min-w-0 flex items-center justify-center gap-1.5 rounded-md border border-[#353f4f] bg-[#282f3d] text-[#A8A49E] hover:border-[#575654] hover:bg-[#575654] hover:text-[#F2F0E5] cursor-pointer transition-colors ${
                   isOpen ? 'text-[11.5px] font-medium' : ''
                 }`}
               >
                 <MessageSquare size={13} className="flex-shrink-0" />
-                {isOpen && <span className="truncate">Chat</span>}
+                {isOpen && <span className="truncate">{t('sidebar.chat')}</span>}
               </button>
               <button
                 type="button"
                 onClick={() => setSessionMenu(m => (m === 'project' ? 'split' : 'project'))}
-                title="Open a project"
+                title={t('sidebar.openProject')}
                 className={`flex-1 min-w-0 flex items-center justify-center gap-1.5 rounded-md border cursor-pointer transition-colors ${
                   sessionMenu === 'project'
-                    ? 'border-fg-dim bg-fg-dim text-fg'
-                    : 'border-line bg-surface text-fg-muted hover:border-fg-dim hover:bg-fg-dim hover:text-fg'
+                    ? 'border-[#575654] bg-[#575654] text-[#F2F0E5]'
+                    : 'border-[#353f4f] bg-[#282f3d] text-[#A8A49E] hover:border-[#575654] hover:bg-[#575654] hover:text-[#F2F0E5]'
                 } ${isOpen ? 'text-[11.5px] font-medium' : ''}`}
               >
                 <FolderOpen size={13} className="flex-shrink-0" />
-                {isOpen && <span className="truncate">Project</span>}
+                {isOpen && <span className="truncate">{t('sidebar.project')}</span>}
               </button>
             </div>
           </div>
 
           {/* project path prompt */}
           {sessionMenu === 'project' && isOpen && (
-            <div className="mt-1.5 w-full overflow-hidden rounded-md border border-surface bg-panel p-2">
-              <label className="block px-0.5 pb-1.5 text-[11px] font-mono uppercase tracking-wider text-fg-faint">
-                Project folder path
+            <div className="mt-1.5 w-full overflow-hidden rounded-md border border-[#282726] bg-[#1C1B1A] p-2">
+              <label className="block px-0.5 pb-1.5 text-[11px] font-mono uppercase tracking-wider text-[#87857F]">
+                {t('sidebar.projectPath')}
               </label>
               <div className="flex items-center gap-1.5">
                 <input
@@ -235,7 +237,7 @@ export function Sidebar({
                   }}
                   placeholder="C:\\dev\\my-project"
                   spellCheck={false}
-                  className="min-w-0 flex-1 rounded-md border border-white/[0.08] bg-white/[0.03] px-2 py-1.5 font-mono text-[11.5px] text-fg placeholder-white/20 focus:border-fg-dim focus:outline-none"
+                  className="min-w-0 flex-1 rounded-md border border-white/[0.08] bg-white/[0.03] px-2 py-1.5 font-mono text-[11.5px] text-[#F2F0E5] placeholder-white/20 focus:border-[#575654] focus:outline-none"
                 />
                 <button
                   type="button"
@@ -243,13 +245,13 @@ export function Sidebar({
                     const p = projectPath.trim();
                     if (p) { setProjectPath(''); setSessionMenu('closed'); onOpenProject?.(p); }
                   }}
-                  className="flex-shrink-0 rounded-md border border-line bg-surface px-2.5 py-1.5 text-[11.5px] font-medium text-fg-soft hover:border-fg-dim hover:bg-fg-dim hover:text-fg cursor-pointer transition-colors"
+                  className="flex-shrink-0 rounded-md border border-[#353f4f] bg-[#282f3d] px-2.5 py-1.5 text-[11.5px] font-medium text-[#CECDC3] hover:border-[#575654] hover:bg-[#575654] hover:text-[#F2F0E5] cursor-pointer transition-colors"
                 >
-                  Open
+                  {t('common.open')}
                 </button>
               </div>
-              <p className="px-0.5 pt-1.5 text-[11px] leading-snug text-fg-faint">
-                Tip: pick one of your recent projects below instead.
+              <p className="px-0.5 pt-1.5 text-[11px] leading-snug text-[#87857F]">
+                {t('sidebar.tipRecent')}
               </p>
             </div>
           )}
@@ -260,7 +262,7 @@ export function Sidebar({
         <div className="flex flex-col gap-0.5 w-full mt-1">
           {isOpen && (
             <span className="px-1.5 mb-0.5 text-[11px] font-semibold uppercase tracking-widest text-obsidian-muted/50">
-              Projects
+              {t('sidebar.projects')}
             </span>
           )}
 
@@ -276,7 +278,7 @@ export function Sidebar({
           )}
 
           {isOpen && projects.length === 0 && (
-            <span className="px-2 py-1 text-[11px] text-obsidian-muted/60">No projects yet</span>
+            <span className="px-2 py-1 text-[11px] text-obsidian-muted/60">{t('sidebar.noProjects')}</span>
           )}
 
           {isOpen && projects.map(project => {
@@ -291,11 +293,11 @@ export function Sidebar({
                   className="w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md bg-[#2b1918] border border-rose-600/40"
                 >
                   <Trash2 size={12} className="text-rose-400 flex-shrink-0" />
-                  <span className="flex-1 min-w-0 truncate text-[11px] text-rose-200">Remove from list?</span>
+                  <span className="flex-1 min-w-0 truncate text-[11px] text-rose-200">{t('sidebar.removeFromListQ')}</span>
                   <button
                     type="button"
                     onClick={() => { setProjects(forgetProject(project.root)); setPendingDelete(null); }}
-                    title="Remove"
+                    title={t('common.remove')}
                     className="text-rose-300 hover:text-rose-200 p-0.5 cursor-pointer"
                   >
                     <Check size={12} />
@@ -303,8 +305,8 @@ export function Sidebar({
                   <button
                     type="button"
                     onClick={() => setPendingDelete(null)}
-                    title="Cancel"
-                    className="text-fg-faint hover:text-fg-soft p-0.5 cursor-pointer"
+                    title={t('common.cancel')}
+                    className="text-[#87857F] hover:text-[#CECDC3] p-0.5 cursor-pointer"
                   >
                     <X size={12} />
                   </button>
@@ -332,7 +334,7 @@ export function Sidebar({
                     <FolderOpen
                       key={`open-${project.root}`}
                       size={13}
-                      className="flex-shrink-0 text-gold folder-pop"
+                      className="flex-shrink-0 text-[#dcb67a] folder-pop"
                     />
                   ) : (
                     <Folder
@@ -349,7 +351,7 @@ export function Sidebar({
                     e.stopPropagation();
                     setPendingDelete({ kind: 'project', id: project.root });
                   }}
-                  title="Remove from list"
+                  title={t('sidebar.removeFromList')}
                   className="flex-shrink-0 pr-2 opacity-0 group-hover/project:opacity-100 text-obsidian-muted hover:text-rose-400 cursor-pointer transition-opacity"
                 >
                   <X size={11} />
@@ -361,7 +363,7 @@ export function Sidebar({
 
         {/* CHATS Group */}
         <div className="flex flex-col gap-0.5 w-full mt-4">
-          {isOpen && <span className="px-1.5 mb-0.5 text-[11px] font-semibold uppercase tracking-widest text-obsidian-muted/50">Chats</span>}
+          {isOpen && <span className="px-1.5 mb-0.5 text-[11px] font-semibold uppercase tracking-widest text-obsidian-muted/50">{t('sidebar.chats')}</span>}
           
           {chats.map(chat => {
             const isActive = currentView === 'chat' && activeChatId === chat.id;
@@ -420,11 +422,11 @@ export function Sidebar({
                   className="w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md bg-[#2b1918] border border-rose-600/40"
                 >
                   <Trash2 size={12} className="text-rose-400 flex-shrink-0" />
-                  <span className="flex-1 min-w-0 truncate text-[11px] text-rose-200">Delete this chat?</span>
+                  <span className="flex-1 min-w-0 truncate text-[11px] text-rose-200">{t('sidebar.deleteChatQ')}</span>
                   <button
                     type="button"
                     onClick={() => { if (onDeleteChat) onDeleteChat(chat.id); setPendingDelete(null); }}
-                    title="Delete"
+                    title={t('common.delete')}
                     className="text-rose-300 hover:text-rose-200 p-0.5 cursor-pointer"
                   >
                     <Check size={12} />
@@ -432,8 +434,8 @@ export function Sidebar({
                   <button
                     type="button"
                     onClick={() => setPendingDelete(null)}
-                    title="Cancel"
-                    className="text-fg-faint hover:text-fg-soft p-0.5 cursor-pointer"
+                    title={t('common.cancel')}
+                    className="text-[#87857F] hover:text-[#CECDC3] p-0.5 cursor-pointer"
                   >
                     <X size={12} />
                   </button>
@@ -462,7 +464,7 @@ export function Sidebar({
                 >
                   {/* Aktif sohbet: pop animasyonlu ikon. Digerleri: sade, soluk. */}
                   {isActive ? (
-                    <MessageSquare key={`chat-open-${chat.id}`} size={13} className="flex-shrink-0 text-fg-soft chat-pop" />
+                    <MessageSquare key={`chat-open-${chat.id}`} size={13} className="flex-shrink-0 text-[#C6C0B2] chat-pop" />
                   ) : (
                     <MessageSquare size={13} className="flex-shrink-0 opacity-50" />
                   )}
@@ -479,7 +481,7 @@ export function Sidebar({
                         setEditTitle(chat.title);
                       }}
                       className="text-obsidian-muted hover:text-white p-0.5 rounded cursor-pointer transition-colors"
-                      title="Rename Chat"
+                      title={t('sidebar.renameChat')}
                     >
                       <Pencil size={11} />
                     </button>
@@ -490,7 +492,7 @@ export function Sidebar({
                         setPendingDelete({ kind: 'chat', id: chat.id });
                       }}
                       className="text-obsidian-muted hover:text-rose-400 p-0.5 rounded cursor-pointer transition-colors"
-                      title="Delete Chat"
+                      title={t('sidebar.deleteChat')}
                     >
                       <Trash2 size={11} />
                     </button>
@@ -508,29 +510,29 @@ export function Sidebar({
 
         <div className="relative" ref={profileMenuRef}>
           {profileMenuOpen && isOpen && (
-            <div className="absolute bottom-full left-0 right-0 mb-1.5 overflow-hidden rounded-md bg-panel border border-surface shadow-[0_12px_32px_-14px_rgba(0,0,0,0.8)] z-50">
+            <div className="absolute bottom-full left-0 right-0 mb-1.5 overflow-hidden rounded-md bg-[#1C1B1A] border border-[#282726] shadow-[0_12px_32px_-14px_rgba(0,0,0,0.8)] z-50">
 
               <div className="p-1">
                 <button
                   type="button"
                   onClick={() => { setProfileMenuOpen(false); if (onOpenSettings) onOpenSettings(); }}
-                  className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-fg-muted hover:bg-surface hover:text-fg text-left cursor-pointer transition-colors"
+                  className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[#A8A49E] hover:bg-[#282726] hover:text-[#F2F0E5] text-left cursor-pointer transition-colors"
                 >
                   <Settings size={14} className="flex-shrink-0" />
-                  <span className="flex-1 text-[12px]">Settings</span>
+                  <span className="flex-1 text-[12px]">{t('common.settings')}</span>
                 </button>
               </div>
 
-              <div className="border-t border-surface" />
+              <div className="border-t border-[#282726]" />
 
               <div className="p-1">
                 <button
                   type="button"
                   onClick={() => { setProfileMenuOpen(false); if (onLogout) onLogout(); }}
-                  className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-fg-muted hover:bg-surface hover:text-danger text-left cursor-pointer transition-colors"
+                  className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[#A8A49E] hover:bg-[#282726] hover:text-[#D14D41] text-left cursor-pointer transition-colors"
                 >
                   <LogoutIcon size={14} className="flex-shrink-0" />
-                  <span className="flex-1 text-[12px]">Sign out</span>
+                  <span className="flex-1 text-[12px]">{t('sidebar.signOut')}</span>
                 </button>
               </div>
             </div>
@@ -547,18 +549,18 @@ export function Sidebar({
                 setProfileMenuOpen(v => !v);
               }
             }}
-            title={profileMenuOpen ? 'Close menu' : `${displayName} — menu`}
+            title={profileMenuOpen ? t('sidebar.closeMenu') : t('sidebar.menu', { name: displayName })}
             aria-expanded={profileMenuOpen}
             aria-haspopup="menu"
             className={`group w-full flex items-center rounded-md border p-1.5 cursor-pointer transition-colors duration-150 ${
               isOpen ? 'justify-start gap-2.5' : 'justify-center'
             } ${
               profileMenuOpen
-                ? 'bg-surface border-line'
+                ? 'bg-[#282726] border-[#3a3936]'
                 : 'border-transparent hover:bg-obsidian-panel/40'
             }`}
           >
-            <span className="w-7 h-7 rounded-full bg-surface border border-line flex items-center justify-center flex-shrink-0 overflow-hidden text-fg-faint group-hover:text-fg-soft transition-colors">
+            <span className="w-7 h-7 rounded-full bg-[#282726] border border-[#3a3936] flex items-center justify-center flex-shrink-0 overflow-hidden text-[#87857F] group-hover:text-[#CECDC3] transition-colors">
               {userAvatarUrl ? (
                 <img src={userAvatarUrl} alt="" className="w-full h-full object-cover" />
               ) : (
@@ -568,14 +570,14 @@ export function Sidebar({
             {isOpen && (
               <>
                 <span className="min-w-0 flex-1 flex flex-col items-start leading-tight text-left">
-                  <span className="text-[12px] text-fg-soft group-hover:text-fg truncate w-full transition-colors">{displayName}</span>
+                  <span className="text-[12px] text-[#CECDC3] group-hover:text-[#F2F0E5] truncate w-full transition-colors">{displayName}</span>
                   {planLabel && (
-                    <span className="text-[11px] text-fg-faint truncate w-full">{planLabel}</span>
+                    <span className="text-[11px] text-[#87857F] truncate w-full">{planLabel}</span>
                   )}
                 </span>
                 <ChevronUp
                   size={12}
-                  className={`flex-shrink-0 text-fg-faint transition-transform duration-150 ${
+                  className={`flex-shrink-0 text-[#87857F] transition-transform duration-150 ${
                     profileMenuOpen ? 'rotate-180' : ''
                   }`}
                 />

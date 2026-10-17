@@ -3,6 +3,7 @@ import { FileCode2, FolderOpen, KeyRound, Gauge } from 'lucide-react';
 import { MarkdownMessage } from './MarkdownMessage';
 import { TextDivider } from './TextDivider';
 import { useToast } from './Toast';
+import { useT } from '../lib/i18n';
 import type { Message } from '../types';
 
 /**
@@ -59,6 +60,7 @@ function ChatViewInner({
   }, [chatKey]);
 
   const { showToast } = useToast();
+  const t = useT();
 
   // Pencere: son N mesaj render edilir; eskiler kullanicinin istegiyle gelir.
   const windowStart = Math.max(0, messages.length - visibleCount);
@@ -70,12 +72,12 @@ function ChatViewInner({
       {messages.length <= 1 && !loading ? (
         <div className="flex flex-col items-center justify-center min-h-[400px] h-full max-w-3xl mx-auto px-4 py-8 select-none">
           <div className="text-center mb-8">
-            <h2 className="hand text-[26px] leading-tight mb-1" style={{ color: 'rgb(var(--tlm-gold))' }}>Welcome to Thalamus</h2>
+            <h2 className="hand text-[26px] leading-tight mb-1" style={{ color: 'rgb(var(--tlm-gold))' }}>{t('chat.welcome')}</h2>
             <svg className="sketch-underline" viewBox="0 0 220 8" fill="none" aria-hidden="true">
-              <path d="M2 5 C 30 2, 55 7, 85 4 S 150 2, 180 5 S 210 3, 218 4" style={{ stroke: 'rgb(var(--tlm-gold))' }} strokeWidth="1.6" strokeLinecap="round" />
+              <path d="M2 5 C 30 2, 55 7, 85 4 S 150 2, 180 5 S 210 3, 218 4" stroke="#dcb67a" strokeWidth="1.6" strokeLinecap="round" />
             </svg>
-            <p className="text-xs text-fg-muted max-w-md mx-auto leading-relaxed mt-4">
-              Thalamus is your local AI assistant — behind the scenes it compresses context losslessly to save context and cost. Pick a starting point:
+            <p className="text-xs text-[#A8A49E] max-w-md mx-auto leading-relaxed mt-4">
+              {t('chat.welcomeSub')}
             </p>
           </div>
 
@@ -84,14 +86,14 @@ function ChatViewInner({
             <button
               type="button"
               onClick={() => onSampleCode(`def calc_data(items):\n    # Redundant calculation optimization example\n    total = 0\n    for x in items:\n        val = x * 2.0\n        total += val\n    return total`)}
-              className="sketch-border flex items-start gap-3.5 p-4 bg-panel/80 hover:bg-surface hover:border-gold/60 text-left cursor-pointer transition-all duration-300 group"
+              className="sketch-border flex items-start gap-3.5 p-4 bg-[#1C1B1A]/80 hover:bg-[#282726] hover:border-[#dcb67a]/60 text-left cursor-pointer transition-all duration-300 group"
             >
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-gold transition-colors group-hover:border-gold/40 group-hover:bg-gold/10 flex-shrink-0">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-[#dcb67a] transition-colors group-hover:border-[#dcb67a]/40 group-hover:bg-[#dcb67a]/10 flex-shrink-0">
                 <FileCode2 size={17} strokeWidth={1.75} />
               </div>
               <div className="flex flex-col gap-1 min-w-0">
-                <span className="text-[13px] font-semibold text-fg group-hover:text-white transition-colors">Sample prompt</span>
-                <span className="text-[11px] text-fg-muted leading-normal">A short Python snippet to start a conversation with.</span>
+                <span className="text-[13px] font-semibold text-[#F2F0E5] group-hover:text-white transition-colors">{t('chat.card.sample.title')}</span>
+                <span className="text-[11px] text-[#A8A49E] leading-normal">{t('chat.card.sample.desc')}</span>
               </div>
             </button>
 
@@ -99,14 +101,14 @@ function ChatViewInner({
             <button
               type="button"
               onClick={onOpenProject}
-              className="sketch-border flex items-start gap-3.5 p-4 bg-panel/80 hover:bg-surface hover:border-gold/60 text-left cursor-pointer transition-all duration-300 group"
+              className="sketch-border flex items-start gap-3.5 p-4 bg-[#1C1B1A]/80 hover:bg-[#282726] hover:border-[#dcb67a]/60 text-left cursor-pointer transition-all duration-300 group"
             >
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-gold transition-colors group-hover:border-gold/40 group-hover:bg-gold/10 flex-shrink-0">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-[#dcb67a] transition-colors group-hover:border-[#dcb67a]/40 group-hover:bg-[#dcb67a]/10 flex-shrink-0">
                 <FolderOpen size={17} strokeWidth={1.75} />
               </div>
               <div className="flex flex-col gap-1 min-w-0">
-                <span className="text-[13px] font-semibold text-fg group-hover:text-white transition-colors">Open project</span>
-                <span className="text-[11px] text-fg-muted leading-normal">Browse {projectName}: files, editor, terminal.</span>
+                <span className="text-[13px] font-semibold text-[#F2F0E5] group-hover:text-white transition-colors">{t('chat.card.project.title')}</span>
+                <span className="text-[11px] text-[#A8A49E] leading-normal">{t('chat.card.project.desc', { project: projectName })}</span>
               </div>
             </button>
 
@@ -114,14 +116,14 @@ function ChatViewInner({
             <button
               type="button"
               onClick={onOpenSettings}
-              className="sketch-border flex items-start gap-3.5 p-4 bg-panel/80 hover:bg-surface hover:border-gold/60 text-left cursor-pointer transition-all duration-300 group"
+              className="sketch-border flex items-start gap-3.5 p-4 bg-[#1C1B1A]/80 hover:bg-[#282726] hover:border-[#dcb67a]/60 text-left cursor-pointer transition-all duration-300 group"
             >
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-gold transition-colors group-hover:border-gold/40 group-hover:bg-gold/10 flex-shrink-0">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-[#dcb67a] transition-colors group-hover:border-[#dcb67a]/40 group-hover:bg-[#dcb67a]/10 flex-shrink-0">
                 <KeyRound size={17} strokeWidth={1.75} />
               </div>
               <div className="flex flex-col gap-1 min-w-0">
-                <span className="text-[13px] font-semibold text-fg group-hover:text-white transition-colors">Connect a model</span>
-                <span className="text-[11px] text-fg-muted leading-normal">Add provider keys so replies can use a model.</span>
+                <span className="text-[13px] font-semibold text-[#F2F0E5] group-hover:text-white transition-colors">{t('chat.card.model.title')}</span>
+                <span className="text-[11px] text-[#A8A49E] leading-normal">{t('chat.card.model.desc')}</span>
               </div>
             </button>
 
@@ -129,14 +131,14 @@ function ChatViewInner({
             <button
               type="button"
               onClick={onEngineDiagnostic}
-              className="sketch-border flex items-start gap-3.5 p-4 bg-panel/80 hover:bg-surface hover:border-gold/60 text-left cursor-pointer transition-all duration-300 group"
+              className="sketch-border flex items-start gap-3.5 p-4 bg-[#1C1B1A]/80 hover:bg-[#282726] hover:border-[#dcb67a]/60 text-left cursor-pointer transition-all duration-300 group"
             >
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-gold transition-colors group-hover:border-gold/40 group-hover:bg-gold/10 flex-shrink-0">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-[#dcb67a] transition-colors group-hover:border-[#dcb67a]/40 group-hover:bg-[#dcb67a]/10 flex-shrink-0">
                 <Gauge size={17} strokeWidth={1.75} />
               </div>
               <div className="flex flex-col gap-1 min-w-0">
-                <span className="text-[13px] font-semibold text-fg group-hover:text-white transition-colors">Engine status</span>
-                <span className="text-[11px] text-fg-muted leading-normal">Pings the local engine and reports latency.</span>
+                <span className="text-[13px] font-semibold text-[#F2F0E5] group-hover:text-white transition-colors">{t('chat.card.engine.title')}</span>
+                <span className="text-[11px] text-[#A8A49E] leading-normal">{t('chat.card.engine.desc')}</span>
               </div>
             </button>
           </div>
@@ -148,11 +150,11 @@ function ChatViewInner({
             <button
               type="button"
               onClick={() => setVisibleCount(c => c + WINDOW_STEP)}
-              className="mx-auto mt-1 mb-2 px-3 py-1.5 rounded-md border border-white/[0.08] bg-white/[0.03] text-[11px] text-fg-muted hover:text-fg hover:bg-white/[0.06] cursor-pointer transition-colors"
+              className="mx-auto mt-1 mb-2 px-3 py-1.5 rounded-md border border-white/[0.08] bg-white/[0.03] text-[11px] text-[#A8A49E] hover:text-[#F2F0E5] hover:bg-white/[0.06] cursor-pointer transition-colors"
               title={`${hiddenCount} earlier message${hiddenCount === 1 ? '' : 's'} hidden for speed`}
             >
-              Load {Math.min(WINDOW_STEP, hiddenCount)} older message{Math.min(WINDOW_STEP, hiddenCount) === 1 ? '' : 's'}
-              <span className="text-fg-faint"> · {hiddenCount} hidden</span>
+              {t('chat.loadOlder', { n: Math.min(WINDOW_STEP, hiddenCount), s: Math.min(WINDOW_STEP, hiddenCount) === 1 ? '' : 's' })}
+              <span className="text-[#6F6C66]"> · {t('chat.hidden', { n: hiddenCount })}</span>
             </button>
           )}
 
@@ -170,9 +172,9 @@ function ChatViewInner({
 
                 <div className="analytics-inner-content">
                   <div className="flex flex-col">
-                    <div className="column-label">TOKEN SAVINGS</div>
+                    <div className="column-label">{t('chat.tokenSavings')}</div>
                     <div className="flex items-center">
-                      <span className="analytics-text-green">%{msg.metrics.savingsPercentage} Reduced</span>
+                      <span className="analytics-text-green">{t('chat.reduced', { pct: msg.metrics.savingsPercentage })}</span>
                       <span className="analytics-tokens-note">
                         ({msg.metrics.originalTokens} → {msg.metrics.compressedTokens} tokens)
                       </span>
@@ -183,7 +185,7 @@ function ChatViewInner({
                     <>
                       <div className="inner-divider" />
                       <div className="flex flex-col">
-                        <div className="column-label">FINANCIAL SAVINGS</div>
+                        <div className="column-label">{t('chat.financialSavings')}</div>
                         <div className="analytics-text-gold shadow-amber-500/15">
                           {msg.metrics.financialSavings}
                         </div>
@@ -193,13 +195,13 @@ function ChatViewInner({
 
                   <div className="inner-divider" />
                   <div className="flex flex-col items-start">
-                    <div className="column-label">CODE CHANGE ANALYSIS</div>
+                    <div className="column-label">{t('chat.codeChange')}</div>
                     <button
                       type="button"
                       className="analytics-diff-btn"
                       onClick={() => onInspectDiff(msg, idx)}
                     >
-                      Inspect Structural Changes Visually →
+                      {t('chat.inspectChanges')}
                     </button>
                   </div>
                 </div>
@@ -214,11 +216,11 @@ function ChatViewInner({
                     <svg className="msg-avatar" viewBox="0 0 24 24">
                       <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
                     </svg>
-                    <span>{msg.role === 'user' ? (userName || 'Anonymous User') : 'Thalamus'}</span>
+                    <span>{msg.role === 'user' ? (userName || t('sidebar.anonymous')) : t('chat.thalamus')}</span>
                   </div>
                   <div className="msg-header-right">
                     {/* D1: modelName yoksa pazarlama modeli uydurma */}
-                    <span className="msg-model-name">{msg.modelName || 'Local message'}</span>
+                    <span className="msg-model-name">{msg.modelName || t('chat.localMessage')}</span>
                     <span className="dot-separator">·</span>
                     <span>
                       {msg.metrics?.executionTimeMs
@@ -237,7 +239,7 @@ function ChatViewInner({
                     {msg.role === 'assistant' && (
                       <button
                         className="msg-btn-action"
-                        title="Regenerate"
+                        title={t('chat.regenerate')}
                         onClick={() => onRegenerate(idx)}
                       >
                         <svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>
@@ -245,11 +247,11 @@ function ChatViewInner({
                     )}
                     <button
                       className="msg-btn-action"
-                      title="Copy"
+                      title={t('chat.copy')}
                       onClick={() => {
                         navigator.clipboard.writeText(msg.content)
-                          .then(() => showToast('Copied', 'Message copied to clipboard.', 'success'))
-                          .catch(() => showToast('Copy Failed', 'Clipboard is not available — select the message text and copy manually (Ctrl+C).', 'error', undefined, '[500] clipboard unavailable'));
+                          .then(() => showToast(t('chat.copied'), undefined, 'success'))
+                          .catch(() => showToast(t('chat.copyFailed'), t('chat.copyFailedMsg'), 'error', undefined, '[500] clipboard unavailable'));
                       }}
                     >
                       <svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
@@ -261,10 +263,10 @@ function ChatViewInner({
                       {/* T7: her tahmin '≈' taşır; görsel mesajlar ek'teki ölçülmüş
                           estTokens'i toplar — '[1 image] = 1 tokens' yalanı gitti. */}
                       {msg.metrics?.compressedTokens
-                        ? `${msg.metrics.compressedTokens} tokens`
+                        ? t('chat.tokens', { n: msg.metrics.compressedTokens })
                         : msg.images?.length
-                          ? `≈${msg.images.reduce((s, i) => s + i.estTokens, 0) + (typeof msg.content === 'string' ? Math.ceil(msg.content.length / 4) : 0)} tokens (image est.)`
-                          : `≈${Math.ceil(msg.content.length / 4)} tokens`}
+                          ? t('chat.tokensImageEst', { n: msg.images.reduce((s, i) => s + i.estTokens, 0) + (typeof msg.content === 'string' ? Math.ceil(msg.content.length / 4) : 0) })
+                          : t('chat.tokensEst', { n: Math.ceil(msg.content.length / 4) })}
                     </span>
                     {onlinePricing && (
                       <>

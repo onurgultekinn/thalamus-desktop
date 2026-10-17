@@ -14,6 +14,7 @@ import {
 import { getStoredKey, setStoredKey, clearStoredKeys } from '../lib/secrets';
 import { getWorkspaceRoot } from '../lib/workspace';
 import { explainError } from '../lib/errors';
+import { useT, LANGUAGES, getLang, setLang, type TranslationKey } from '../lib/i18n';
 
 export type SettingsTab = 'profile' | 'providers' | 'appearance' | 'general';
 
@@ -70,11 +71,11 @@ const selectCls =
   'rounded-md border border-white/[0.08] bg-white/[0.03] px-2.5 py-2 font-mono text-[12px] text-[#F2F0E5] focus:outline-none cursor-pointer';
 const labelCls = 'text-[11.5px] text-[#87857F]';
 
-const SECTIONS: { id: SettingsTab; label: string }[] = [
-  { id: 'profile',    label: 'Profile' },
-  { id: 'providers',  label: 'Providers' },
-  { id: 'appearance', label: 'Appearance' },
-  { id: 'general',    label: 'General' },
+const SECTIONS: { id: SettingsTab; labelKey: TranslationKey }[] = [
+  { id: 'profile',    labelKey: 'settings.tab.profile' },
+  { id: 'providers',  labelKey: 'settings.tab.providers' },
+  { id: 'appearance', labelKey: 'settings.tab.appearance' },
+  { id: 'general',    labelKey: 'settings.tab.general' },
 ];
 
 const AVATAR_SIZE = 256;
@@ -120,6 +121,7 @@ export function SettingsModal({
   /** Called after a successful save so the app can apply changes live. */
   onSaved?: () => void;
 }) {
+  const t = useT();
   const [activeSection, setActiveSection] = useState<SettingsTab>(initialTab);
   const { showToast } = useToast();
   const [resetArmed, setResetArmed] = useState(false);
@@ -348,10 +350,9 @@ export function SettingsModal({
     if (theme !== themeAtOpenRef.current) {
       setTheme(themeAtOpenRef.current);
       try { localStorage.setItem('tlm_theme', themeAtOpenRef.current); } catch {}
-      document.documentElement.setAttribute(
-        'data-theme',
-        themeAtOpenRef.current === 'nord-red' ? 'nord-red' : 'dark'
-      );
+      const el = document.documentElement;
+      if (themeAtOpenRef.current === 'nord-red') el.setAttribute('data-theme', 'nord-red');
+      else el.removeAttribute('data-theme');
     }
     onClose();
   };
@@ -375,7 +376,7 @@ export function SettingsModal({
                   : 'text-[#87857F] hover:bg-white/[0.03] hover:text-[#CECDC3]'
               }`}
             >
-              {s.label}
+              {t(s.labelKey)}
             </button>
           ))}
         </aside>
@@ -383,7 +384,7 @@ export function SettingsModal({
         {/* right: content */}
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="flex flex-shrink-0 items-center justify-between px-6 pb-3 pt-5">
-            <span className="text-[14px] font-semibold tracking-tight text-[#F2F0E5]">{section.label}</span>
+            <span className="text-[14px] font-semibold tracking-tight text-[#F2F0E5]">{t(section.labelKey)}</span>
             <button
               type="button"
               onClick={requestClose}
@@ -561,7 +562,9 @@ export function SettingsModal({
                         onClick={() => {
                           setTheme(t);
                           localStorage.setItem('tlm_theme', t);
-                          document.documentElement.setAttribute('data-theme', t === 'nord-red' ? 'nord-red' : 'dark');
+                          const el = document.documentElement;
+                          if (t === 'nord-red') el.setAttribute('data-theme', 'nord-red');
+                          else el.removeAttribute('data-theme');
                         }}
                         className={`rounded-md border px-3 py-1.5 text-[11.5px] transition-colors cursor-pointer ${
                           theme === t
@@ -597,8 +600,24 @@ export function SettingsModal({
             {/* ── GENERAL ── */}
             {activeSection === 'general' && (
               <div className="flex flex-col gap-5">
+                <Row
+                  label={t('settings.language')}
+                  hint={t('settings.languageHint')}
+                  control={
+                    <select
+                      value={getLang()}
+                      onChange={e => setLang(e.target.value === 'tr' ? 'tr' : 'en')}
+                      className={selectCls}
+                    >
+                      {LANGUAGES.map(l => (
+                        <option key={l.id} value={l.id}>{l.label}</option>
+                      ))}
+                    </select>
+                  }
+                />
+
                 <div className="flex flex-col gap-1.5">
-                  <label className={labelCls}>Project root</label>
+                  <label className={labelCls}>{t('settings.workspaceRoot')}</label>
                   <input
                     type="text"
                     value={workspaceRoot}
@@ -606,13 +625,13 @@ export function SettingsModal({
                     placeholder="C:/projects/my-app"
                     className={inputCls}
                   />
-                  <p className="text-[11px] text-[#87857F]">Folder shown in the explorer and editor.</p>
+                  <p className="text-[11px] text-[#87857F]">{t('settings.workspaceRootHint')}</p>
                 </div>
 
                 <div className="divide-y divide-white/[0.05]">
                   <Row
-                    label="Default model"
-                    hint="Used for cost estimates until you switch it in the chat."
+                    label={t('settings.defaultModel')}
+                    hint={t('settings.defaultModelHint')}
                     control={
                       <select
                         value={defaultModel}
@@ -690,7 +709,7 @@ export function SettingsModal({
               onClick={requestClose}
               className="rounded-md border border-white/[0.08] px-3.5 py-1.5 text-[11.5px] text-[#87857F] transition-colors hover:border-white/[0.14] hover:text-[#CECDC3] cursor-pointer"
             >
-              Cancel
+              {t('settings.cancel')}
             </button>
             <button
               type="button"
@@ -700,7 +719,7 @@ export function SettingsModal({
               className="flex items-center gap-1.5 rounded-md bg-[#3AA99F] px-4 py-1.5 text-[11.5px] font-semibold text-[#071310] transition-colors hover:bg-[#45B8AD] cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <Save size={12} />
-              {keysLoaded ? 'Save' : 'Loading keys…'}
+              {keysLoaded ? t('settings.save') : t('settings.save') + '…'}
             </button>
           </footer>
         </div>
