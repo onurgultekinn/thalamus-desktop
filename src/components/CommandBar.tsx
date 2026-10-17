@@ -1,7 +1,7 @@
 import { type FormEvent, useState, useRef, useEffect } from 'react';
 import { Paperclip, ArrowUp, FileCode, X, UploadCloud, ChevronUp, Square } from 'lucide-react';
 import { MODELS } from '../constants';
-import { prepareImageFile, IMAGE_MODE_ORDER, DEFAULT_IMAGE_MODE, type AttachedImage, type ImageMode } from '../lib/imageAttach';
+import { prepareImageFile, DEFAULT_IMAGE_MODE, type AttachedImage, type ImageMode } from '../lib/imageAttach';
 import { useT } from '../lib/i18n';
 
 // Attachments must never dump raw bytes into the prompt. Images become a compact
@@ -45,15 +45,11 @@ export function CommandBar({
   setImages
 }: CommandBarProps) {
   const t = useT();
-  const IMAGE_LABEL_KEY = { auto: 'image.auto', economy: 'image.economy', balanced: 'image.balanced', high: 'image.high' } as const;
-  const IMAGE_HINT_KEY = { auto: 'image.auto.hint', economy: 'image.economy.hint', balanced: 'image.balanced.hint', high: 'image.high.hint' } as const;
-  const modeLabel = (m: ImageMode) => t(IMAGE_LABEL_KEY[m]);
-  const modeHint = (m: ImageMode) => t(IMAGE_HINT_KEY[m]);
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
   const [isFileMenuOpen, setIsFileMenuOpen] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
-  const [imageMode, setImageMode] = useState<ImageMode>(DEFAULT_IMAGE_MODE);
+  const [imageMode] = useState<ImageMode>(DEFAULT_IMAGE_MODE);
 
   const popoverRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -188,7 +184,7 @@ export function CommandBar({
       {isFileMenuOpen && (
         <div className="absolute bottom-full left-0 mb-2 bg-obsidian-panel border border-obsidian-border rounded-lg w-[260px] z-50 shadow-2xl p-3 flex flex-col gap-2.5 animate-in fade-in slide-in-from-bottom-2 duration-150">
           <div className="flex items-center justify-between text-[11px] font-semibold text-obsidian-muted/60 tracking-wider uppercase">
-            <span>Context Files</span>
+            <span>{t('composer.uploadFile')}</span>
             <button type="button" onClick={() => setIsFileMenuOpen(false)} className="text-obsidian-muted hover:text-obsidian-text cursor-pointer">
               <X size={12} />
             </button>
@@ -200,26 +196,6 @@ export function CommandBar({
             onChange={handleFileChange} 
             style={{ display: 'none' }} 
           />
-          <div className="flex flex-col gap-1">
-            <div className="flex items-center gap-1">
-              {IMAGE_MODE_ORDER.map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => setImageMode(m)}
-                  title={modeHint(m)}
-                  className={`flex-1 rounded-md border px-1.5 py-1 text-[11px] transition-colors cursor-pointer ${
-                    imageMode === m
-                      ? 'border-[#dcb67a]/50 bg-[#dcb67a]/10 text-[#dcb67a]'
-                      : 'border-obsidian-border text-obsidian-muted hover:text-obsidian-text'
-                  }`}
-                >
-                  {modeLabel(m)}
-                </button>
-              ))}
-            </div>
-            <span className="text-[11px] text-obsidian-muted/70">Image: {modeHint(imageMode)}</span>
-          </div>
           <div
             onClick={() => fileInputRef.current?.click()}
             onDragOver={(e) => {
@@ -229,15 +205,18 @@ export function CommandBar({
             }}
             onDragLeave={() => setIsDragging(false)}
             onDrop={handleDrop}
-            className={`border border-dashed rounded-md p-3 text-center flex flex-col items-center gap-1 cursor-pointer transition-colors ${
+            className={`border border-dashed rounded-md px-3 py-5 text-center flex flex-col items-center gap-1.5 cursor-pointer transition-colors ${
               isDragging
                 ? 'border-[#dcb67a]/60 bg-[#dcb67a]/10'
-                : 'border-obsidian-border bg-obsidian-bg/50 hover:border-obsidian-muted/40'
+                : 'border-obsidian-border bg-obsidian-bg/50 hover:border-[#dcb67a]/40 hover:bg-obsidian-bg'
             }`}
           >
-            <UploadCloud size={14} className={isDragging ? 'text-[#dcb67a]' : 'text-obsidian-muted'} />
-            <span className={`text-[11px] ${isDragging ? 'text-[#dcb67a]' : 'text-obsidian-muted'}`}>
+            <UploadCloud size={18} className={isDragging ? 'text-[#dcb67a]' : 'text-obsidian-muted'} />
+            <span className={`text-[12px] font-medium ${isDragging ? 'text-[#dcb67a]' : 'text-obsidian-text'}`}>
               {isDragging ? t('composer.releaseToAttach') : t('composer.uploadDrag')}
+            </span>
+            <span className="text-[10.5px] text-obsidian-muted/60">
+              {t('composer.uploadHint')}
             </span>
           </div>
 
@@ -328,7 +307,7 @@ export function CommandBar({
               className="flex items-center gap-1.5 text-obsidian-muted hover:text-obsidian-text cursor-pointer transition-colors text-[11px] font-sans"
             >
               <Paperclip size={12} />
-              <span>{t('composer.attach')}</span>
+              <span>{t('composer.uploadFile')}</span>
               {images.length > 0 && (
                 <span className="text-[11px] text-[#dcb67a]">{t(images.length > 1 ? 'composer.imageMany' : 'composer.imageOne', { n: images.length })}</span>
               )}
