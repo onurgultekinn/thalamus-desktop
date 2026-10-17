@@ -19,7 +19,7 @@ import { getWorkspaceName, getWorkspaceRoot, openProject, pruneRecentProjects, r
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { explainError, splitExplanation } from './lib/errors';
 import { markSwitchStart, reportSwitchPaint } from './lib/perfTrace';
-import { useT } from './lib/i18n';
+import { useT, t } from './lib/i18n';
 import type { Message, ChatItem, User } from './types';
 export type { Message, MessageMetrics, ChatItem } from './types';
 import './App.css';
@@ -27,15 +27,15 @@ import './App.css';
 // D1: metin sohbeti model ÇAĞIRMAZ — yerel sıkıştırma motoru çalışır.
 // Mesaj rozetleri pazarlama modeli adı (Claude/GPT…) değil, gerçekte
 // kullanılanı yazar.
-const LOCAL_ENGINE_STAMP = 'Local Compression Engine';
+const localEngineStamp = () => t('app.engineStamp');
 
 const getDefaultMessages = (): Message[] => {
   return [
     {
       role: 'assistant',
-      content: 'Thalamus AI Assistant is ready. Ask questions about your code or projects.',
+      content: t('app.welcome1'),
       timestamp: ts(),
-      modelName: LOCAL_ENGINE_STAMP
+      modelName: localEngineStamp()
     }
   ];
 };
@@ -262,7 +262,7 @@ export default function App() {
     activeChatIdRef.current = activeChatId;
   }, [activeChatId]);
 
-  const activeChat = chats.find(c => c.id === activeChatId) || chats[0] || { id: '', title: 'New Chat Session' };
+  const activeChat = chats.find(c => c.id === activeChatId) || chats[0] || { id: '', title: t('app.newChatTitle') };
 
   const [messages, setMessages] = useState<Message[]>([]);
   // Perf: acilista okunan sohbetin hemen geri yazilmasini engelleyen isaret
@@ -365,16 +365,16 @@ export default function App() {
     const newId = 'chat_' + Date.now();
     const newChat: ChatItem = {
       id: newId,
-      title: 'New Chat Session'
+      title: t('app.newChatTitle')
     };
     setChats(prev => [newChat, ...prev]);
     setActiveChatId(newId);
     setMessages([
       {
         role: 'assistant',
-        content: 'Thalamus AI Assistant is ready. You can ask questions about your project or code snippets.',
+        content: t('app.welcome2'),
         timestamp: ts(),
-        modelName: LOCAL_ENGINE_STAMP
+        modelName: localEngineStamp()
       }
     ]);
   };
@@ -570,7 +570,7 @@ export default function App() {
           role: 'assistant',
           content: t('app.noProvider'),
           timestamp: ts(),
-          modelName: LOCAL_ENGINE_STAMP,
+          modelName: localEngineStamp(),
         }]);
       } else {
         // Regenerate'te yeniden sorulan soru, bağlama tekrar girilmez.
@@ -609,7 +609,7 @@ export default function App() {
           role: 'assistant',
           content: kind === 'stop' ? 'Request stopped.' : '**Request timed out** after 180 s — no response arrived.',
           timestamp: ts(),
-          modelName: LOCAL_ENGINE_STAMP,
+          modelName: localEngineStamp(),
         }]);
       } else {
         const x = explainError(err, 'Assistant request');
@@ -619,7 +619,7 @@ export default function App() {
           role: 'assistant',
           content: `**[${x.code}] ${x.title}**\n\n${splitExplanation(x.explanation).rest ?? x.explanation}\n\n*${t('toast.wiki')}*`,
           timestamp: ts(),
-          modelName: LOCAL_ENGINE_STAMP,
+          modelName: localEngineStamp(),
         }]);
       }
     } finally {
@@ -728,8 +728,8 @@ export default function App() {
     if (!result.ok) {
       const openErr = explainError(result.error, 'Project open');
       showToast(
-        'Project Unavailable',
-        `"${root}" could not be opened and was removed from the recent list. ${openErr.explanation}`,
+        t('app.projectUnavailable'),
+        t('app.projectUnavailableMsg', { root, explanation: openErr.explanation }),
         'error',
         undefined,
         `[${openErr.code}] ${openErr.detail ?? openErr.explanation}`

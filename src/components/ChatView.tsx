@@ -296,13 +296,13 @@ function ChatViewInner({
         <div className="msg-wrapper msg-assistant-left">
           <div className="custom-loader-card">
             <div className="custom-loader-container">
-              <span>PROCESSING:</span>
+              <span>{t('chat.processing')}</span>
               <div className="custom-loader-words">
-                <span className="custom-loader-word">models</span>
-                <span className="custom-loader-word">prompts</span>
-                <span className="custom-loader-word">keys</span>
-                <span className="custom-loader-word">tokens</span>
-                <span className="custom-loader-word">models</span>
+                <span className="custom-loader-word">{t('chat.proc.models')}</span>
+                <span className="custom-loader-word">{t('chat.proc.prompts')}</span>
+                <span className="custom-loader-word">{t('chat.proc.keys')}</span>
+                <span className="custom-loader-word">{t('chat.proc.tokens')}</span>
+                <span className="custom-loader-word">{t('chat.proc.models')}</span>
               </div>
             </div>
           </div>

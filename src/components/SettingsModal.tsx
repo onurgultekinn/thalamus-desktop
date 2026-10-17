@@ -52,10 +52,10 @@ export type SettingsTab =
   | 'about'
   | 'data';
 
-const FAMILY_LABEL: Record<ProviderFamily, string> = {
-  openai: 'OpenAI-compatible',
-  anthropic: 'Anthropic',
-  local: 'Local',
+const FAMILY_LABEL: Record<ProviderFamily, TranslationKey> = {
+  openai: 'settings.family.openai',
+  anthropic: 'settings.family.anthropic',
+  local: 'settings.family.local',
 };
 
 type IconCmp = ComponentType<{ size?: number; className?: string }>;
@@ -783,7 +783,7 @@ export function SettingsModal({
                       {API_PROVIDERS.map((x) => (
                         <option key={x.id} value={x.id} disabled={x.available === false}>
                           {x.name}
-                          {x.available === false ? t('settings.comingSoon') : ` — ${FAMILY_LABEL[x.family]}`}
+                          {x.available === false ? t('settings.comingSoon') : ` — ${t(FAMILY_LABEL[x.family])}`}
                         </option>
                       ))}
                     </select>

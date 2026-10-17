@@ -29,8 +29,6 @@ interface DiffViewProps {
 
 const MONO: React.CSSProperties['fontFamily'] = "'Ubuntu Sans Mono', Consolas, monospace";
 
-const TSV_LEGEND =
-  '@T schema format: (k=v) constant column · name(n=v;…) dictionary · name[prefix] shared prefix · ^ repeats previous row · ~ null';
 
 function isJson(code: string): boolean {
   const t = code.trim();
@@ -91,7 +89,7 @@ function CodePane({ label, dotClass, code, lang, metric, tsvHint, scrollRef, onS
           {label}
           {tsvHint && (
             <span
-              title={TSV_LEGEND}
+              title={t('diff.tsvLegend')}
               className="ml-1 cursor-help rounded border border-white/[0.08] bg-white/[0.05] px-1.5 py-px font-mono text-[11px] font-normal text-[#575654]"
             >
               TSV

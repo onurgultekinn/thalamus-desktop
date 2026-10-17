@@ -26,7 +26,7 @@ import { aiChat, userMessage, type AiChatResponse, type AiEditResult } from '../
 import { prepareImageFile, IMAGE_MODE_ORDER, DEFAULT_IMAGE_MODE, type AttachedImage, type ImageMode } from '../lib/imageAttach';
 import { MarkdownMessage } from './MarkdownMessage';
 import { CopilotDiffModal } from './CopilotDiffModal';
-import { useT } from '../lib/i18n';
+import { useT, type TranslationKey } from '../lib/i18n';
 
 export interface ActionPayload {
   type: 'RUN_TERMINAL' | 'APPLY_PATCH';
@@ -55,11 +55,11 @@ interface ThalamusCopilotProps {
 }
 
 /** Slash command templates (Claude Code / ZCode style). */
-const SLASH_TEMPLATES: Record<string, string> = {
-  '/explain': 'Explain the relevant code below (logic, patterns used, improvement opportunities):',
-  '/review': 'Review the relevant code for bugs, security and improvement suggestions:',
-  '/refactor': 'Make the relevant code cleaner and more readable (apply with SEARCH/REPLACE blocks):',
-  '/tests': 'Suggest unit tests for the relevant code (with SEARCH/REPLACE blocks):',
+const SLASH_TEMPLATES: Record<string, TranslationKey> = {
+  '/explain': 'cop.cmdExplain',
+  '/review': 'cop.cmdReview',
+  '/refactor': 'cop.cmdRefactor',
+  '/tests': 'cop.cmdTests',
 };
 
 /** Generates a message id (against Date.now collisions). */
@@ -205,7 +205,7 @@ export function ThalamusCopilot({
     // Placeholder kimliğiyle güncellenir — kullanıcının görünüşün arasında
     // başka mesaja geçtiğinde 'son mesaj' yanıltıcıydı.
     const placeholderId = newId();
-    setMessages(prev => [...prev, { id: placeholderId, sender: 'ai', text: 'Camera interpretation requested…', timestamp: ts(), modeUsed: 'chat' }]);
+    setMessages(prev => [...prev, { id: placeholderId, sender: 'ai', text: t('cop.cameraRequested'), timestamp: ts(), modeUsed: 'chat' }]);
     try {
       const res = await callRealAI(prompt);
       setMessages(prev => prev.map(m => m.id === placeholderId ? { ...m, text: res.content } : m));
@@ -225,8 +225,8 @@ export function ThalamusCopilot({
       id: "1",
       sender: "ai",
       text: activeFile
-        ? `\`${activeFile}\` is active — how can I help you?`
-        : 'How can I help you?',
+        ? t('cop.activeFile', { file: activeFile })
+        : t('cop.howCanIHelp'),
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       modeUsed: 'chat'
     }
@@ -297,7 +297,7 @@ export function ThalamusCopilot({
     // D3: konusma DURUMU gonderilir (son 10 gercek mesaj) — copilot artik
     // "hafizasiz" degil; "Thinking..." placeholder'i ve bos mesajlar elenir.
     const history = messages
-      .filter(m => m.text.trim().length > 0 && m.text !== 'Thinking...')
+      .filter(m => m.text.trim().length > 0 && m.text !== t('cop.thinking'))
       .slice(-10)
       .map(m => ({
         role: (m.sender === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
@@ -321,10 +321,11 @@ export function ThalamusCopilot({
 
     // Slash command expansion: /explain, /review, /refactor, /tests
     const firstTok = userText.split(/\s+/)[0];
-    const slashTemplate = SLASH_TEMPLATES[firstTok];
+    const slashKey = SLASH_TEMPLATES[firstTok];
+    const slashTemplate = slashKey ? t(slashKey) : undefined;
     const aiText = slashTemplate
       ? slashTemplate + (userText.length > firstTok.length ? ' ' + userText.slice(firstTok.length).trim() : '')
-      : (userText || 'Look at the attached image.');
+      : (userText || t('cop.lookAtImage'));
 
     const userMsg: Message = {
       id: newId(),
@@ -346,7 +347,7 @@ export function ThalamusCopilot({
     setMessages(prev => [...prev, {
       id: placeholderId,
       sender: 'ai',
-      text: 'Thinking...',
+      text: t('cop.thinking'),
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       modeUsed: mode
     }]);
@@ -443,7 +444,7 @@ export function ThalamusCopilot({
 
         const isKeyMissing = err instanceof Error && err.message === 'API_KEY_MISSING';
         const errorText = isKeyMissing
-          ? 'No API key is configured. Open Settings → Providers, save an OpenAI, Anthropic or DeepSeek key, then ask again. No simulated answer is shown.'
+          ? t('cop.noKey')
           : `⚠️ The AI request failed: ${err instanceof Error ? err.message : String(err)}`;
 
         setMessages(prev => [...prev, {
@@ -625,7 +626,7 @@ export function ThalamusCopilot({
               <span>•</span>
               <span>{msg.timestamp}</span>
               {msg.modeUsed === 'agent' && (
-                <span className="bg-[#4385BE]/20 text-[#4385BE] px-1 py-0.5 rounded text-[8.5px]">Agent</span>
+                <span className="bg-[#4385BE]/20 text-[#4385BE] px-1 py-0.5 rounded text-[8.5px]">{t('cop.agent')}</span>
               )}
             </div>
 

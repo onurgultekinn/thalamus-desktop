@@ -331,8 +331,8 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
     setFileContents(prev => (prev[file] === effective ? prev : { ...prev, [file]: effective }));
     if (restored) {
       showToast(
-        'Unsaved edits restored',
-        `${file}: your last unsaved editor changes were restored instead of the disk copy. Save to write them to disk, or close the tab to discard.`,
+        t('ide.unsavedRestored'),
+        t('ide.unsavedRestoredMsg', { file }),
         'info'
       );
     }
@@ -477,7 +477,7 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
     } catch (err) {
       console.error('Could not create entry:', err);
       const x = explainError(err, 'Create');
-      showToast('Create Error', `Could not write "${trimmedName}" to disk. ${x.explanation}`, 'error', undefined, `[${x.code}] ${x.detail ?? String(err)}]`);
+      showToast(t('ide.createError'), t('ide.createErrorMsg', { name: trimmedName, explanation: x.explanation }), 'error', undefined, `[${x.code}] ${x.detail ?? String(err)}]`);
     }
 
     setNewItemName('');
@@ -662,7 +662,7 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
     } catch (err) {
       console.error('Move error:', err);
       const x = explainError(err, 'Move');
-      showToast('Move Error', `Could not move the entry — nothing changed. ${x.explanation}`, 'error', undefined, `[${x.code}] ${x.detail ?? String(err)}]`);
+      showToast(t('ide.moveError'), t('ide.moveErrorMsg', { explanation: x.explanation }), 'error', undefined, `[${x.code}] ${x.detail ?? String(err)}]`);
     }
 
     setPendingMove(null);
@@ -715,7 +715,7 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
     } catch (err) {
       console.error('Rename error:', err);
       const x = explainError(err, 'Rename');
-      showToast('Rename Error', `Could not rename ${node.id} — the editor and buffers were not touched. ${x.explanation}`, 'error', undefined, `[${x.code}] ${x.detail ?? String(err)}]`);
+      showToast(t('ide.renameError'), t('ide.renameErrorMsg', { id: node.id, explanation: x.explanation }), 'error', undefined, `[${x.code}] ${x.detail ?? String(err)}]`);
     }
   };
 
@@ -771,7 +771,7 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
         const x = explainError(err, 'File read');
         showToast(
           x.title,
-          `"${node.id}" could not be opened. ${x.explanation}`,
+          t('ide.openFailedMsg', { file: node.id, explanation: x.explanation }),
           'error',
           undefined,
           `[${x.code}] ${x.detail ?? node.id}`
@@ -831,7 +831,7 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
       } catch (e) {
         console.error("Could not save file to disk:", e);
         const x = explainError(e, 'Save');
-        showToast('Save Failed', `${activeTab} was not saved — running the DISK copy, which may differ from the editor. ${x.explanation}`, 'error', undefined, `[${x.code}] ${x.detail ?? String(e)}]`);
+        showToast(t('ide.saveFailed'), t('ide.saveFailedMsg', { file: activeTab, explanation: x.explanation }), 'error', undefined, `[${x.code}] ${x.detail ?? String(e)}]`);
       }
     }
 
@@ -857,7 +857,7 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
       } catch (e) {
         console.error('Save error:', e);
         const x = explainError(e, 'Save');
-        showToast('Save Error', `${activeTab} could not be written to disk — the editor content is still there, nothing is lost. ${x.explanation}`, 'error', undefined, `[${x.code}] ${x.detail ?? String(e)}]`);
+        showToast(t('ide.saveError'), t('ide.saveErrorMsg', { file: activeTab, explanation: x.explanation }), 'error', undefined, `[${x.code}] ${x.detail ?? String(e)}]`);
       }
     }
   };
@@ -896,7 +896,7 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
     } catch (err) {
       console.error('Delete error:', err);
       const x = explainError(err, 'Delete');
-      showToast('Delete Error', `Could not delete ${node.id} — the entry is still on disk. ${x.explanation}`, 'error', undefined, `[${x.code}] ${x.detail ?? String(err)}]`);
+      showToast(t('ide.deleteError'), t('ide.deleteErrorMsg', { id: node.id, explanation: x.explanation }), 'error', undefined, `[${x.code}] ${x.detail ?? String(err)}]`);
     }
   };
 
