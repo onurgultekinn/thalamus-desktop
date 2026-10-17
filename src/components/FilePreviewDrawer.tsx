@@ -105,6 +105,10 @@ export function FilePreviewDrawer({ item, onClose }: { item: PreviewItem; onClos
           <div className="p-3"><audio src={item.url} controls className="w-full" /></div>
         ) : item.body !== undefined ? (
           <pre className="p-3 text-[11.5px] leading-relaxed font-mono text-obsidian-text whitespace-pre-wrap break-words">{item.body}</pre>
+        ) : item.kind === 'pdf' && item.url ? (
+          /* Geçici: @file-viewer bizim kurulumda PDF renderer'ını devreye
+             sokmuyor (araştırılıyor) → PDF şimdilik native görüntüleyici. */
+          <iframe src={item.url} title={item.name} className="w-full h-full min-h-[70vh] border-0 bg-white" />
         ) : canUseViewer ? (
             <FileViewer
               url={viewerUrl}
@@ -129,6 +133,8 @@ export function FilePreviewDrawer({ item, onClose }: { item: PreviewItem; onClos
           </p>
         )}
       </div>
+
+      {fv.floating && <FloatResizeHandle onPointerDown={fv.onResizeStart} />}
     </div>
   );
 }
