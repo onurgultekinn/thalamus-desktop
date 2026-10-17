@@ -65,6 +65,8 @@ export function splitExplanation(message?: string): { cause?: string; rest?: str
   return { cause: parts[0], rest: parts.slice(1).join(' ') };
 }
 
+import { t, type TranslationKey } from './i18n';
+
 const trimDetail = (s: string, max = 200): string => s.replace(/\s+/g, ' ').trim().slice(0, max);
 
 /**
@@ -84,6 +86,21 @@ function providerShortMessage(body: string): string | undefined {
   return undefined;
 }
 
+/** Known context names → translated label key (titles embed the context). */
+const CTX_KEY: Record<string, TranslationKey> = {
+  'Save': 'err.ctx.save',
+  'Workspace': 'err.ctx.workspace',
+  'Assistant request': 'err.ctx.assistant',
+  'Create': 'err.ctx.create',
+  'Delete': 'err.ctx.delete',
+  'File read': 'err.ctx.fileRead',
+  'Move': 'err.ctx.move',
+  'Rename': 'err.ctx.rename',
+  'Vision request': 'err.ctx.vision',
+  'Project open': 'err.ctx.projectOpen',
+};
+const ctxLabel = (c: string) => (CTX_KEY[c] ? t(CTX_KEY[c]) : c);
+
 export function explainError(err: unknown, context?: string): ExplainedError {
   const raw = err instanceof Error ? err.message : String(err ?? 'unknown error');
 
@@ -91,23 +108,23 @@ export function explainError(err: unknown, context?: string): ExplainedError {
   if (err instanceof DOMException && err.name === 'AbortError') {
     return {
       code: '499',
-      title: context ? `Stopped - ${context}` : 'Request stopped',
-      explanation: 'You stopped the request. Partial output is kept only where the UI says so.',
+      title: context ? t('err.stoppedTitleCtx', { ctx: ctxLabel(context) }) : t('err.stoppedTitle'),
+      explanation: t('err.stoppedMsg'),
     };
   }
   if (typeof raw === 'string' && raw.includes('TIMEOUT')) {
     return {
       code: '408',
-      title: 'Request timed out',
-      explanation: 'No answer arrived within 180 s. The provider may be slow or overloaded. Try again, or switch providers in Settings > Providers.',
+      title: t('err.timeoutTitle'),
+      explanation: t('err.timeoutMsg'),
       detail: trimDetail(raw),
     };
   }
   if (raw === 'API_KEY_MISSING') {
     return {
       code: '401',
-      title: 'No API key configured',
-      explanation: 'Add a provider key in Settings > Providers; chat answers, vision and summarization need it.',
+      title: t('err.noKeyTitle'),
+      explanation: t('err.noKeyMsg'),
     };
   }
 
@@ -126,47 +143,47 @@ export function explainError(err: unknown, context?: string): ExplainedError {
     if (effectiveStatus === 401) {
       return {
         code: '401',
-        title: 'API key rejected',
-        explanation: 'The provider rejected your API key. Open Settings > Providers and re-enter a valid key for this model.',
+        title: t('err.keyRejectedTitle'),
+        explanation: t('err.keyRejectedMsg'),
         detail: short ?? trimDetail(bodyText),
       };
     }
     if (effectiveStatus === 402 || effectiveStatus === 403) {
       return {
         code: String(effectiveStatus),
-        title: 'Access / billing problem',
-        explanation: 'The provider denied the call - usually an empty balance, an expired plan or key restrictions on the provider dashboard.',
+        title: t('err.accessTitle'),
+        explanation: t('err.accessMsg'),
         detail: short ?? trimDetail(bodyText),
       };
     }
     if (effectiveStatus === 404) {
       return {
         code: '404',
-        title: 'Model or endpoint not found',
-        explanation: 'The provider could not find the model or endpoint used. If a custom Base URL is set in Settings > Providers, verify it (wrong path or wrong model name).',
+        title: t('err.notFoundTitle'),
+        explanation: t('err.notFoundMsg'),
         detail: short ?? trimDetail(bodyText),
       };
     }
     if (effectiveStatus === 429) {
       return {
         code: '429',
-        title: 'Too many requests',
-        explanation: 'The provider hit a rate or usage limit. Wait a moment and try again.',
+        title: t('err.rateTitle'),
+        explanation: t('err.rateMsg'),
         detail: short ?? trimDetail(bodyText),
       };
     }
     if (effectiveStatus >= 500) {
       return {
         code: String(status),
-        title: 'Provider error',
-        explanation: 'The provider itself failed mid-answer. It is usually a temporary server-side issue - try again in a moment.',
+        title: t('err.providerTitle'),
+        explanation: t('err.providerMsg'),
         detail: short ?? trimDetail(bodyText),
       };
     }
     return {
       code: String(status),
-      title: `Request failed (HTTP ${status})`,
-      explanation: 'The provider answered with an unexpected error.',
+      title: t('err.reqFailedTitle', { status }),
+      explanation: t('err.unexpectedMsg'),
       detail: short ?? trimDetail(bodyText),
     };
   }
@@ -176,8 +193,8 @@ export function explainError(err: unknown, context?: string): ExplainedError {
   if (networkLike.test(raw) || raw.includes('down empty')) {
     return {
       code: '503',
-      title: 'The local engine is unreachable',
-      explanation: 'The chat could not reach the local backend (127.0.0.1:8277). Restart the application via thalamus_baslat.bat.',
+      title: t('err.engineTitle'),
+      explanation: t('err.engineMsg'),
       detail: trimDetail(raw),
     };
   }
@@ -186,8 +203,8 @@ export function explainError(err: unknown, context?: string): ExplainedError {
   if (/valid utf-?8|utf-?8|did not contain valid/i.test(raw)) {
     return {
       code: '415',
-      title: 'Not a text file',
-      explanation: 'This file is not valid UTF-8 text — it may be binary, an image or a legacy encoding. Open it with an external editor.',
+      title: t('err.binaryTitle'),
+      explanation: t('err.binaryMsg'),
       detail: trimDetail(raw),
     };
   }
@@ -196,10 +213,8 @@ export function explainError(err: unknown, context?: string): ExplainedError {
   const fsContext = context ? /file|create|move|rename|delete|save|workspace|read/i.test(context) : false;
   return {
     code: '500',
-    title: context ? `${context} failed` : 'Operation failed',
-    explanation: fsContext
-      ? 'This operation failed unexpectedly. Check that the file is not open in another program and that you have permission, then try again.'
-      : 'This operation failed unexpectedly. If it keeps happening, check Settings > Providers (key / Base URL) and try a different provider.',
+    title: context ? t('err.titleFailed', { ctx: ctxLabel(context) }) : t('err.opFailed'),
+    explanation: fsContext ? t('err.opFailedMsgFile') : t('err.opFailedMsg'),
     detail: trimDetail(raw),
   };
 }
