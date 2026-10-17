@@ -222,12 +222,12 @@ export default function App() {
       const ok = await checkHealth();
       const ms = Math.max(1, Math.round(performance.now() - t0));
       if (ok) {
-        showToast('Engine Active', `Local engine is running · ${API_BASE} · ~${ms}ms`, 'success');
+        showToast(t('app.engineActive'), t('app.engineActiveMsg', { base: API_BASE, ms }), 'success');
       } else {
-        showToast('Engine Offline', `Could not reach the engine at ${API_BASE}. Restart the app via thalamus_baslat.bat — terminal, explorer and chat need it.`, 'error', undefined, '[503] health check failed');
+        showToast(t('app.engineOffline'), t('app.engineOfflineMsg', { base: API_BASE }), 'error', undefined, '[503] health check failed');
       }
     } catch {
-      showToast('Engine Offline', `Could not reach the engine at ${API_BASE}. Restart the app via thalamus_baslat.bat.`, 'error', undefined, '[503] health check failed');
+      showToast(t('app.engineOffline'), t('app.engineOfflineMsg', { base: API_BASE }), 'error', undefined, '[503] health check failed');
     }
   };
   const [loading, setLoading] = useState<boolean>(false);
@@ -568,7 +568,7 @@ export default function App() {
       if (!provider) {
         applyMessages(prev => [...prev, {
           role: 'assistant',
-          content: '**No AI provider is configured.** Add a key in Settings → Providers to get answers. File explorer, terminal and the compression engine keep working without a key.',
+          content: t('app.noProvider'),
           timestamp: ts(),
           modelName: LOCAL_ENGINE_STAMP,
         }]);

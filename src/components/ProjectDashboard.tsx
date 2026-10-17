@@ -697,12 +697,12 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
 
   /** F7b: herhangi bir düğümü yeniden adlandırır (move_entry, aynı dizinde). */
   const handleRenameEntry = async (node: FileNode) => {
-    const raw = window.prompt(`Rename "${node.name}"`, node.name);
+    const raw = window.prompt(t('ide.renamePrompt', { name: node.name }), node.name);
     const newName = raw?.trim();
     if (!newName || newName === node.name) return;
     // Windows dosya adında geçersiz karakterler — diske gitmeden dur.
     if (/[\\/:*?"<>|]/.test(newName)) {
-      showToast('Invalid name', 'Name contains characters Windows does not allow (\\ / : * ? " < > |). Use a name without them.', 'error', undefined, '[400] invalid name characters');
+      showToast(t('ide.invalidName'), t('ide.invalidNameMsg'), 'error', undefined, '[400] invalid name characters');
       return;
     }
     const parent = node.id.includes('/') ? node.id.slice(0, node.id.lastIndexOf('/')) : '';
@@ -711,7 +711,7 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
       await invoke('move_entry', { from: node.id, to: newPath });
       await loadTree();
       remapPathKeys(node.id, newPath);
-      showToast('Renamed', `${node.name} → ${newName}`, 'success');
+      showToast(t('ide.renamed'), `${node.name} → ${newName}`, 'success');
     } catch (err) {
       console.error('Rename error:', err);
       const x = explainError(err, 'Rename');
@@ -722,7 +722,7 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
   /** F5: aktif dosyayı yeniden adlandırır (breadcrumb kalem düğmesi). */
   const handleRenameActiveFile = () => {
     if (!activeTab || !activeNode) {
-      showToast('Nothing to rename', 'Open a file from the explorer first.', 'info');
+      showToast(t('ide.nothingToRename'), t('ide.openFileFirst'), 'info');
       return;
     }
     void handleRenameEntry(activeNode);
@@ -734,7 +734,7 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
     // "kapat" denirse tampon ve bellek kopyasi atilir (kaybolur, ama bilerek).
     if (isDirty(fileName)) {
       const name = fileName.split('/').pop();
-      if (!window.confirm(`"${name}" has unsaved changes. Close anyway and lose them? (Tip: Ctrl+S saves.)`)) {
+      if (!window.confirm(t('ide.unsavedClose', { name }))) {
         return;
       }
       setFileContents(prev => {
@@ -819,10 +819,8 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
     // ekrana basılır — kullanıcıya önceden söyle + komutu onayla.
     // ONAY ÖNCE GELİR: kullanıcı vazgeçerse dosya diske de yazılmaz.
     if (!isScript) {
-      if (!window.confirm(
-        `"${activeTab}" is not a runnable script (.py/.rs). Its CONTENTS will be printed instead of running.\n\nCommand: ${cmd}\n\nProceed?`
-      )) return;
-    } else if (!window.confirm(`Run "${activeTab}"?\n\nCommand: ${cmd}`)) return;
+      if (!window.confirm(t('ide.notRunnable', { name: activeTab, cmd }))) return;
+    } else if (!window.confirm(t('ide.runConfirm', { name: activeTab, cmd }))) return;
 
     // Onaydan SONRA kaydet (vazgeçilen bir çalıştırma diske yazmasın).
     const fileCode = fileContents[activeTab];
@@ -847,7 +845,7 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
 
   const handleSaveActiveFile = async () => {
     if (!activeTab || !activeNode) {
-      showToast('Nothing to save', 'Open a file from the explorer first.', 'info');
+      showToast(t('ide.nothingToSave'), t('ide.openFileFirst'), 'info');
       return;
     }
     const fileCode = fileContents[activeTab];
@@ -855,7 +853,7 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
       try {
         await invoke('thalamus_write_file', { path: activeTab, content: fileCode });
         setSavedContents(prev => ({ ...prev, [activeTab]: fileCode }));
-        showToast('File Saved', `${activeTab} successfully saved to disk.`, 'success');
+        showToast(t('ide.fileSaved'), t('ide.fileSavedMsg', { file: activeTab }), 'success');
       } catch (e) {
         console.error('Save error:', e);
         const x = explainError(e, 'Save');
@@ -866,7 +864,7 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
 
   /** F7b: herhangi bir dosya/klasörü çöp kutusuna gönderir. */
   const handleDeleteEntry = async (node: FileNode) => {
-    if (!window.confirm(`Delete "${node.name}"? It will be moved to the recycle bin.`)) return;
+    if (!window.confirm(t('ide.deleteConfirm', { name: node.name }))) return;
     try {
       // D9: Rust tarafı hangi yolun KULLANILDIĞINI döner; UI ona göre
       // konuşur — kalıcı silme olduysa "çöp kutusuna taşındı" denmez.
@@ -891,9 +889,9 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
       }
       await loadTree();
       if (mode === 'recycled') {
-        showToast('Deleted', `${node.name} moved to the recycle bin.`, 'success');
+        showToast(t('ide.deleted'), t('ide.deletedMsg', { name: node.name }), 'success');
       } else {
-        showToast('Permanently Deleted', `${node.name} was NOT sent to the recycle bin (${mode}). It cannot be restored from the app.`, 'error');
+        showToast(t('ide.permanentlyDeleted'), t('ide.permanentlyDeletedMsg', { name: node.name, mode }), 'error');
       }
     } catch (err) {
       console.error('Delete error:', err);
@@ -905,7 +903,7 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
   /** Sends the active file to the recycle bin (breadcrumb trash button). */
   const handleDeleteActiveFile = () => {
     if (!activeTab || !activeNode) {
-      showToast('Nothing to delete', 'Open a file from the explorer first.', 'info');
+      showToast(t('ide.nothingToDelete'), t('ide.openFileFirst'), 'info');
       return;
     }
     void handleDeleteEntry(activeNode);
@@ -926,7 +924,7 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'r' || e.key === 'R')) {
         e.preventDefault();
         if (activeTab && activeNode) handleRunActiveFile();
-        else showToast('Nothing to run', 'Open a file from the explorer first.', 'info');
+        else showToast(t('ide.nothingToRun'), t('ide.openFileFirst'), 'info');
       }
     };
     window.addEventListener('keydown', handleKeyDownGlobal);
