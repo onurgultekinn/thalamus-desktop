@@ -86,6 +86,29 @@ export default function App() {
   const [input, setInput] = useState<string>('');
   // Dosya önizlemesi: chat düzeninde SAĞDA bir sütun (chat'i örtmez, daraltır).
   const [previewItem, setPreviewItem] = useState<PreviewItem | null>(null);
+  // Önizleme sütun genişliği — sol kenardan çekip bırakarak ayarlanır, hatırlanır.
+  const [previewWidth, setPreviewWidth] = useState<number>(() => {
+    const v = Number(localStorage.getItem('tlm_preview_width'));
+    return Number.isFinite(v) && v >= 320 ? v : 520;
+  });
+  useEffect(() => {
+    try { localStorage.setItem('tlm_preview_width', String(previewWidth)); } catch { /* noop */ }
+  }, [previewWidth]);
+  const startPreviewResize = (e: { clientX: number; preventDefault: () => void }) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = previewWidth;
+    const move = (ev: PointerEvent) => {
+      const w = Math.max(320, Math.min(startW + (startX - ev.clientX), window.innerWidth - 380));
+      setPreviewWidth(w);
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
 
   /**
    * The theme is applied via the `html[data-theme]` attribute (rules live in App.css).
@@ -844,9 +867,19 @@ export default function App() {
               </div>
 
               {previewItem && (
-                <div style={{ width: 'clamp(360px, 42vw, 620px)', flexShrink: 0, minWidth: 0, height: '100%' }}>
-                  <FilePreviewDrawer item={previewItem} onClose={() => setPreviewItem(null)} inline />
-                </div>
+                <>
+                  {/* Sol kenar tutamacı: çekip bırakarak önizleme genişliğini ayarla. */}
+                  <div
+                    onPointerDown={startPreviewResize}
+                    title={t('preview.resize')}
+                    className="w-[5px] flex-shrink-0 cursor-col-resize bg-transparent hover:bg-[#dcb67a]/40 active:bg-[#dcb67a]/60 transition-colors"
+                    role="separator"
+                    aria-orientation="vertical"
+                  />
+                  <div style={{ width: previewWidth, flexShrink: 0, minWidth: 0, height: '100%' }}>
+                    <FilePreviewDrawer item={previewItem} onClose={() => setPreviewItem(null)} inline />
+                  </div>
+                </>
               )}
               </div>
             </div>

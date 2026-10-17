@@ -19,8 +19,10 @@ export interface PreviewItem {
   buffer?: ArrayBuffer;
 }
 
-function triggerDownload(name: string, url?: string, buffer?: ArrayBuffer) {
-  const href = url ?? (buffer ? URL.createObjectURL(new Blob([buffer])) : undefined);
+function triggerDownload(name: string, url?: string, buffer?: ArrayBuffer, body?: string) {
+  const href = url
+    ?? (buffer ? URL.createObjectURL(new Blob([buffer])) : undefined)
+    ?? (body !== undefined ? URL.createObjectURL(new Blob([body], { type: 'text/plain' })) : undefined);
   if (!href) return;
   const a = document.createElement('a');
   a.href = href;
@@ -65,6 +67,7 @@ export function FilePreviewDrawer({ item, onClose, inline = false }: { item: Pre
   // onu daraltır). Yüzen modda her zaman portal + fixed kullanılır.
   const node = (
     <div
+      ref={fv.frameRef}
       style={fv.floating ? fv.style : undefined}
       className={`bg-obsidian-panel flex flex-col ${
         fv.floating
@@ -75,7 +78,7 @@ export function FilePreviewDrawer({ item, onClose, inline = false }: { item: Pre
       }`}
     >
       {/* İçerik doğal boyutunda kalır ve tek parça ölçeklenir (zoom). */}
-      <div style={fv.contentStyle}>
+      <div ref={fv.contentRef} style={fv.contentStyle}>
       <div
         onPointerDown={fv.floating ? fv.onDragStart : undefined}
         className={`flex items-center justify-between gap-2 px-3 py-2 border-b border-obsidian-border bg-[#1C1B1A] flex-shrink-0 ${fv.floating ? 'cursor-move' : ''}`}
@@ -88,7 +91,7 @@ export function FilePreviewDrawer({ item, onClose, inline = false }: { item: Pre
         <div className="flex items-center gap-1 flex-shrink-0">
           <button
             type="button"
-            onClick={() => triggerDownload(item.name, item.url, item.buffer)}
+            onClick={() => triggerDownload(item.name, item.url, item.buffer, item.body)}
             className="flex items-center gap-1 rounded-md border border-obsidian-border px-2 py-1 text-[11px] text-obsidian-muted hover:text-obsidian-text hover:border-[#dcb67a]/50 cursor-pointer transition-colors"
             title={t('preview.download')}
           >
@@ -133,14 +136,10 @@ export function FilePreviewDrawer({ item, onClose, inline = false }: { item: Pre
               filename={item.name}
               options={{
                 theme: 'dark',
-                onDiagnostic: (d: unknown) => {
-                  const w = window as unknown as { __fvDiag?: unknown[] };
-                  (w.__fvDiag = w.__fvDiag || []).push(d);
-                },
-              }}
-              onEvent={(e: unknown) => {
-                const w = window as unknown as { __fvDiag?: unknown[] };
-                (w.__fvDiag = w.__fvDiag || []).push({ event: e });
+                // Araç çubuğunu sadeleştir + zemini uygulama paletine çek:
+                // varsayılan mavi/kalabalık görünüm sakinleşir.
+                ui: { density: 'compact', surfaceBackground: '#100F0F' },
+                toolbar: { position: 'top', download: true, zoom: true, search: true, print: false, exportHtml: false, theme: false },
               }}
               style={{ width: '100%', height: '100%' }}
             />
