@@ -1,5 +1,6 @@
 import { buildFacts, gridLuma, textureStats, type VisionFacts } from './vision';
 import { analyzeOnDevice, lastVisionError } from './onDeviceVision';
+import { t } from './i18n';
 
 /** How much of an image to spend on: fewer tokens vs more detail. */
 export type ImageMode = 'auto' | 'economy' | 'balanced' | 'high';
@@ -101,13 +102,13 @@ export function estimateVisionTokens(width: number, height: number, detail: 'low
 function factsSummary(f: VisionFacts): string {
   const colors = f.colors.slice(0, 5).map((c) => `${c.hex} ${c.pct}%`).join(', ');
   return [
-    `light ${f.lightClass} (${f.bright}%)`,
-    `edge ${f.edges.dominant}`,
-    `texture ${f.tex.textureClass}`,
-    colors ? `colors ${colors}` : '',
+    `${t('vis.s.light')} ${f.lightClass} (${f.bright}%)`,
+    `${t('vis.s.edge')} ${f.edges.dominant}`,
+    `${t('vis.s.texture')} ${f.tex.textureClass}`,
+    colors ? `${t('vis.s.colors')} ${colors}` : '',
     f.subj
-      ? `subject ${f.subj.shapeClass} (aspect ${f.subj.aspect}, fullness ${f.subj.extentPct}%, upright ${f.subj.upright})`
-      : 'subject: none detected',
+      ? `${t('vis.s.subject')} ${f.subj.shapeClass} (aspect ${f.subj.aspect}, fullness ${f.subj.extentPct}%, upright ${f.subj.upright})`
+      : t('vis.s.noSubject'),
   ].filter(Boolean).join(' · ');
 }
 
