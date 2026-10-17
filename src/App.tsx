@@ -798,7 +798,10 @@ export default function App() {
 
         <main className="main-content">
           {currentView === 'chat' && (
-            <div className="chat-layout" style={{ display: 'flex', flexDirection: 'row', height: '100%', overflow: 'hidden' }}>
+            <div className="chat-layout">
+              {/* Satır sarmalayıcı: chat sütunu + (açıksa) önizleme sütunu.
+                  .chat-layout CSS'i column!important olduğu için satır burada. */}
+              <div style={{ display: 'flex', flexDirection: 'row', height: '100%', width: '100%', overflow: 'hidden' }}>
               <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
               <div className="message-list" data-chat-scroll style={{ flex: 1, overflowY: 'auto' }}>
                 <ChatView
@@ -845,6 +848,7 @@ export default function App() {
                   <FilePreviewDrawer item={previewItem} onClose={() => setPreviewItem(null)} inline />
                 </div>
               )}
+              </div>
             </div>
           )}
 
