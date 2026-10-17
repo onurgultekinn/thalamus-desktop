@@ -17,7 +17,8 @@ const PACKAGES = [
   '@file-viewer/assets-drawing',
 ];
 
-// Bayat asset'leri temizle (yeni sürümde dosya adı değişirse kalıntı kalmasın).
+// Temiz başla: eski/tam-payload (CAD dahil) kalıntı kalmasın. Eklenti copyAssets
+// kapalı olduğundan public→dist kopyasıyla yarış yok.
 if (existsSync(target)) rmSync(target, { recursive: true, force: true });
 mkdirSync(target, { recursive: true });
 

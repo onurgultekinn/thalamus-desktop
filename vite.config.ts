@@ -13,7 +13,10 @@ export default defineConfig({
     // Dokümandaki varsayılan: kurulu preset-* paketlerini otomatik keşfeder,
     // renderer kaydını enjekte eder ve asset'leri <base>/file-viewer'e kopyalar.
     // (CAD yok: preset-standard kurulu; preset-all/engineering kurulu değil.)
-    fileViewerRenderers({ copyAssets: true }),
+    // copyAssets KAPALI: tam asset payload'ı (file-viewer-copy-assets) CAD/AGPL
+    // asset'leri içeriyor. CAD'siz asset'leri kendimiz kopyalıyoruz
+    // (scripts/copy-file-viewer-assets.mjs → public/file-viewer).
+    fileViewerRenderers({ copyAssets: false }),
   ],
   
   // Tauri dev server settings
@@ -30,6 +33,11 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+      // AGPL CAD runtime'ını paket dışı bırak (ticari lisans). preset-all
+      // renderer-cad'ı statik import ediyor; stub'a yönlendiriyoruz.
+      '@file-viewer/renderer-cad': path.resolve(__dirname, './src/lib/fileViewerCadStub.ts'),
+      '@flyfish-dev/cad-viewer': path.resolve(__dirname, './src/lib/fileViewerCadStub.ts'),
+      'dwf-viewer': path.resolve(__dirname, './src/lib/fileViewerCadStub.ts'),
     },
   },
 

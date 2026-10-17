@@ -29,6 +29,7 @@
     "@file-viewer/capability-text-tools": "^3.2.1",
     "@file-viewer/preset-standard": "^3.2.1",
     "@file-viewer/react": "^3.2.1",
+    "@file-viewer/react-full": "^3.2.1",
     "@file-viewer/renderer-3d": "^3.2.1",
     "@file-viewer/renderer-archive": "^3.2.1",
     "@file-viewer/renderer-chm": "^3.2.1",
