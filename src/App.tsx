@@ -94,24 +94,29 @@ export default function App() {
   useEffect(() => {
     try { localStorage.setItem('tlm_preview_width', String(previewWidth)); } catch { /* noop */ }
   }, [previewWidth]);
-  // Sürükleme sırasında panel İÇERİĞİ yeniden akmaz; tek parça ÖLÇEKLENİR
-  // (transform), bırakınca gerçek genişlik bir kez uygulanır. Böylece PDF/office
-  // gibi yeniden yerleşimi pahalı içerik titremez ve düzen bir bütün kalır.
-  const [previewDrag, setPreviewDrag] = useState<{ startW: number; scale: number } | null>(null);
+  // İçerik (PDF/office) genişliği: panel açıldığı andaki genişliğe sabitlenir.
+  // Panel büyütülünce PDF BÜYÜMEZ — yalnız çalışma alanı büyür; zoom'u kullanıcı
+  // viewer'ın kendi araç çubuğundan yapar.
+  const [previewContentW, setPreviewContentW] = useState<number>(640);
+  const openPreview = useCallback((item: PreviewItem) => {
+    setPreviewItem(item);
+    // İçerik genişliği = panelin AÇILIŞ anındaki genişliği; sonra panel
+    // büyütülse de içerik bu boyutta kalır (PDF kendi kendine büyümez).
+    setPreviewContentW(previewWidth);
+  }, [previewWidth]);
+
+  // Sol kenardan çekip bırakarak ÇALIŞMA ALANI (panel) genişliği ayarlanır.
   const startPreviewResize = (e: { clientX: number; preventDefault: () => void }) => {
     e.preventDefault();
     const startX = e.clientX;
     const startW = previewWidth;
     document.body.style.userSelect = 'none';
-    setPreviewDrag({ startW, scale: 1 });
     const move = (ev: PointerEvent) => {
       const w = Math.max(320, Math.min(startW + (startX - ev.clientX), window.innerWidth - 380));
       setPreviewWidth(w);
-      setPreviewDrag({ startW, scale: w / startW });
     };
     const up = () => {
       document.body.style.userSelect = '';
-      setPreviewDrag(null);
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
     };
@@ -869,7 +874,7 @@ export default function App() {
                   activeModelLabel={activeModelLabel}
                   images={pendingImages}
                   setImages={setPendingImages}
-                  onOpenPreview={setPreviewItem}
+                  onOpenPreview={openPreview}
                   onClosePreview={() => setPreviewItem(null)}
                 />
               </div>
@@ -886,19 +891,12 @@ export default function App() {
                     aria-orientation="vertical"
                   />
                   <div style={{ width: previewWidth, maxWidth: 'calc(100vw - 360px)', flexShrink: 0, minWidth: 0, height: '100%', overflow: 'hidden' }}>
-                    <div
-                      style={previewDrag
-                        ? {
-                            width: previewDrag.startW,
-                            height: '100%',
-                            transform: `scale(${previewDrag.scale})`,
-                            transformOrigin: 'top left',
-                            pointerEvents: 'none',
-                          }
-                        : { width: '100%', height: '100%' }}
-                    >
-                      <FilePreviewDrawer item={previewItem} onClose={() => setPreviewItem(null)} inline />
-                    </div>
+                    <FilePreviewDrawer
+                      item={previewItem}
+                      onClose={() => setPreviewItem(null)}
+                      inline
+                      contentWidth={previewContentW}
+                    />
                   </div>
                 </>
               )}

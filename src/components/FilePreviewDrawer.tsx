@@ -47,9 +47,9 @@ function openInWindow(item: PreviewItem) {
  * (PDF, Office, arşiv, e-posta, veri, 3D, EPUB…) `@file-viewer` ile çizilir.
  * (PDF, ileride ayrı bir pdfjs görüntüleyiciye devredilecek — metin seçimi için.)
  */
-export function FilePreviewDrawer({ item, onClose, inline = false }: { item: PreviewItem; onClose: () => void; inline?: boolean }) {
+export function FilePreviewDrawer({ item, onClose, inline = false, contentWidth }: { item: PreviewItem; onClose: () => void; inline?: boolean; contentWidth?: number }) {
   const t = useT();
-  const fv = useFloatingPanel('preview', { def: { x: 860, y: 90, w: 560, h: 560 }, minScale: 0.5 });
+  const fv = useFloatingPanel('preview', { def: { x: 820, y: 80, w: 560, h: 600 }, minScale: 0.55 });
   const canUseViewer = useMemo(() => item.kind !== 'large' && (!!item.url || !!item.buffer), [item]);
 
   // @file-viewer `url` ile çalışır; buffer'dan blob URL üretip geçici olarak kullanırız.
@@ -131,7 +131,7 @@ export function FilePreviewDrawer({ item, onClose, inline = false }: { item: Pre
         ) : item.body !== undefined ? (
           <pre className="p-3 text-[11.5px] leading-relaxed font-mono text-obsidian-text whitespace-pre-wrap break-words">{item.body}</pre>
         ) : canUseViewer ? (
-            <div className="fv-themed" style={{ width: '100%', height: '100%' }}>
+            <div className="fv-themed" style={{ width: contentWidth ?? '100%', height: '100%' }}>
             {/* @file-viewer araç çubuğunu uygulama paletine çek (mavi/kalabalık
                 varsayılan görünümü sadeleştirir). styleIsolation:'none' gerekir. */}
             <style>{`
@@ -149,6 +149,13 @@ export function FilePreviewDrawer({ item, onClose, inline = false }: { item: Pre
               .fv-themed .file-viewer-web-icon-button[aria-pressed="true"],
               .fv-themed .file-viewer-web-icon-button[data-active="true"] { background: rgba(220,182,122,0.14) !important; color: #dcb67a !important; }
               .fv-themed .file-viewer-web-zoom-meter { color: #A8A49E !important; font-family: ui-monospace, monospace !important; }
+              /* PDF kendi araç çubuğu sınıfları (web toolbar kapalı) */
+              .fv-themed .pdf-toolbar { background: #1C1B1A !important; border-bottom: 1px solid #34332F !important; padding: 4px 6px !important; min-height: 0 !important; gap: 4px !important; }
+              .fv-themed .pdf-icon-button, .fv-themed .pdf-scale-button { border-radius: 6px !important; color: #87857F !important; background: transparent !important; }
+              .fv-themed .pdf-icon-button:hover, .fv-themed .pdf-scale-button:hover { background: #282726 !important; color: #F2F0E5 !important; }
+              .fv-themed .pdf-icon-button[aria-pressed="true"], .fv-themed .pdf-scale-button[data-active="true"] { background: rgba(220,182,122,0.14) !important; color: #dcb67a !important; }
+              .fv-themed .pdf-page-meter, .fv-themed .pdf-rotation-meter { color: #A8A49E !important; font-family: ui-monospace, monospace !important; }
+              .fv-themed .pdf-content, .fv-themed .pdf-viewport, .fv-themed .pdf-wrapper, .fv-themed .pdfViewer { background: #100F0F !important; }
             `}</style>
             <FileViewer
               url={viewerUrl}
