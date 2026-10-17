@@ -734,7 +734,7 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
     // "kapat" denirse tampon ve bellek kopyasi atilir (kaybolur, ama bilerek).
     if (isDirty(fileName)) {
       const name = fileName.split('/').pop();
-      if (!window.confirm(t('ide.unsavedClose', { name }))) {
+      if (!window.confirm(t('ide.unsavedClose', { name: name ?? '' }))) {
         return;
       }
       setFileContents(prev => {
