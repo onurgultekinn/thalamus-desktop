@@ -498,6 +498,10 @@ export function SettingsModal({
                       const target = API_PROVIDERS.find(x => x.id === e.target.value);
                       if (target && target.available === false) return;
                       setActiveProvider(e.target.value);
+                      // Sağlayıcı seçimi ANINDA etki eder (Kaydet beklemez):
+                      // getActiveProvider bu anahtarı okur.
+                      try { localStorage.setItem(activeProviderStorageKey, e.target.value); } catch {}
+                      window.dispatchEvent(new Event('thalamus_config_changed'));
                       setVisibleProvider(null);
                     }}
                     className={selectCls}
@@ -525,7 +529,12 @@ export function SettingsModal({
                     <input
                       type="text"
                       value={baseUrls[p.id] || ''}
-                      onChange={e => setBaseUrls(prev => ({ ...prev, [p.id]: e.target.value }))}
+                      onChange={e => {
+                        const v = e.target.value;
+                        setBaseUrls(prev => ({ ...prev, [p.id]: v }));
+                        try { if (v.trim()) localStorage.setItem(baseStorageKey(p.id), v); else localStorage.removeItem(baseStorageKey(p.id)); } catch {}
+                        window.dispatchEvent(new Event('thalamus_config_changed'));
+                      }}
                       placeholder={p.defaultBaseUrl || 'http://localhost:8000/v1'}
                       className={inputCls}
                       spellCheck={false}
