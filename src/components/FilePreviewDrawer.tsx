@@ -45,9 +45,9 @@ function openInWindow(item: PreviewItem) {
  * (PDF, Office, arşiv, e-posta, veri, 3D, EPUB…) `@file-viewer` ile çizilir.
  * (PDF, ileride ayrı bir pdfjs görüntüleyiciye devredilecek — metin seçimi için.)
  */
-export function FilePreviewDrawer({ item, onClose }: { item: PreviewItem; onClose: () => void }) {
+export function FilePreviewDrawer({ item, onClose, inline = false }: { item: PreviewItem; onClose: () => void; inline?: boolean }) {
   const t = useT();
-  const fv = useFloatingPanel('preview', { def: { x: 860, y: 90, w: 560, h: 560 }, min: { w: 320, h: 240 } });
+  const fv = useFloatingPanel('preview', { def: { x: 860, y: 90, w: 560, h: 560 }, minScale: 0.5 });
   const canUseViewer = useMemo(() => item.kind !== 'large' && (!!item.url || !!item.buffer), [item]);
 
   // @file-viewer `url` ile çalışır; buffer'dan blob URL üretip geçici olarak kullanırız.
@@ -61,17 +61,21 @@ export function FilePreviewDrawer({ item, onClose }: { item: PreviewItem; onClos
     if (viewerUrl && !item.url) { try { URL.revokeObjectURL(viewerUrl); } catch { /* noop */ } }
   }, [viewerUrl, item.url]);
 
-  // Portal: `fixed` konumlandırma, transform'lu ata elemanlardan etkilenmesin
-  // (aksi halde panel sağa/tam yüksekliğe oturmuyor).
-  return createPortal(
+  // `inline`: chat düzeni içinde bir SÜTUN olarak render edilir (chat'i örtmez,
+  // onu daraltır). Yüzen modda her zaman portal + fixed kullanılır.
+  const node = (
     <div
       style={fv.floating ? fv.style : undefined}
       className={`bg-obsidian-panel flex flex-col ${
         fv.floating
           ? `relative ${FLOATING_CHROME}`
-          : 'fixed top-0 right-0 h-screen w-[560px] max-w-[94vw] border-l border-obsidian-border shadow-2xl z-[60]'
+          : inline
+            ? 'relative h-full w-full border-l border-obsidian-border'
+            : 'fixed top-0 right-0 h-screen w-[560px] max-w-[94vw] border-l border-obsidian-border shadow-2xl z-[60]'
       }`}
     >
+      {/* İçerik doğal boyutunda kalır ve tek parça ölçeklenir (zoom). */}
+      <div style={fv.contentStyle}>
       <div
         onPointerDown={fv.floating ? fv.onDragStart : undefined}
         className={`flex items-center justify-between gap-2 px-3 py-2 border-b border-obsidian-border bg-[#1C1B1A] flex-shrink-0 ${fv.floating ? 'cursor-move' : ''}`}
@@ -146,9 +150,14 @@ export function FilePreviewDrawer({ item, onClose }: { item: PreviewItem; onClos
           </p>
         )}
       </div>
+      </div>
 
       {fv.floating && <FloatResizeHandle onPointerDown={fv.onResizeStart} />}
-    </div>,
-    document.body,
+    </div>
   );
+
+  // Inline + docked: bulunduğu sütunda kalır (portal yok). Aksi halde viewport'a
+  // sabitlenmek için portal kullanılır.
+  if (inline && !fv.floating) return node;
+  return createPortal(node, document.body);
 }

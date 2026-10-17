@@ -3,7 +3,7 @@ import { Paperclip, ArrowUp, FileCode, X, UploadCloud, ChevronUp, Square } from 
 import { MODELS } from '../constants';
 import { prepareImageFile, DEFAULT_IMAGE_MODE, type AttachedImage, type ImageMode } from '../lib/imageAttach';
 import { useT } from '../lib/i18n';
-import { FilePreviewDrawer, type PreviewItem } from './FilePreviewDrawer';
+import type { PreviewItem } from './FilePreviewDrawer';
 
 // Attachments must never dump raw bytes into the prompt. Images become a compact
 // on-device measurement summary; binary files are noted but omitted; oversized
@@ -48,6 +48,10 @@ interface CommandBarProps {
   activeModelLabel?: string;
   images: AttachedImage[];
   setImages: React.Dispatch<React.SetStateAction<AttachedImage[]>>;
+  /** Çipe tıklanınca önizlemeyi chat düzeninde (App) açar. */
+  onOpenPreview?: (item: PreviewItem) => void;
+  /** Gönderimde açık önizlemeyi kapatır (blob URL'ler serbest bırakılabilsin). */
+  onClosePreview?: () => void;
 }
 
 export function CommandBar({
@@ -60,7 +64,9 @@ export function CommandBar({
   targetModel,
   activeModelLabel,
   images,
-  setImages
+  setImages,
+  onOpenPreview,
+  onClosePreview
 }: CommandBarProps) {
   const t = useT();
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
@@ -68,8 +74,6 @@ export function CommandBar({
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [imageMode] = useState<ImageMode>(DEFAULT_IMAGE_MODE);
-  /** Çipe tıklanınca sağda açılan önizleme. */
-  const [preview, setPreview] = useState<PreviewItem | null>(null);
 
   const popoverRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -174,7 +178,7 @@ export function CommandBar({
     setUploadedFiles(prev => {
       const removed = prev[index];
       if (removed?.url) { try { URL.revokeObjectURL(removed.url); } catch {} }
-      if (removed && preview?.name === removed.name) setPreview(null);
+      void removed;
       return prev.filter((_, i) => i !== index);
     });
   };
@@ -190,7 +194,7 @@ export function CommandBar({
     // Serbest bırak: yerel önizleme blob URL'leri artık gerekmiyor.
     uploadedFiles.forEach(f => { if (f.url) { try { URL.revokeObjectURL(f.url); } catch {} } });
     setUploadedFiles([]);
-    setPreview(null);
+    onClosePreview?.();
     onSend({ preventDefault: () => {} } as unknown as FormEvent, files);
   };
 
@@ -274,8 +278,6 @@ export function CommandBar({
       )}
 
       {/* Main Command Input Box */}
-      {/* Preview drawer (right side) — opens when a chip is clicked. */}
-      {preview && <FilePreviewDrawer item={preview} onClose={() => setPreview(null)} />}
 
       <form onSubmit={(e) => { e.preventDefault(); submitWithFiles(); }} className="w-full bg-obsidian-panel border border-obsidian-border rounded-xl flex flex-col p-3 gap-2 shadow-2xl transition-all duration-200 focus-within:border-[#dcb67a]/40">
         {/* Attachment chips — the row sits just above the input; nothing is
@@ -286,14 +288,14 @@ export function CommandBar({
               <div
                 key={`img-${img.name}-${idx}`}
                 className="group flex items-center gap-1.5 rounded-md border border-obsidian-border bg-obsidian-bg/60 pl-1 pr-1.5 py-1 cursor-pointer hover:border-[#dcb67a]/50 transition-colors"
-                onClick={() => setPreview({ name: img.name, kind: 'image', url: img.url })}
+                onClick={() => onOpenPreview?.({ name: img.name, kind: 'image', url: img.url })}
                 title={img.name}
               >
                 <img src={img.url} alt="" className="h-5 w-5 rounded object-cover border border-obsidian-border flex-shrink-0" />
                 <span className="max-w-[140px] truncate text-[11px] text-obsidian-text">{img.name}</span>
                 <button
                   type="button"
-                  onClick={(e) => { e.stopPropagation(); setImages(prev => prev.filter((_, i) => i !== idx)); if (preview?.name === img.name) setPreview(null); }}
+                  onClick={(e) => { e.stopPropagation(); setImages(prev => prev.filter((_, i) => i !== idx)); }}
                   className="text-obsidian-muted hover:text-rose-400 cursor-pointer p-0.5"
                   title={t('cop.removeImage')}
                 >
@@ -305,7 +307,7 @@ export function CommandBar({
               <div
                 key={`file-${file.name}-${idx}`}
                 className="group flex items-center gap-1.5 rounded-md border border-obsidian-border bg-obsidian-bg/60 pl-2 pr-1.5 py-1 cursor-pointer hover:border-[#dcb67a]/50 transition-colors"
-                onClick={() => setPreview({ name: file.name, kind: file.kind, body: file.body, url: file.url, buffer: file.buffer, mime: file.mime, size: file.size })}
+                onClick={() => onOpenPreview?.({ name: file.name, kind: file.kind, body: file.body, url: file.url, buffer: file.buffer, mime: file.mime, size: file.size })}
                 title={file.name}
               >
                 <FileCode size={12} className="text-obsidian-muted flex-shrink-0" />

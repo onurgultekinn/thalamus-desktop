@@ -5,6 +5,7 @@ import { Sidebar } from './components/Sidebar';
 import { DiffView } from './components/DiffView';
 import { ProjectDashboard } from './components/ProjectDashboard';
 import { CommandBar } from './components/CommandBar';
+import { FilePreviewDrawer, type PreviewItem } from './components/FilePreviewDrawer';
 import type { AttachedImage } from './lib/imageAttach';
 import { ChatView } from './components/ChatView';
 import type { DiffCodeData } from './components/DiffView';
@@ -83,6 +84,8 @@ export default function App() {
     };
   }, []);
   const [input, setInput] = useState<string>('');
+  // Dosya önizlemesi: chat düzeninde SAĞDA bir sütun (chat'i örtmez, daraltır).
+  const [previewItem, setPreviewItem] = useState<PreviewItem | null>(null);
 
   /**
    * The theme is applied via the `html[data-theme]` attribute (rules live in App.css).
@@ -795,7 +798,8 @@ export default function App() {
 
         <main className="main-content">
           {currentView === 'chat' && (
-            <div className="chat-layout" style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+            <div className="chat-layout" style={{ display: 'flex', flexDirection: 'row', height: '100%', overflow: 'hidden' }}>
+              <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
               <div className="message-list" data-chat-scroll style={{ flex: 1, overflowY: 'auto' }}>
                 <ChatView
                   messages={messages}
@@ -830,8 +834,17 @@ export default function App() {
                   activeModelLabel={activeModelLabel}
                   images={pendingImages}
                   setImages={setPendingImages}
+                  onOpenPreview={setPreviewItem}
+                  onClosePreview={() => setPreviewItem(null)}
                 />
               </div>
+              </div>
+
+              {previewItem && (
+                <div style={{ width: 'clamp(360px, 42vw, 620px)', flexShrink: 0, minWidth: 0, height: '100%' }}>
+                  <FilePreviewDrawer item={previewItem} onClose={() => setPreviewItem(null)} inline />
+                </div>
+              )}
             </div>
           )}
 
