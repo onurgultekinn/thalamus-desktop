@@ -1,8 +1,8 @@
 import { useEffect, useMemo } from 'react';
-import { FileCode, X, Download, PictureInPicture2 } from 'lucide-react';
-import { FileViewer } from '@file-viewer/react';
+import { createPortal } from 'react-dom';
+import { FileCode, X, Download, PictureInPicture2, ExternalLink } from 'lucide-react';
+import { FileViewer } from '@file-viewer/react-full';
 import { useT } from '../lib/i18n';
-import { FILE_VIEWER_OPTIONS } from '../lib/fileViewerSetup';
 import { useFloatingPanel, FloatResizeHandle, FLOATING_CHROME } from './floating';
 
 export interface PreviewItem {
@@ -31,6 +31,14 @@ function triggerDownload(name: string, url?: string, buffer?: ArrayBuffer) {
   // buffer'dan ürettiysek hemen serbest bırakma; tarayıcı indirmeyi başlattı.
 }
 
+/** Ayrı bir pencere/pop-up'ta açar (blob URL ile). */
+function openInWindow(item: PreviewItem) {
+  const url = item.url ?? (item.buffer ? URL.createObjectURL(new Blob([item.buffer], item.mime ? { type: item.mime } : undefined)) : undefined);
+  if (!url) return;
+  // Tauri/WebView2'de window.open sistem tarayıcısına gider; tarayıcı önizlemesinde yeni sekme.
+  window.open(url, '_blank', 'noopener,noreferrer,width=1000,height=760');
+}
+
 /**
  * Sağ tarafta açılan dosya önizleme çekmecesi.
  * Native dallar (görsel/ses/video/metin) hızlı; diğer tüm formatlar
@@ -53,18 +61,20 @@ export function FilePreviewDrawer({ item, onClose }: { item: PreviewItem; onClos
     if (viewerUrl && !item.url) { try { URL.revokeObjectURL(viewerUrl); } catch { /* noop */ } }
   }, [viewerUrl, item.url]);
 
-  return (
+  // Portal: `fixed` konumlandırma, transform'lu ata elemanlardan etkilenmesin
+  // (aksi halde panel sağa/tam yüksekliğe oturmuyor).
+  return createPortal(
     <div
       style={fv.floating ? fv.style : undefined}
-      className={`relative bg-obsidian-panel flex flex-col ${
+      className={`bg-obsidian-panel flex flex-col ${
         fv.floating
-          ? FLOATING_CHROME
-          : 'fixed top-0 right-0 h-full w-[560px] max-w-[94vw] border-l border-obsidian-border shadow-2xl z-[60]'
+          ? `relative ${FLOATING_CHROME}`
+          : 'fixed top-0 right-0 h-screen w-[560px] max-w-[94vw] border-l border-obsidian-border shadow-2xl z-[60]'
       }`}
     >
       <div
         onPointerDown={fv.floating ? fv.onDragStart : undefined}
-        className={`flex items-center justify-between px-3 py-2 border-b border-obsidian-border flex-shrink-0 ${fv.floating ? 'cursor-move' : ''}`}
+        className={`flex items-center justify-between gap-2 px-3 py-2 border-b border-obsidian-border bg-[#1C1B1A] flex-shrink-0 ${fv.floating ? 'cursor-move' : ''}`}
       >
         <div className="flex items-center gap-2 min-w-0">
           <FileCode size={14} className="text-obsidian-muted flex-shrink-0" />
@@ -79,6 +89,14 @@ export function FilePreviewDrawer({ item, onClose }: { item: PreviewItem; onClos
             title={t('preview.download')}
           >
             <Download size={12} /> {t('preview.download')}
+          </button>
+          <button
+            type="button"
+            onClick={() => openInWindow(item)}
+            className="p-1 rounded cursor-pointer text-obsidian-muted hover:text-obsidian-text transition-colors"
+            title={t('preview.openExternal')}
+          >
+            <ExternalLink size={15} />
           </button>
           <button
             type="button"
@@ -105,17 +123,12 @@ export function FilePreviewDrawer({ item, onClose }: { item: PreviewItem; onClos
           <div className="p-3"><audio src={item.url} controls className="w-full" /></div>
         ) : item.body !== undefined ? (
           <pre className="p-3 text-[11.5px] leading-relaxed font-mono text-obsidian-text whitespace-pre-wrap break-words">{item.body}</pre>
-        ) : item.kind === 'pdf' && item.url ? (
-          /* Geçici: @file-viewer bizim kurulumda PDF renderer'ını devreye
-             sokmuyor (araştırılıyor) → PDF şimdilik native görüntüleyici. */
-          <iframe src={item.url} title={item.name} className="w-full h-full min-h-[70vh] border-0 bg-white" />
         ) : canUseViewer ? (
             <FileViewer
               url={viewerUrl}
               filename={item.name}
-              type={item.mime}
               options={{
-                ...FILE_VIEWER_OPTIONS,
+                theme: 'dark',
                 onDiagnostic: (d: unknown) => {
                   const w = window as unknown as { __fvDiag?: unknown[] };
                   (w.__fvDiag = w.__fvDiag || []).push(d);
@@ -135,6 +148,7 @@ export function FilePreviewDrawer({ item, onClose }: { item: PreviewItem; onClos
       </div>
 
       {fv.floating && <FloatResizeHandle onPointerDown={fv.onResizeStart} />}
-    </div>
+    </div>,
+    document.body,
   );
 }
