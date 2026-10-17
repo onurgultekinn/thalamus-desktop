@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { ThalamusClient, type CompressionMetrics, type EngineStatus } from '../services/ThalamusClient';
+import { t } from '../lib/i18n';
 
 export type { CompressionMetrics, EngineStatus };
 
@@ -73,7 +74,7 @@ export const useThalamus = (): UseThalamusReturn => {
         return metrics;
       } catch (err: unknown) {
         const errorMessage =
-          err instanceof Error ? err.message : 'An error occurred during prompt compression.';
+          err instanceof Error ? err.message : t('eng.compressError');
         setError(errorMessage);
         setIsLoading(false);
         throw err;

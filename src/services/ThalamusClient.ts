@@ -1,3 +1,5 @@
+import { t } from '../lib/i18n';
+
 // thalamus_desktop/src/services/ThalamusClient.ts
 //
 // The frontend now talks to the local HTTP backend (axum) instead of Tauri IPC
@@ -77,14 +79,14 @@ export class ThalamusClient {
         is_ready: data.ok !== false,
         model_loaded: true,
         model_path: null,
-        info: data.info || 'Local Compression Engine Active',
+        info: data.info || t('eng.active'),
       };
     } catch {
       return {
         is_ready: false,
         model_loaded: false,
         model_path: null,
-        info: 'No connection to engine',
+        info: t('eng.noConnection'),
       };
     }
   }
@@ -114,7 +116,7 @@ export class ThalamusClient {
       // No backend — safe raw-text return, but NOT FAKE:
       // marked with `degraded: true` so the UI does not mislead the user.
       const message =
-        err instanceof Error ? err.message : 'Could not connect to the compression engine.';
+        err instanceof Error ? err.message : t('eng.connectError');
       const approxTokens = Math.max(1, Math.round(prompt.length / 4));
       return {
         original_prompt: prompt,

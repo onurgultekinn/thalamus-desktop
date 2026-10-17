@@ -365,6 +365,13 @@ const en = {
   'ide.renameErrorMsg': 'Could not rename {id} — the editor and buffers were not touched. {explanation}',
 
   // ── Error catalog (toast explanations) ────────────────────────────────
+  'eng.compressError': 'An error occurred during prompt compression.',
+  'eng.active': 'Local Compression Engine Active',
+  'eng.noConnection': 'No connection to engine',
+  'eng.connectError': 'Could not connect to the compression engine.',
+  'ide.projectPathEmpty': 'Project path is empty.',
+
+  // ── Error catalog (toast explanations) ────────────────────────────────
   'err.ctx.save': 'Save',
   'err.ctx.workspace': 'Workspace',
   'err.ctx.assistant': 'Assistant request',
@@ -844,6 +851,13 @@ const tr: Record<TranslationKey, string> = {
   'ide.deleteErrorMsg': '{id} silinemedi — öğe hâlâ diskte. {explanation}',
   'ide.renameError': 'Yeniden adlandırma hatası',
   'ide.renameErrorMsg': '{id} yeniden adlandırılamadı — düzenleyici ve tamponlar korundu. {explanation}',
+
+  // ── Error catalog (toast explanations) ────────────────────────────────
+  'eng.compressError': 'İstem sıkıştırma sırasında bir hata oluştu.',
+  'eng.active': 'Yerel Sıkıştırma Motoru Etkin',
+  'eng.noConnection': 'Motora bağlantı yok',
+  'eng.connectError': 'Sıkıştırma motoruna bağlanılamadı.',
+  'ide.projectPathEmpty': 'Proje yolu boş.',
 
   // ── Error catalog (toast explanations) ────────────────────────────────
   'err.ctx.save': 'Kaydetme',

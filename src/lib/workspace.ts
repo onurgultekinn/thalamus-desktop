@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { t } from './i18n';
 
 export interface WorkspaceInfo {
   root: string;
@@ -155,7 +156,7 @@ function inTauriDesktop(): boolean {
  * Tarayici önizlemesinde native backend yoktur; yerel gecersiz kalir.
  */
 export async function openProject(root: string): Promise<OpenProjectResult> {
-  if (!root) return { ok: false, error: 'Project path is empty.' };
+  if (!root) return { ok: false, error: t('ide.projectPathEmpty') };
   const previous = getWorkspaceRoot();
   saveWorkspaceRoot(root);
   rememberProject(root);
