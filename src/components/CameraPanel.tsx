@@ -222,14 +222,14 @@ export function CameraPanel({ onClose, onInterpret }: CameraPanelProps) {
               <div className="flex items-center gap-1.5 text-[#3AA99F]"><ScanLine size={11} /> {t('cam.liveScene')}</div>
               <div className="text-[#CECDC3]">{sceneStatus}</div>
               {sceneEvents.length > 0 && (
-                <div className="text-[#87857F]">events: {sceneEvents.slice(-3).join(' · ')}</div>
+                <div className="text-[#87857F]">{t('cam.eventsLabel')} {sceneEvents.slice(-3).join(' · ')}</div>
               )}
               <div className="flex items-center gap-1.5 pt-0.5 text-[#3AA99F]"><ScanLine size={11} /> {t('cam.measured')}</div>
-              <div>light: {facts.lightClass} (%{facts.bright}) · colors: {facts.colors.map((c) => `${c.hex}%${c.pct}`).join(' ')}</div>
-              <div>edge: {facts.edges.dominant} (H{facts.edges.horizontal}/V{facts.edges.vertical}) · texture: {facts.tex.textureClass}</div>
+              <div>{t('cam.lightLabel')}: {facts.lightClass} (%{facts.bright}) · {t('cam.colorsLabel')}: {facts.colors.map((c) => `${c.hex}%${c.pct}`).join(' ')}</div>
+              <div>{t('cam.edgeLabel')}: {facts.edges.dominant} (H{facts.edges.horizontal}/V{facts.edges.vertical}) · {t('cam.textureLabel')}: {facts.tex.textureClass}</div>
               <div>
                 {facts.subj
-                  ? `subject ${facts.subj.box}: ${facts.subj.shapeClass} · aspect ${facts.subj.aspect} · upright:${facts.subj.upright} · motion %${facts.subj.motionPct}`
+                  ? `${t('cam.subjectLabel')} ${facts.subj.box}: ${facts.subj.shapeClass} · ${t('cam.aspectLabel')} ${facts.subj.aspect} · ${t('cam.uprightLabel')}:${facts.subj.upright} · ${t('cam.motionLabel')} %${facts.subj.motionPct}`
                   : t('cam.noSubject')}
               </div>
               <div className="text-[#A8A49E]">{t('cam.consistency')} {selfCheck(facts).join(' · ')}</div>

@@ -8,6 +8,12 @@
 // interpretation is left to the LLM and `interpretPrompt` forces it to
 // say "if I'm not sure, I say uncertain".
 
+import { t, type TranslationKey } from './i18n';
+
+/** Yerelleştirme yardımcıları (display string'leri; veri İngilizce kalır). */
+const vigorLabel = (v: SceneModel['vigor']) => t((`vis.vigor.${v}`) as TranslationKey);
+const dirLabel = (d: string) => t((`vis.dir.${d}`) as TranslationKey);
+
 // --- Multi-scale static analysis -------------------------------------------
 // Shared core for image attachments, video frames and live camera. Pure
 // functions on raw RGBA pixels — runs entirely on-device.
@@ -223,7 +229,7 @@ export function analyzeStaticImage(data: Uint8ClampedArray, w: number, h: number
   const n = Math.max(1, w * h);
   for (let i = 0; i < n; i++) sumL += lum(data[i * 4], data[i * 4 + 1], data[i * 4 + 2]);
   const bright = Math.round((sumL / n) * 100);
-  const lightClass = bright < 10 ? 'very dark' : bright < 26 ? 'dim indoors' : bright < 55 ? 'normal/medium lighting' : bright < 80 ? 'bright (daylight)' : 'very bright';
+  const lightClass = bright < 10 ? t('vis.light.veryDark') : bright < 26 ? t('vis.light.dim') : bright < 55 ? t('vis.light.normal') : bright < 80 ? t('vis.light.bright') : t('vis.light.veryBright');
 
   const colors = colorHistogram(data, w, h);
   const cols = 84, rows = 34;
@@ -383,7 +389,7 @@ export function edgeOrientation(luma: Float32Array, cols: number, rows: number):
   }
   const pct = (k: number) => (total ? Math.round((k / total) * 100) : 0);
   const entries = { horizontal: pct(hor), vertical: pct(ver), diagonal: pct(dia) };
-  const dominant = total === 0 ? 'uncertain (smooth)' : (Object.entries(entries).sort((a, b) => b[1] - a[1])[0][0]);
+  const dominant = total === 0 ? t('vis.edge.uncertain') : t((`vis.edge.${Object.entries(entries).sort((a, b) => b[1] - a[1])[0][0]}`) as TranslationKey);
   return { horizontal: entries.horizontal, vertical: entries.vertical, diagonal: entries.diagonal, dominant };
 }
 
@@ -402,7 +408,7 @@ export function textureStats(luma: Float32Array, cols: number, rows: number): Te
   const rms = Math.sqrt(sum / Math.max(1, cnt));
   return {
     microContrast: Math.round(rms * 1000) / 1000,
-    textureClass: rms < 0.04 ? 'flat/soft surface' : rms < 0.12 ? 'medium texture' : 'pronounced texture',
+    textureClass: rms < 0.04 ? t('vis.tex.flat') : rms < 0.12 ? t('vis.tex.medium') : t('vis.tex.pronounced'),
   };
 }
 
@@ -451,7 +457,7 @@ export function subjectShape(luma: Float32Array, cols: number, rows: number, box
     aspect: Math.round((shW / shH) * 100) / 100,
     extentPct: Math.round((mask / area) * 1000) / 10,
     upright: shH > shW,
-    shapeClass: shH > shW * 1.6 ? 'vertical/tall (human, torso...)' : shW > shH * 1.6 ? 'horizontally-wide (cat, obstacle...)' : 'compact/square-ish (head, bush...)',
+    shapeClass: shH > shW * 1.6 ? t('vis.shape.tall') : shW > shH * 1.6 ? t('vis.shape.wide') : t('vis.shape.compact'),
   };
 }
 
@@ -499,15 +505,15 @@ export function buildFacts(data: Uint8ClampedArray, w: number, h: number, prevLu
 /** Deterministic self-consistency check — flags contradictions. */
 export function selfCheck(f: VisionFacts): string[] {
   const flags: string[] = [];
-  if (f.motion != null && f.motion < 0.5 && f.subj) flags.push('contradiction: motion is low but "moving subject"');
-  if (f.subj && f.subj.upright && f.subj.extentPct < 18) flags.push('weak signal: upright but sparse — may be distant/partially occluded, do not be sure of identity');
-  if (f.bright < 15 && f.subj) flags.push('low light: subject separation is unreliable');
+  if (f.motion != null && f.motion < 0.5 && f.subj) flags.push(t('vis.flag.contradiction'));
+  if (f.subj && f.subj.upright && f.subj.extentPct < 18) flags.push(t('vis.flag.weak'));
+  if (f.bright < 15 && f.subj) flags.push(t('vis.flag.lowLight'));
   const warm = f.colors.some((c) => {
     const r = parseInt(c.hex.slice(1, 3), 16), g = parseInt(c.hex.slice(3, 5), 16), b = parseInt(c.hex.slice(5, 7), 16);
     return r > 150 && r > g + 30 && g > b;
   });
-  if (f.subj && f.subj.upright && warm) flags.push('strong hint: warm skin tone + upright silhouette → in favor of "human" (but a guess)');
-  return flags.length ? flags : ['no obvious contradiction'];
+  if (f.subj && f.subj.upright && warm) flags.push(t('vis.flag.warmHint'));
+  return flags.length ? flags : [t('vis.flag.none')];
 }
 
 /** Error-reducing interpretation template to send to the LLM. */
@@ -564,7 +570,7 @@ export function emptySceneModel(): SceneModel {
   return {
     fgMean: null, fgVar: null, fgMask: null, diffMask: null, prevLuma: null,
     smBox: null, subject: null, centroid: null,
-    vigor: 'calm', lastDirection: '—', events: [], status: 'Waiting for camera…',
+    vigor: 'calm', lastDirection: '—', events: [], status: t('vis.status.waiting'),
   };
 }
 
@@ -646,7 +652,7 @@ export function updateSceneModel(
       fgMask: null, diffMask: null, prevLuma: cur.slice(), smBox: null,
       subject: null, centroid: null, vigor: 'calm',
       lastDirection: '—', events: [...model.events].slice(-6),
-      status: 'First frame — learning the background…',
+      status: t('vis.status.firstFrame'),
     };
   }
 
@@ -698,7 +704,7 @@ export function updateSceneModel(
       aspect,
       extentPct: Math.round((blob.area / (smBox.w * smBox.h)) * 1000) / 10,
       upright: smBox.h > smBox.w,
-      shapeClass: smBox.h > smBox.w * 1.6 ? 'vertical/tall' : smBox.w > smBox.h * 1.6 ? 'horizontally-wide' : 'compact',
+      shapeClass: smBox.h > smBox.w * 1.6 ? t('vis.shape2.tall') : smBox.w > smBox.h * 1.6 ? t('vis.shape2.wide') : t('vis.shape2.compact'),
       motionPct: Math.round((blob.area / n) * 100),
     };
     if (model.centroid) {
@@ -710,7 +716,7 @@ export function updateSceneModel(
         const dir = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up');
         if (dir !== lastDirection) {
           lastDirection = dir;
-          events.push(`motion: subject ${dir} (${subject.shapeClass})`);
+          events.push(`${t('vis.event.motion')} ${dirLabel(dir)} (${subject.shapeClass})`);
           if (events.length > 6) events.shift();
         }
       }
@@ -720,8 +726,8 @@ export function updateSceneModel(
   }
 
   const status = !subject
-    ? 'Scene is calm — no obvious motion'
-    : `In foreground: ${subject.shapeClass} (aspect ${subject.aspect}, fullness %${subject.extentPct}), direction ${lastDirection}, vigor ${vigor}`;
+    ? t('vis.status.calm')
+    : t('vis.status.foreground', { shape: subject.shapeClass, aspect: subject.aspect, fullness: subject.extentPct, dir: dirLabel(lastDirection), vigor: vigorLabel(vigor) });
 
   return { fgMean: newMean, fgVar: newVar, fgMask: maskBg, diffMask: maskDiff, prevLuma: cur, smBox, subject, centroid, vigor, lastDirection, events, status };
 }
