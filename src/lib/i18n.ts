@@ -82,6 +82,9 @@ const en = {
   'chat.financialSavings': 'FINANCIAL SAVINGS',
   'chat.codeChange': 'CODE CHANGE ANALYSIS',
   'chat.inspectChanges': 'Inspect Structural Changes Visually →',
+  'code.copy': 'Copy code',
+  'code.copied': '✓ Copied!',
+  'code.highlighting': 'Highlighting',
   'chat.tokens': '{n} tokens',
   'chat.tokensImageEst': '≈{n} tokens (image est.)',
   'chat.tokensEst': '≈{n} tokens',
@@ -124,6 +127,28 @@ const en = {
   'toast.chatDeletedMsg': 'The chat session has been permanently removed.',
   'toast.chatRenamed': 'Chat Renamed',
   'toast.chatRenamedMsg': 'The chat title was updated successfully.',
+
+  // ── Camera panel ──────────────────────────────────────────────────────
+  'cam.title': 'Camera — live vision pipeline',
+  'cam.close': 'Close',
+  'cam.sensitivity': 'Sensitivity',
+  'cam.minBlob': 'Min blob',
+  'cam.liveMotion': 'LIVE MOTION (every frame)',
+  'cam.light': 'LIGHT',
+  'cam.scope': 'SCOPE',
+  'cam.scopeTitle': 'Scope: motion region as a red heat map (scaled)',
+  'cam.waiting': 'Waiting for camera…',
+  'cam.liveScene': 'LIVE SCENE (processed every frame, LLM-ready, few tokens)',
+  'cam.measured': 'Measured facts (not guesses)',
+  'cam.noSubject': 'subject: no region of interest (no sizeable movement detected in the frame)',
+  'cam.consistency': 'consistency:',
+  'cam.getInterpretation': 'Get AI interpretation',
+
+  // ── Auth / local profile ──────────────────────────────────────────────
+  'auth.subtitle': 'This app runs entirely on your device. No account, no password, no server — a local profile just personalizes the interface.',
+  'auth.nameLabel': 'DISPLAY NAME (OPTIONAL)',
+  'auth.emailLabel': 'EMAIL (OPTIONAL)',
+  'auth.continue': 'Continue',
 
   // ── IDE / Project ─────────────────────────────────────────────────────
   'ide.explorer': 'EXPLORER',
@@ -256,6 +281,9 @@ const tr: Record<TranslationKey, string> = {
   'chat.financialSavings': 'MALİ TASARRUF',
   'chat.codeChange': 'KOD DEĞİŞİKLİĞİ ANALİZİ',
   'chat.inspectChanges': 'Yapısal değişiklikleri görsel incele →',
+  'code.copy': 'Kodu kopyala',
+  'code.copied': '✓ Kopyalandı!',
+  'code.highlighting': 'Renklendiriliyor',
   'chat.tokens': '{n} token',
   'chat.tokensImageEst': '≈{n} token (görsel tahmini)',
   'chat.tokensEst': '≈{n} token',
@@ -298,6 +326,28 @@ const tr: Record<TranslationKey, string> = {
   'toast.chatDeletedMsg': 'Sohbet oturumu kalıcı olarak kaldırıldı.',
   'toast.chatRenamed': 'Sohbet yeniden adlandırıldı',
   'toast.chatRenamedMsg': 'Sohbet başlığı güncellendi.',
+
+  // ── Camera panel ──────────────────────────────────────────────────────
+  'cam.title': 'Kamera — canlı görüş hattı',
+  'cam.close': 'Kapat',
+  'cam.sensitivity': 'Hassasiyet',
+  'cam.minBlob': 'En küçük bölge',
+  'cam.liveMotion': 'CANLI HAREKET (her kare)',
+  'cam.light': 'IŞIK',
+  'cam.scope': 'KAPSAM',
+  'cam.scopeTitle': 'Kapsam: hareket bölgesi kırmızı ısı haritası olarak (ölçekli)',
+  'cam.waiting': 'Kamera bekleniyor…',
+  'cam.liveScene': 'CANLI SAHNE (her kare işlenir, LLM’e hazır, az token)',
+  'cam.measured': 'Ölçülen gerçekler (tahmin değil)',
+  'cam.noSubject': 'özne: ilgi bölgesi yok (karede kayda değer hareket algılanmadı)',
+  'cam.consistency': 'tutarlılık:',
+  'cam.getInterpretation': 'AI yorumu al',
+
+  // ── Auth / local profile ──────────────────────────────────────────────
+  'auth.subtitle': 'Bu uygulama tamamen cihazınızda çalışır. Hesap yok, parola yok, sunucu yok — yerel profil yalnızca arayüzü kişiselleştirir.',
+  'auth.nameLabel': 'GÖRÜNEN AD (İSTEĞE BAĞLI)',
+  'auth.emailLabel': 'E-POSTA (İSTEĞE BAĞLI)',
+  'auth.continue': 'Devam et',
 
   // ── IDE / Project ─────────────────────────────────────────────────────
   'ide.explorer': 'GEZGİN',

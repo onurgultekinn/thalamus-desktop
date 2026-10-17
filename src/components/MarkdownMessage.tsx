@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { SyntaxHighlighter, vscDarkPlus } from '../lib/codeHighlight';
 import { useToast } from './Toast';
+import { useT } from '../lib/i18n';
 
 interface MarkdownMessageProps {
   content: string;
@@ -55,7 +56,7 @@ const buildHighlighted = (lang: string, code: string) => (
     lineNumberStyle={{
       minWidth: '28px',
       paddingRight: '12px',
-      color: 'rgb(var(--tlm-fg-dim))',
+      color: 'rgb(var(--tlm-line))',
       textAlign: 'right',
       userSelect: 'none',
       display: 'inline-block',
@@ -63,7 +64,7 @@ const buildHighlighted = (lang: string, code: string) => (
     customStyle={{
       margin: 0,
       padding: '0.75rem 0.85rem 0.75rem 0.5rem',
-      background: 'rgb(var(--tlm-ink))',
+      background: 'rgb(var(--tlm-bg))',
       fontFamily: "'Cascadia Code', 'Ubuntu Sans Mono', Consolas, monospace",
       fontSize: '0.8rem',
       lineHeight: '1.6'
@@ -74,6 +75,7 @@ const buildHighlighted = (lang: string, code: string) => (
 );
 
 const CodeBlock: React.FC<{ lang: string; code: string }> = React.memo(({ lang, code }) => {
+  const t = useT();
   const key = cacheKey(lang, code);
   const [node, setNode] = React.useState<React.ReactNode>(
     () => (lang ? cacheGet(key) ?? null : null)
@@ -133,7 +135,7 @@ const CodeBlock: React.FC<{ lang: string; code: string }> = React.memo(({ lang, 
   }, [key, lang, code]);
 
   return (
-    <div ref={boxRef} className="relative" style={{ background: 'rgb(var(--tlm-ink))' }}>
+    <div ref={boxRef} className="relative" style={{ background: 'rgb(var(--tlm-bg))' }}>
       {!lang ? (
         /* Dil etiketsiz ``` blokları inline pikap stiline düşmemeli; düz
            monospace blok olarak kalır (satır sonu korunur). */
@@ -144,7 +146,7 @@ const CodeBlock: React.FC<{ lang: string; code: string }> = React.memo(({ lang, 
         node
       ) : (
         <div className="code-skeleton" style={{ height: skeletonHeight }}>
-          {slow && <span className="code-skeleton-label">Highlighting</span>}
+          {slow && <span className="code-skeleton-label">{t('code.highlighting')}</span>}
         </div>
       )}
     </div>
@@ -159,6 +161,7 @@ const CodeBlock: React.FC<{ lang: string; code: string }> = React.memo(({ lang, 
 export const MarkdownMessage: React.FC<MarkdownMessageProps> = React.memo(({ content }) => {
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
   const { showToast } = useToast();
+  const t = useT();
 
   const handleCopy = async (code: string) => {
     // Pano reddederse "Copied!" demeyiz: başarısızlık dürüstçe bildirilir.
@@ -166,7 +169,7 @@ export const MarkdownMessage: React.FC<MarkdownMessageProps> = React.memo(({ con
       await navigator.clipboard.writeText(code);
     } catch {
       setCopiedCode(null);
-      showToast('Copy Failed', 'Clipboard is not available — select the code and copy manually (Ctrl+C).', 'error', undefined, '[500] clipboard unavailable');
+      showToast(t('chat.copyFailed'), t('chat.copyFailedMsg'), 'error', undefined, '[500] clipboard unavailable');
       return;
     }
     setCopiedCode(code);
@@ -176,8 +179,8 @@ export const MarkdownMessage: React.FC<MarkdownMessageProps> = React.memo(({ con
   // Kopyalama başlıklı, dil rozetli blok çerçevesi — hem Prism dilinciği hem
   // dilsiz ``` blokları aynı çerçeveye oturur.
   const renderCodeBlock = (lang: string, codeString: string) => (
-    <div className="my-2 rounded-md overflow-hidden border border-zinc-800 bg-ink relative text-left">
-      <div className="flex items-center justify-between px-3 py-1.5 bg-panel border-b border-zinc-800 font-mono text-[11px]">
+    <div className="my-2 rounded-md overflow-hidden border border-zinc-800 bg-[#100F0F] relative text-left">
+      <div className="flex items-center justify-between px-3 py-1.5 bg-[#1C1B1A] border-b border-zinc-800 font-mono text-[11px]">
         <span className="text-cyan-400 font-semibold">{lang || 'text'}</span>
         <button
           type="button"
@@ -185,13 +188,13 @@ export const MarkdownMessage: React.FC<MarkdownMessageProps> = React.memo(({ con
           className="inner-code-copy-btn flex items-center gap-1 text-zinc-400 hover:text-zinc-200 transition-colors"
         >
           {copiedCode === codeString ? (
-            <span className="text-emerald-400">✓ Copied!</span>
+            <span className="text-emerald-400">{t('code.copied')}</span>
           ) : (
             <span className="flex items-center gap-1">
               <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
               </svg>
-              Copy code
+              {t('code.copy')}
             </span>
           )}
         </button>
@@ -248,7 +251,7 @@ export const MarkdownMessage: React.FC<MarkdownMessageProps> = React.memo(({ con
             );
           },
           thead({ children }) {
-            return <thead className="bg-panel">{children}</thead>;
+            return <thead className="bg-[#1C1B1A]">{children}</thead>;
           },
           th({ children }) {
             return <th className="border-b border-zinc-800 px-2.5 py-1.5 text-left font-semibold text-zinc-100">{children}</th>;
