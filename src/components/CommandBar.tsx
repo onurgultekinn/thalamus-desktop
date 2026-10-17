@@ -25,6 +25,8 @@ interface CommandBarProps {
   setInput: (value: string) => void;
   setTargetModel: (model: string) => void;
   targetModel: string;
+  /** Gerçekte yanıtlayacak sağlayıcı · model (App çözer); boşsa anahtar yok. */
+  activeModelLabel?: string;
   images: AttachedImage[];
   setImages: React.Dispatch<React.SetStateAction<AttachedImage[]>>;
 }
@@ -37,6 +39,7 @@ export function CommandBar({
   setInput,
   setTargetModel,
   targetModel,
+  activeModelLabel,
   images,
   setImages
 }: CommandBarProps) {
@@ -201,7 +204,7 @@ export function CommandBar({
                   title={imageModeHint(m)}
                   className={`flex-1 rounded-md border px-1.5 py-1 text-[11px] transition-colors cursor-pointer ${
                     imageMode === m
-                      ? 'border-gold/50 bg-gold/10 text-gold'
+                      ? 'border-[#dcb67a]/50 bg-[#dcb67a]/10 text-[#dcb67a]'
                       : 'border-obsidian-border text-obsidian-muted hover:text-obsidian-text'
                   }`}
                 >
@@ -222,12 +225,12 @@ export function CommandBar({
             onDrop={handleDrop}
             className={`border border-dashed rounded-md p-3 text-center flex flex-col items-center gap-1 cursor-pointer transition-colors ${
               isDragging
-                ? 'border-gold/60 bg-gold/10'
+                ? 'border-[#dcb67a]/60 bg-[#dcb67a]/10'
                 : 'border-obsidian-border bg-obsidian-bg/50 hover:border-obsidian-muted/40'
             }`}
           >
-            <UploadCloud size={14} className={isDragging ? 'text-gold' : 'text-obsidian-muted'} />
-            <span className={`text-[11px] ${isDragging ? 'text-gold' : 'text-obsidian-muted'}`}>
+            <UploadCloud size={14} className={isDragging ? 'text-[#dcb67a]' : 'text-obsidian-muted'} />
+            <span className={`text-[11px] ${isDragging ? 'text-[#dcb67a]' : 'text-obsidian-muted'}`}>
               {isDragging ? 'Release to attach' : 'Upload or drag dataset'}
             </span>
           </div>
@@ -243,7 +246,7 @@ export function CommandBar({
                       title={`${img.name} · ${img.width}×${img.height} · detail:${img.detail} · ${img.reason}${img.visionDiag ? ' · ' + img.visionDiag : ''}\n${img.options.map((o) => `${o.label}: ${Math.round(o.ratio * 100)}% · ≈${o.tokens} tok · ${o.retention}% detail`).join('\n')}`}
                       className="h-12 w-12 rounded-md object-cover border border-obsidian-border"
                     />
-                    <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 rounded bg-obsidian-panel/90 px-1 text-[8.5px] font-mono text-gold whitespace-nowrap">
+                    <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 rounded bg-obsidian-panel/90 px-1 text-[8.5px] font-mono text-[#dcb67a] whitespace-nowrap">
                       ≈{img.estTokens} · %{img.retention}
                     </span>
                     <button
@@ -265,7 +268,7 @@ export function CommandBar({
                   <span className="text-[11px] text-obsidian-muted/70 truncate">{last.name} — mode comparison</span>
                   {last.options.map((o) => (
                     <div key={o.mode} className="flex items-center justify-between gap-2 text-[11px]">
-                      <span className={o.mode === last.chosenMode ? 'text-gold' : 'text-obsidian-muted'}>
+                      <span className={o.mode === last.chosenMode ? 'text-[#dcb67a]' : 'text-obsidian-muted'}>
                         {o.mode === last.chosenMode ? '●' : '○'} {o.label}
                         {o.mode === 'economy' && last.textLike && (
                           <span title="This image looks like text/UI — low detail may hurt legibility"> ⚠</span>
@@ -295,7 +298,7 @@ export function CommandBar({
       )}
 
       {/* Main Command Input Box */}
-      <form onSubmit={onSend} className="w-full bg-obsidian-panel border border-obsidian-border rounded-xl flex flex-col p-3 gap-2 shadow-2xl transition-all duration-200 focus-within:border-gold/40">
+      <form onSubmit={onSend} className="w-full bg-obsidian-panel border border-obsidian-border rounded-xl flex flex-col p-3 gap-2 shadow-2xl transition-all duration-200 focus-within:border-[#dcb67a]/40">
         <textarea
           ref={textareaRef}
           value={input}
@@ -321,18 +324,24 @@ export function CommandBar({
               <Paperclip size={12} />
               <span>Attach</span>
               {images.length > 0 && (
-                <span className="text-[11px] text-gold">{images.length} image{images.length > 1 ? 's' : ''}</span>
+                <span className="text-[11px] text-[#dcb67a]">{images.length} image{images.length > 1 ? 's' : ''}</span>
               )}
             </button>
           </div>
 
           <div className="flex items-center gap-2">
-            {/* D1/D8: bu secici bir MALIYET TAHMIN referansidir. Metin
-                sayfagi model CAGIRMAZ (yerel sikistirma motoru); ≈ ve title
-                ile bu durustce belirtilir. */}
+            {/* D1/D8: bu secici bir MALIYET TAHMIN referansidir; metin sohbeti
+                AKTIF SAGLAYICININ modelini cagirir (faturalandirilir). Eski ipucu
+                "hic model API cagrilmaz" diyordu — YANLISTI (kullanici yerel/
+                ucretsiz sanip faturalandirilabiliyordu). Gercek model adi
+                App'ten 'activeModelLabel' olarak gelir. */}
             <button
               type="button"
-              title="Cost-estimate reference only. Text chat runs on the local compression engine and calls no model API; this choice only changes the ≈ cost figures."
+              title={
+                activeModelLabel
+                  ? `Cost-estimate reference only. Replies are generated by your active provider (${activeModelLabel}) and billed by it; this menu only changes the ≈ cost figures.`
+                  : 'Cost-estimate reference only. No provider key is set yet — chat cannot call a model until you add one in Settings → Providers.'
+              }
               onClick={() => {
                 setIsModelMenuOpen(!isModelMenuOpen);
                 setIsFileMenuOpen(false);
@@ -351,7 +360,7 @@ export function CommandBar({
               <button
                 type="button"
                 onClick={onStop}
-                className="flex items-center justify-center w-6 h-6 bg-danger hover:bg-danger-soft text-white rounded-md cursor-pointer transition-all"
+                className="flex items-center justify-center w-6 h-6 bg-[#D14D41] hover:bg-[#E0685C] text-white rounded-md cursor-pointer transition-all"
                 title="Stop request"
               >
                 <Square size={9} strokeWidth={0} fill="currentColor" />

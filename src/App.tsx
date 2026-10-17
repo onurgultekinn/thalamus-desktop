@@ -58,6 +58,28 @@ export default function App() {
   const [targetModel, setTargetModel] = useState<string>(() => {
     return localStorage.getItem('tlm_default_model') || DEFAULT_MODEL_NAME;
   });
+  // Gerçekte yanıtlayacak sağlayıcı · model; composer'ın dürüst ipucu için.
+  // Ayarlar değişince (anahtar kaydı/sağlayıcı seçimi) yeniden çözülür.
+  const [activeModelLabel, setActiveModelLabel] = useState<string>('');
+  useEffect(() => {
+    let cancelled = false;
+    const resolve = async () => {
+      try {
+        const p = await getActiveProvider();
+        if (!cancelled) setActiveModelLabel(p ? `${p.name} · ${p.model}` : '');
+      } catch {
+        if (!cancelled) setActiveModelLabel('');
+      }
+    };
+    void resolve();
+    window.addEventListener('thalamus_config_changed', resolve);
+    window.addEventListener('storage', resolve);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('thalamus_config_changed', resolve);
+      window.removeEventListener('storage', resolve);
+    };
+  }, []);
   const [input, setInput] = useState<string>('');
 
   /**
@@ -778,6 +800,7 @@ export default function App() {
                     localStorage.setItem('tlm_default_model', m);
                   }}
                   targetModel={targetModel}
+                  activeModelLabel={activeModelLabel}
                   images={pendingImages}
                   setImages={setPendingImages}
                 />
@@ -830,16 +853,16 @@ export default function App() {
       
       {showOnboarding && (
         <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4 select-none font-sans">
-          <div className="w-full max-w-md bg-panel border border-line rounded-xl shadow-2xl p-6 flex flex-col gap-4 text-xs animate-in fade-in zoom-in-95 duration-150">
+          <div className="w-full max-w-md bg-[#1C1B1A] border border-[#34332F] rounded-xl shadow-2xl p-6 flex flex-col gap-4 text-xs animate-in fade-in zoom-in-95 duration-150">
             <div className="flex flex-col gap-1.5">
-              <h2 className="text-sm font-semibold text-fg tracking-tight">Live Pricing & Update Permission</h2>
-              <p className="text-fg-muted leading-relaxed text-[11.5px]">
+              <h2 className="text-sm font-semibold text-[#F2F0E5] tracking-tight">Live Pricing & Update Permission</h2>
+              <p className="text-[#A8A49E] leading-relaxed text-[11.5px]">
                 Thalamus fetches the latest AI model prices live from the public registry (GitHub). Token counts still come from the local engine.
               </p>
             </div>
             
-            <div className="p-3 bg-ink/60 border border-line rounded-lg text-fg-muted leading-relaxed text-[11px]">
-              <strong className="text-fg-soft block mb-1">Effects of your choice:</strong>
+            <div className="p-3 bg-[#100F0F]/60 border border-[#34332F] rounded-lg text-[#A8A49E] leading-relaxed text-[11px]">
+              <strong className="text-[#CECDC3] block mb-1">Effects of your choice:</strong>
               • <strong>Live Updates (Yes):</strong> Always view costs and dollar-based savings updated in real time.<br/>
               • <strong>Stay Offline (No):</strong> Pricing indicators are hidden, running local offline token estimations only.
             </div>
@@ -852,7 +875,7 @@ export default function App() {
                   setOnlinePricing(false);
                   setShowOnboarding(false);
                 }}
-                className="px-3.5 py-2 rounded-md border border-line hover:bg-surface text-fg-soft font-medium transition-colors cursor-pointer"
+                className="px-3.5 py-2 rounded-md border border-[#34332F] hover:bg-[#282726] text-[#CECDC3] font-medium transition-colors cursor-pointer"
               >
                 No, Stay Offline
               </button>
@@ -863,7 +886,7 @@ export default function App() {
                   setOnlinePricing(true);
                   setShowOnboarding(false);
                 }}
-                className="px-3.5 py-2 rounded-md bg-aqua hover:bg-aqua-soft text-ink font-semibold shadow transition-colors cursor-pointer"
+                className="px-3.5 py-2 rounded-md bg-[#3AA99F] hover:bg-[#45B8AD] text-[#100F0F] font-semibold shadow transition-colors cursor-pointer"
               >
                 Yes, Live Update (Recommended)
               </button>

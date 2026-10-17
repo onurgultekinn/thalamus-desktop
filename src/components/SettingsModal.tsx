@@ -36,8 +36,8 @@ function Row({
   return (
     <div className="flex items-center justify-between gap-6 py-3.5">
       <div className="flex min-w-0 flex-col gap-0.5">
-        <span className="text-[12.5px] text-fg-soft">{label}</span>
-        {hint && <span className="text-[11px] leading-snug text-fg-faint">{hint}</span>}
+        <span className="text-[12.5px] text-[#CECDC3]">{label}</span>
+        {hint && <span className="text-[11px] leading-snug text-[#87857F]">{hint}</span>}
       </div>
       <div className="flex flex-shrink-0 items-center">{control}</div>
     </div>
@@ -52,7 +52,7 @@ function Switch({ checked, onChange }: { checked: boolean; onChange: (v: boolean
       aria-checked={checked}
       onClick={() => onChange(!checked)}
       className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors duration-200 ${
-        checked ? 'bg-aqua' : 'bg-white/15'
+        checked ? 'bg-[#3AA99F]' : 'bg-white/15'
       }`}
     >
       <span
@@ -65,10 +65,10 @@ function Switch({ checked, onChange }: { checked: boolean; onChange: (v: boolean
 }
 
 const inputCls =
-  'w-full rounded-md border border-white/[0.08] bg-white/[0.03] px-3 py-2 font-mono text-[12.5px] text-fg placeholder-white/20 transition-colors focus:border-aqua/60 focus:outline-none';
+  'w-full rounded-md border border-white/[0.08] bg-white/[0.03] px-3 py-2 font-mono text-[12.5px] text-[#F2F0E5] placeholder-white/20 transition-colors focus:border-[#3AA99F]/60 focus:outline-none';
 const selectCls =
-  'rounded-md border border-white/[0.08] bg-white/[0.03] px-2.5 py-2 font-mono text-[12px] text-fg focus:outline-none cursor-pointer';
-const labelCls = 'text-[11.5px] text-fg-faint';
+  'rounded-md border border-white/[0.08] bg-white/[0.03] px-2.5 py-2 font-mono text-[12px] text-[#F2F0E5] focus:outline-none cursor-pointer';
+const labelCls = 'text-[11.5px] text-[#87857F]';
 
 const SECTIONS: { id: SettingsTab; label: string }[] = [
   { id: 'profile',    label: 'Profile' },
@@ -219,7 +219,10 @@ export function SettingsModal({
   if (!isOpen) return null;
 
   const p = API_PROVIDERS.find(x => x.id === activeProvider) || API_PROVIDERS[0];
-  const configuredCount = API_PROVIDERS.filter(x => !!(keys[x.id] || '').trim()).length;
+  // Yalnız KULLANILABILIR sağlayıcılar sayılır: "coming soon" (ör. Anthropic)
+  // listelenir ama anahtarı olsa bile kullanılamaz — sayıma katmak yanıltıcıydı.
+  const availableProviders = API_PROVIDERS.filter(x => x.available !== false);
+  const configuredCount = availableProviders.filter(x => !!(keys[x.id] || '').trim()).length;
 
   async function handleAvatarPick(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -357,10 +360,10 @@ export function SettingsModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
       <div className="absolute inset-0" onClick={requestClose} />
 
-      <div className="relative flex h-[560px] w-[680px] max-w-[94vw] overflow-hidden rounded-lg border border-white/[0.08] bg-ink shadow-2xl font-sans text-xs">
+      <div className="relative flex h-[560px] w-[680px] max-w-[94vw] overflow-hidden rounded-lg border border-white/[0.08] bg-[#100F0F] shadow-2xl font-sans text-xs">
 
         {/* left: section list */}
-        <aside className="flex w-[168px] flex-shrink-0 flex-col border-r border-white/[0.06] bg-ink p-2">
+        <aside className="flex w-[168px] flex-shrink-0 flex-col border-r border-white/[0.06] bg-[#100F0F] p-2">
           {SECTIONS.map(s => (
             <button
               key={s.id}
@@ -368,8 +371,8 @@ export function SettingsModal({
               onClick={() => setActiveSection(s.id)}
               className={`rounded-md px-2.5 py-1.5 text-left text-[12.5px] transition-colors cursor-pointer ${
                 activeSection === s.id
-                  ? 'bg-white/[0.06] text-fg'
-                  : 'text-fg-faint hover:bg-white/[0.03] hover:text-fg-soft'
+                  ? 'bg-white/[0.06] text-[#F2F0E5]'
+                  : 'text-[#87857F] hover:bg-white/[0.03] hover:text-[#CECDC3]'
               }`}
             >
               {s.label}
@@ -380,12 +383,12 @@ export function SettingsModal({
         {/* right: content */}
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="flex flex-shrink-0 items-center justify-between px-6 pb-3 pt-5">
-            <span className="text-[14px] font-semibold tracking-tight text-fg">{section.label}</span>
+            <span className="text-[14px] font-semibold tracking-tight text-[#F2F0E5]">{section.label}</span>
             <button
               type="button"
               onClick={requestClose}
               aria-label="Close settings"
-              className="flex h-6 w-6 items-center justify-center rounded text-fg-dim transition-colors hover:bg-white/[0.06] hover:text-fg-soft cursor-pointer"
+              className="flex h-6 w-6 items-center justify-center rounded text-[#575654] transition-colors hover:bg-white/[0.06] hover:text-[#CECDC3] cursor-pointer"
             >
               <X size={14} />
             </button>
@@ -395,13 +398,13 @@ export function SettingsModal({
             {/* ── PROFILE ── */}
             {activeSection === 'profile' && (
               !user ? (
-                <p className="text-[11.5px] leading-relaxed text-fg-faint">
+                <p className="text-[11.5px] leading-relaxed text-[#87857F]">
                   Sign in with a local profile to edit your name and photo here.
                 </p>
               ) : (
                 <div className="flex flex-col gap-5">
                   <div className="flex items-center gap-4">
-                    <div className="flex h-16 w-16 flex-shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/[0.08] bg-white/[0.03] text-fg-faint">
+                    <div className="flex h-16 w-16 flex-shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/[0.08] bg-white/[0.03] text-[#87857F]">
                       {avatar ? (
                         <img src={avatar} alt="" className="h-full w-full object-cover" />
                       ) : (
@@ -410,7 +413,7 @@ export function SettingsModal({
                     </div>
                     <div className="flex flex-col gap-1.5">
                       <div className="flex items-center gap-2">
-                        <label className="flex cursor-pointer items-center gap-1.5 rounded-md border border-white/[0.08] px-3 py-1.5 text-[11.5px] text-fg-soft transition-colors hover:border-white/[0.14]">
+                        <label className="flex cursor-pointer items-center gap-1.5 rounded-md border border-white/[0.08] px-3 py-1.5 text-[11.5px] text-[#CECDC3] transition-colors hover:border-white/[0.14]">
                           <Upload size={12} />
                           {avatar ? 'Change photo' : 'Upload photo'}
                           <input type="file" accept="image/*" className="hidden" onChange={handleAvatarPick} />
@@ -419,14 +422,14 @@ export function SettingsModal({
                           <button
                             type="button"
                             onClick={() => setAvatar('')}
-                            className="flex cursor-pointer items-center gap-1.5 rounded-md border border-white/[0.08] px-3 py-1.5 text-[11.5px] text-fg-faint transition-colors hover:border-rose-600/50 hover:text-rose-300"
+                            className="flex cursor-pointer items-center gap-1.5 rounded-md border border-white/[0.08] px-3 py-1.5 text-[11.5px] text-[#87857F] transition-colors hover:border-rose-600/50 hover:text-rose-300"
                           >
                             <Trash2 size={12} />
                             Remove
                           </button>
                         )}
                       </div>
-                      <span className="text-[11px] text-fg-faint">Square JPG or PNG. Stored locally on this device.</span>
+                      <span className="text-[11px] text-[#87857F]">Square JPG or PNG. Stored locally on this device.</span>
                     </div>
                   </div>
 
@@ -441,7 +444,7 @@ export function SettingsModal({
                       className={inputCls}
                       spellCheck={false}
                     />
-                    <span className="text-[11px] text-fg-faint">Shown in the sidebar and on your messages.</span>
+                    <span className="text-[11px] text-[#87857F]">Shown in the sidebar and on your messages.</span>
                   </div>
 
                   <div className="flex flex-col gap-1.5">
@@ -453,7 +456,7 @@ export function SettingsModal({
                       readOnly
                       className={`${inputCls} cursor-not-allowed opacity-60`}
                     />
-                    <span className="text-[11px] text-fg-faint">Part of your local profile; it cannot be changed here.</span>
+                    <span className="text-[11px] text-[#87857F]">Part of your local profile; it cannot be changed here.</span>
                   </div>
                 </div>
               )
@@ -489,8 +492,8 @@ export function SettingsModal({
                       {p.name} is listed but not wired yet: the local proxy only speaks the OpenAI chat/completions format. Choose an OpenAI-compatible provider until then.
                     </p>
                   )}
-                  <p className="text-[11px] text-fg-faint">
-                    {configuredCount} of {API_PROVIDERS.length} have a key saved. Keys are stored in the OS credential vault — never in plain text.
+                  <p className="text-[11px] text-[#87857F]">
+                    {configuredCount} of {availableProviders.length} providers have a key saved. Keys are stored in the OS credential vault — never in plain text.
                   </p>
                 </div>
 
@@ -526,7 +529,7 @@ export function SettingsModal({
                       type="button"
                       onClick={() => setVisibleProvider(visibleProvider === p.id ? null : p.id)}
                       aria-label={visibleProvider === p.id ? 'Hide API key' : 'Show API key'}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-fg-dim transition-colors hover:text-fg-soft cursor-pointer"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-[#575654] transition-colors hover:text-[#CECDC3] cursor-pointer"
                       tabIndex={-1}
                     >
                       {visibleProvider === p.id ? <EyeOff size={13} /> : <Eye size={13} />}
@@ -537,7 +540,7 @@ export function SettingsModal({
                       href={p.docsUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="self-start text-[11.5px] text-aqua hover:underline"
+                      className="self-start text-[11.5px] text-[#3AA99F] hover:underline"
                     >
                       Get an API key →
                     </a>
@@ -562,8 +565,8 @@ export function SettingsModal({
                         }}
                         className={`rounded-md border px-3 py-1.5 text-[11.5px] transition-colors cursor-pointer ${
                           theme === t
-                            ? 'border-white/[0.12] bg-white/[0.07] text-fg'
-                            : 'border-white/[0.07] bg-transparent text-fg-faint hover:text-fg-soft'
+                            ? 'border-white/[0.12] bg-white/[0.07] text-[#F2F0E5]'
+                            : 'border-white/[0.07] bg-transparent text-[#87857F] hover:text-[#CECDC3]'
                         }`}
                       >
                         {t === 'dark' ? 'Obsidian' : 'Nord Red'}
@@ -603,7 +606,7 @@ export function SettingsModal({
                     placeholder="C:/projects/my-app"
                     className={inputCls}
                   />
-                  <p className="text-[11px] text-fg-faint">Folder shown in the explorer and editor.</p>
+                  <p className="text-[11px] text-[#87857F]">Folder shown in the explorer and editor.</p>
                 </div>
 
                 <div className="divide-y divide-white/[0.05]">
@@ -634,8 +637,8 @@ export function SettingsModal({
                             onClick={() => setStartView(v)}
                             className={`rounded-md border px-3 py-1.5 text-[11.5px] transition-colors cursor-pointer ${
                               startView === v
-                                ? 'border-white/[0.12] bg-white/[0.07] text-fg'
-                                : 'border-white/[0.07] bg-transparent text-fg-faint hover:text-fg-soft'
+                                ? 'border-white/[0.12] bg-white/[0.07] text-[#F2F0E5]'
+                                : 'border-white/[0.07] bg-transparent text-[#87857F] hover:text-[#CECDC3]'
                             }`}
                           >
                             {v === 'chat' ? 'Chat' : 'Project'}
@@ -653,8 +656,8 @@ export function SettingsModal({
 
                 <div className="flex items-center justify-between border-t border-white/[0.05] pt-4">
                   <div className="flex flex-col gap-0.5">
-                    <span className="text-[12.5px] text-fg-soft">Reset settings</span>
-                    <span className="text-[11px] leading-snug text-fg-faint">
+                    <span className="text-[12.5px] text-[#CECDC3]">Reset settings</span>
+                    <span className="text-[11px] leading-snug text-[#87857F]">
                       Clears saved keys and preferences. Chats and files are kept.
                     </span>
                   </div>
@@ -671,7 +674,7 @@ export function SettingsModal({
                     className={`flex-shrink-0 rounded-md border px-3 py-1.5 text-[11.5px] transition-colors cursor-pointer ${
                       resetArmed
                         ? 'border-rose-600/60 bg-rose-600/15 text-rose-300'
-                        : 'border-white/[0.08] text-fg-faint hover:border-white/[0.14] hover:text-fg-soft'
+                        : 'border-white/[0.08] text-[#87857F] hover:border-white/[0.14] hover:text-[#CECDC3]'
                     }`}
                   >
                     {resetArmed ? 'Confirm reset' : 'Reset'}
@@ -685,7 +688,7 @@ export function SettingsModal({
             <button
               type="button"
               onClick={requestClose}
-              className="rounded-md border border-white/[0.08] px-3.5 py-1.5 text-[11.5px] text-fg-faint transition-colors hover:border-white/[0.14] hover:text-fg-soft cursor-pointer"
+              className="rounded-md border border-white/[0.08] px-3.5 py-1.5 text-[11.5px] text-[#87857F] transition-colors hover:border-white/[0.14] hover:text-[#CECDC3] cursor-pointer"
             >
               Cancel
             </button>
@@ -694,7 +697,7 @@ export function SettingsModal({
               onClick={handleSave}
               disabled={!keysLoaded}
               title={keysLoaded ? undefined : 'API keys are still loading from the vault…'}
-              className="flex items-center gap-1.5 rounded-md bg-aqua px-4 py-1.5 text-[11.5px] font-semibold text-ink transition-colors hover:bg-aqua-soft cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              className="flex items-center gap-1.5 rounded-md bg-[#3AA99F] px-4 py-1.5 text-[11.5px] font-semibold text-[#071310] transition-colors hover:bg-[#45B8AD] cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <Save size={12} />
               {keysLoaded ? 'Save' : 'Loading keys…'}
