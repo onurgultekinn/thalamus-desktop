@@ -1,8 +1,9 @@
 import { useEffect, useMemo } from 'react';
-import { FileCode, X, Download } from 'lucide-react';
+import { FileCode, X, Download, PictureInPicture2 } from 'lucide-react';
 import { FileViewer } from '@file-viewer/react';
 import { useT } from '../lib/i18n';
 import { FILE_VIEWER_OPTIONS } from '../lib/fileViewerSetup';
+import { useFloatingPanel, FloatResizeHandle, FLOATING_CHROME } from './floating';
 
 export interface PreviewItem {
   name: string;
@@ -38,6 +39,7 @@ function triggerDownload(name: string, url?: string, buffer?: ArrayBuffer) {
  */
 export function FilePreviewDrawer({ item, onClose }: { item: PreviewItem; onClose: () => void }) {
   const t = useT();
+  const fv = useFloatingPanel('preview', { def: { x: 860, y: 90, w: 560, h: 560 }, min: { w: 320, h: 240 } });
   const canUseViewer = useMemo(() => item.kind !== 'large' && (!!item.url || !!item.buffer), [item]);
 
   // @file-viewer `url` ile çalışır; buffer'dan blob URL üretip geçici olarak kullanırız.
@@ -52,8 +54,18 @@ export function FilePreviewDrawer({ item, onClose }: { item: PreviewItem; onClos
   }, [viewerUrl, item.url]);
 
   return (
-    <div className="fixed top-0 right-0 h-full w-[560px] max-w-[94vw] bg-obsidian-panel border-l border-obsidian-border shadow-2xl z-[60] flex flex-col">
-      <div className="flex items-center justify-between px-3 py-2 border-b border-obsidian-border flex-shrink-0">
+    <div
+      style={fv.floating ? fv.style : undefined}
+      className={`relative bg-obsidian-panel flex flex-col ${
+        fv.floating
+          ? FLOATING_CHROME
+          : 'fixed top-0 right-0 h-full w-[560px] max-w-[94vw] border-l border-obsidian-border shadow-2xl z-[60]'
+      }`}
+    >
+      <div
+        onPointerDown={fv.floating ? fv.onDragStart : undefined}
+        className={`flex items-center justify-between px-3 py-2 border-b border-obsidian-border flex-shrink-0 ${fv.floating ? 'cursor-move' : ''}`}
+      >
         <div className="flex items-center gap-2 min-w-0">
           <FileCode size={14} className="text-obsidian-muted flex-shrink-0" />
           <span className="text-[12px] font-semibold text-obsidian-text truncate" title={item.name}>{item.name}</span>
@@ -67,6 +79,14 @@ export function FilePreviewDrawer({ item, onClose }: { item: PreviewItem; onClos
             title={t('preview.download')}
           >
             <Download size={12} /> {t('preview.download')}
+          </button>
+          <button
+            type="button"
+            onClick={fv.toggle}
+            className={`p-1 rounded cursor-pointer transition-colors ${fv.floating ? 'text-[#4385BE] bg-[#4385BE]/15' : 'text-obsidian-muted hover:text-obsidian-text'}`}
+            title={fv.floating ? t('float.dock') : t('float.undock')}
+          >
+            <PictureInPicture2 size={15} />
           </button>
           <button type="button" onClick={onClose} className="text-obsidian-muted hover:text-obsidian-text cursor-pointer p-1" title={t('common.close')}>
             <X size={15} />
@@ -85,18 +105,24 @@ export function FilePreviewDrawer({ item, onClose }: { item: PreviewItem; onClos
           <div className="p-3"><audio src={item.url} controls className="w-full" /></div>
         ) : item.body !== undefined ? (
           <pre className="p-3 text-[11.5px] leading-relaxed font-mono text-obsidian-text whitespace-pre-wrap break-words">{item.body}</pre>
-        ) : item.kind === 'pdf' && item.url ? (
-          /* Geçici: PDF şimdilik native görüntüleyici (Faz 2'de pdfjs ile
-             metin seçimi + vurgulama için kendi görüntüleyicimize geçecek). */
-          <iframe src={item.url} title={item.name} className="w-full h-full min-h-[70vh] border-0 bg-white" />
         ) : canUseViewer ? (
-          <FileViewer
-            url={viewerUrl}
-            filename={item.name}
-            type={item.mime}
-            options={FILE_VIEWER_OPTIONS}
-            style={{ width: '100%', height: '100%' }}
-          />
+            <FileViewer
+              url={viewerUrl}
+              filename={item.name}
+              type={item.mime}
+              options={{
+                ...FILE_VIEWER_OPTIONS,
+                onDiagnostic: (d: unknown) => {
+                  const w = window as unknown as { __fvDiag?: unknown[] };
+                  (w.__fvDiag = w.__fvDiag || []).push(d);
+                },
+              }}
+              onEvent={(e: unknown) => {
+                const w = window as unknown as { __fvDiag?: unknown[] };
+                (w.__fvDiag = w.__fvDiag || []).push({ event: e });
+              }}
+              style={{ width: '100%', height: '100%' }}
+            />
         ) : (
           <p className="p-4 text-[12px] text-obsidian-muted leading-relaxed">
             {item.kind === 'large' ? t('composer.previewTooLarge') : t('composer.previewBinary')}
