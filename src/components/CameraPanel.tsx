@@ -163,12 +163,12 @@ export function CameraPanel({ onClose, onInterpret }: CameraPanelProps) {
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
-      <div className="w-[680px] max-w-full bg-[#100F0F] border border-white/10 rounded-lg overflow-hidden shadow-2xl flex flex-col">
+      <div className="w-[680px] max-w-full bg-ink border border-white/10 rounded-lg overflow-hidden shadow-2xl flex flex-col">
         <div className="flex items-center justify-between px-3 py-2 border-b border-white/10">
-          <span className="flex items-center gap-2 text-[12px] font-semibold text-[#F2F0E5]">
-            <Camera size={13} className="text-[#3AA99F]" /> Camera — live vision pipeline
+          <span className="flex items-center gap-2 text-[12px] font-semibold text-fg">
+            <Camera size={13} className="text-aqua" /> Camera — live vision pipeline
           </span>
-          <button type="button" onClick={onClose} className="text-[#87857F] hover:text-white cursor-pointer" aria-label="Close">
+          <button type="button" onClick={onClose} className="text-fg-faint hover:text-white cursor-pointer" aria-label="Close">
             <X size={15} />
           </button>
         </div>
@@ -181,34 +181,34 @@ export function CameraPanel({ onClose, onInterpret }: CameraPanelProps) {
         <canvas ref={richCanvasRef} className="hidden" />
         <canvas ref={scopeCanvasRef} className="hidden" />
         <div className="flex items-center gap-4 text-[11px] font-mono">
-          <label className="flex items-center gap-1.5 text-[#87857F]">
+          <label className="flex items-center gap-1.5 text-fg-faint">
             Sensitivity
-            <input type="range" min={0.5} max={3} step={0.1} value={sens} onChange={(e) => setSens(Number(e.target.value))} className="w-24 accent-[#3AA99F]" />
-            <span className="text-[#F2F0E5]">{sens.toFixed(1)}</span>
+            <input type="range" min={0.5} max={3} step={0.1} value={sens} onChange={(e) => setSens(Number(e.target.value))} className="w-24 accent-aqua" />
+            <span className="text-fg">{sens.toFixed(1)}</span>
           </label>
-          <label className="flex items-center gap-1.5 text-[#87857F]">
+          <label className="flex items-center gap-1.5 text-fg-faint">
             Min blob
-            <input type="range" min={2} max={20} step={1} value={minArea} onChange={(e) => setMinArea(Number(e.target.value))} className="w-24 accent-[#3AA99F]" />
-            <span className="text-[#F2F0E5]">{minArea}</span>
+            <input type="range" min={2} max={20} step={1} value={minArea} onChange={(e) => setMinArea(Number(e.target.value))} className="w-24 accent-aqua" />
+            <span className="text-fg">{minArea}</span>
           </label>
         </div>
 
           {/* HIGH FPS live indicators */}
           <div className="flex items-center gap-3 font-mono text-[11px]">
             <div className="flex-1">
-              <div className="flex justify-between text-[#87857F] mb-1"><span>LIVE MOTION (every frame)</span><span>%{Math.round(live.motion)}</span></div>
+              <div className="flex justify-between text-fg-faint mb-1"><span>LIVE MOTION (every frame)</span><span>%{Math.round(live.motion)}</span></div>
               <div className="h-2 bg-white/5 rounded overflow-hidden">
                 <div className="h-full bg-rose-500/80 transition-[width] duration-75" style={{ width: `${Math.min(100, live.motion)}%` }} />
               </div>
             </div>
             <div className="flex-1">
-              <div className="flex justify-between text-[#87857F] mb-1"><span>LIGHT</span><span>%{live.bright}</span></div>
+              <div className="flex justify-between text-fg-faint mb-1"><span>LIGHT</span><span>%{live.bright}</span></div>
               <div className="h-2 bg-white/5 rounded overflow-hidden">
                 <div className={`h-full transition-[width] duration-75 ${live.bright > 70 ? 'bg-amber-400' : live.bright < 20 ? 'bg-blue-600' : 'bg-emerald-500/70'}`} style={{ width: `${Math.min(100, live.bright)}%` }} />
               </div>
             </div>
             <div className="flex-1" title="Scope: motion region as a red heat map (scaled)">
-              <span className="text-[#87857F]">SCOPE</span>
+              <span className="text-fg-faint">SCOPE</span>
             </div>
           </div>
 
@@ -216,13 +216,13 @@ export function CameraPanel({ onClose, onInterpret }: CameraPanelProps) {
           {error ? (
             <div className="text-[11px] text-rose-300 font-mono">{error}</div>
           ) : facts ? (
-            <div className="flex flex-col gap-1 font-mono text-[11px] leading-relaxed text-[#CECDC3]">
-              <div className="flex items-center gap-1.5 text-[#3AA99F]"><ScanLine size={11} /> LIVE SCENE (processed every frame, LLM-ready, few tokens)</div>
-              <div className="text-[#CECDC3]">{sceneStatus}</div>
+            <div className="flex flex-col gap-1 font-mono text-[11px] leading-relaxed text-fg-soft">
+              <div className="flex items-center gap-1.5 text-aqua"><ScanLine size={11} /> LIVE SCENE (processed every frame, LLM-ready, few tokens)</div>
+              <div className="text-fg-soft">{sceneStatus}</div>
               {sceneEvents.length > 0 && (
-                <div className="text-[#87857F]">events: {sceneEvents.slice(-3).join(' · ')}</div>
+                <div className="text-fg-faint">events: {sceneEvents.slice(-3).join(' · ')}</div>
               )}
-              <div className="flex items-center gap-1.5 pt-0.5 text-[#3AA99F]"><ScanLine size={11} /> Measured facts (not guesses)</div>
+              <div className="flex items-center gap-1.5 pt-0.5 text-aqua"><ScanLine size={11} /> Measured facts (not guesses)</div>
               <div>light: {facts.lightClass} (%{facts.bright}) · colors: {facts.colors.map((c) => `${c.hex}%${c.pct}`).join(' ')}</div>
               <div>edge: {facts.edges.dominant} (H{facts.edges.horizontal}/V{facts.edges.vertical}) · texture: {facts.tex.textureClass}</div>
               <div>
@@ -230,10 +230,10 @@ export function CameraPanel({ onClose, onInterpret }: CameraPanelProps) {
                   ? `subject ${facts.subj.box}: ${facts.subj.shapeClass} · aspect ${facts.subj.aspect} · upright:${facts.subj.upright} · motion %${facts.subj.motionPct}`
                   : 'subject: no region of interest (no sizeable movement detected in the frame)'}
               </div>
-              <div className="text-[#A8A49E]">consistency: {selfCheck(facts).join(' · ')}</div>
+              <div className="text-fg-muted">consistency: {selfCheck(facts).join(' · ')}</div>
             </div>
           ) : (
-            <div className="text-[11px] text-[#87857F] font-mono">Waiting for camera…</div>
+            <div className="text-[11px] text-fg-faint font-mono">Waiting for camera…</div>
           )}
 
           <div className="flex items-center justify-end gap-2">
@@ -241,7 +241,7 @@ export function CameraPanel({ onClose, onInterpret }: CameraPanelProps) {
               type="button"
               disabled={!facts}
               onClick={() => facts && onInterpret(interpretPrompt(facts))}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[#205EA6] hover:bg-[#4385BE] text-white text-[11px] font-medium disabled:opacity-30 cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-accent-deep hover:bg-accent text-white text-[11px] font-medium disabled:opacity-30 cursor-pointer"
             >
               <Sparkles size={12} /> Get AI interpretation
             </button>

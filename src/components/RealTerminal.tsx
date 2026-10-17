@@ -23,11 +23,17 @@ export function RealTerminal() {
     if (!terminalRef.current || isInitialized.current) return;
     isInitialized.current = true;
 
+    // Resolve the active theme tokens at mount (xterm needs concrete colors).
+    const themeColor = (name: string, fallback: string) => {
+      const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+      return v ? `rgb(${v})` : fallback;
+    };
+
     const term = new Terminal({
       theme: {
-        background: '#1C1B1A',
-        foreground: '#CECDC3',
-        cursor: '#4385BE',
+        background: themeColor('--tlm-panel', '#1C1B1A'),
+        foreground: themeColor('--tlm-fg-soft', '#CECDC3'),
+        cursor: themeColor('--tlm-accent', '#4385BE'),
         selectionBackground: '#264f78'
       },
       fontFamily: "'Cascadia Code', 'Ubuntu Sans Mono', Consolas, 'Courier New', monospace",
@@ -88,7 +94,7 @@ export function RealTerminal() {
   }, []);
 
   return (
-    <div className="w-full h-full min-h-[150px] bg-[#1C1B1A] p-2 overflow-hidden flex flex-col">
+    <div className="w-full h-full min-h-[150px] bg-panel p-2 overflow-hidden flex flex-col">
       <div ref={terminalRef} className="w-full h-full flex-1" />
     </div>
   );

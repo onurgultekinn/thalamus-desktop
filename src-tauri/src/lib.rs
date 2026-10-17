@@ -584,6 +584,20 @@ fn set_workspace_root(path: String, state: State<'_, AppState>) -> Result<Worksp
     Ok(build_workspace_info(Path::new(&root_str)))
 }
 
+/// Ayarları sıfırlarken backend config dosyasını da siler. Aksi halde
+/// `workspace_root` (%APPDATA%\com.thalamus.desktop) yerinde kalır ve bir
+/// sonraki açılışta "sıfırlandı" denen ayar geri gelir.
+#[tauri::command]
+fn reset_app_config(state: State<'_, AppState>) -> Result<(), String> {
+    let p = config_path();
+    if p.exists() {
+        fs::remove_file(&p).map_err(|e| format!("Config could not be removed: {}", e))?;
+    }
+    let fresh = default_workspace_root();
+    *state.workspace_root.write().unwrap_or_else(|e| e.into_inner()) = fresh;
+    Ok(())
+}
+
 /// C9: son kullanılan projeler listesindeki klasörlerin hâlâ var olup
 /// olmadığını denetlemek için kullanılır (yalnızca var/yok bildirir).
 #[tauri::command]
@@ -878,6 +892,7 @@ pub fn run() {
             set_workspace_root,
             get_workspace_info,
             path_is_dir,
+            reset_app_config,
             thalamus_save_config,
             thalamus_load_config,
             secret_set,

@@ -1,6 +1,5 @@
 interface HeaderProps {
   activePath?: string;
-  targetModel?: string;
 }
 
 export function Header({ 
@@ -11,23 +10,23 @@ export function Header({
   const pathSegments = activePath.split('/').map(segment => segment.trim());
 
   return (
-    <header className="w-full h-10 bg-[#100F0F] border-b border-[#282726] flex items-center justify-between px-4 font-mono text-xs select-none">
+    <header className="w-full h-10 bg-ink border-b border-surface flex items-center justify-between px-4 font-mono text-xs select-none">
       <div className="flex items-center gap-3">
         
         {/* LOGO */}
         <div className="flex items-center gap-2 font-sans flex-shrink-0">
-          <span className="font-bold text-[#F2F0E5] tracking-tight text-[13px]">
+          <span className="font-bold text-fg tracking-tight text-[13px]">
             thalamus
           </span>
-          <span className="bg-[#1C1B1A] text-[#A8A49E] border border-[#282726] text-[11px] px-1.5 py-0.5 rounded font-medium">
+          <span className="bg-panel text-fg-muted border border-surface text-[11px] px-1.5 py-0.5 rounded font-medium">
             studio
           </span>
         </div>
         
-        <div className="w-[1px] h-[14px] bg-[#282726] flex-shrink-0" />
+        <div className="w-[1px] h-[14px] bg-surface flex-shrink-0" />
         
         {/* DYNAMIC PATH */}
-        <div className="flex items-center gap-2 text-[#A8A49E] tracking-tight">
+        <div className="flex items-center gap-2 text-fg-muted tracking-tight">
           {pathSegments.map((segment, index) => {
             const isLast = index === pathSegments.length - 1;
             const isRoot = index === 0;
@@ -37,16 +36,16 @@ export function Header({
                 <span
                   className={
                     isRoot
-                      ? "text-[#575654]" 
+                      ? "text-fg-dim" 
                       : isLast
-                      ? "text-[#F2F0E5] font-medium" 
-                      : "text-[#A8A49E]"
+                      ? "text-fg font-medium" 
+                      : "text-fg-muted"
                   }
                 >
                   {segment}
                 </span>
                 {!isLast && (
-                  <span className="text-[#575654] select-none">/</span>
+                  <span className="text-fg-dim select-none">/</span>
                 )}
               </div>
             );

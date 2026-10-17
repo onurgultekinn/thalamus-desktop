@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { SyntaxHighlighter, vscDarkPlus } from '../lib/codeHighlight';
+import { useToast } from './Toast';
 
 interface MarkdownMessageProps {
   content: string;
@@ -54,7 +55,7 @@ const buildHighlighted = (lang: string, code: string) => (
     lineNumberStyle={{
       minWidth: '28px',
       paddingRight: '12px',
-      color: '#575654',
+      color: 'rgb(var(--tlm-fg-dim))',
       textAlign: 'right',
       userSelect: 'none',
       display: 'inline-block',
@@ -62,7 +63,7 @@ const buildHighlighted = (lang: string, code: string) => (
     customStyle={{
       margin: 0,
       padding: '0.75rem 0.85rem 0.75rem 0.5rem',
-      background: '#100F0F',
+      background: 'rgb(var(--tlm-ink))',
       fontFamily: "'Cascadia Code', 'Ubuntu Sans Mono', Consolas, monospace",
       fontSize: '0.8rem',
       lineHeight: '1.6'
@@ -132,7 +133,7 @@ const CodeBlock: React.FC<{ lang: string; code: string }> = React.memo(({ lang, 
   }, [key, lang, code]);
 
   return (
-    <div ref={boxRef} className="relative" style={{ background: '#100F0F' }}>
+    <div ref={boxRef} className="relative" style={{ background: 'rgb(var(--tlm-ink))' }}>
       {!lang ? (
         /* Dil etiketsiz ``` blokları inline pikap stiline düşmemeli; düz
            monospace blok olarak kalır (satır sonu korunur). */
@@ -157,9 +158,17 @@ const CodeBlock: React.FC<{ lang: string; code: string }> = React.memo(({ lang, 
  */
 export const MarkdownMessage: React.FC<MarkdownMessageProps> = React.memo(({ content }) => {
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
+  const { showToast } = useToast();
 
-  const handleCopy = (code: string) => {
-    navigator.clipboard.writeText(code);
+  const handleCopy = async (code: string) => {
+    // Pano reddederse "Copied!" demeyiz: başarısızlık dürüstçe bildirilir.
+    try {
+      await navigator.clipboard.writeText(code);
+    } catch {
+      setCopiedCode(null);
+      showToast('Copy Failed', 'Clipboard is not available — select the code and copy manually (Ctrl+C).', 'error', undefined, '[500] clipboard unavailable');
+      return;
+    }
     setCopiedCode(code);
     setTimeout(() => setCopiedCode(null), 2000);
   };
@@ -167,8 +176,8 @@ export const MarkdownMessage: React.FC<MarkdownMessageProps> = React.memo(({ con
   // Kopyalama başlıklı, dil rozetli blok çerçevesi — hem Prism dilinciği hem
   // dilsiz ``` blokları aynı çerçeveye oturur.
   const renderCodeBlock = (lang: string, codeString: string) => (
-    <div className="my-2 rounded-md overflow-hidden border border-zinc-800 bg-[#100F0F] relative text-left">
-      <div className="flex items-center justify-between px-3 py-1.5 bg-[#1C1B1A] border-b border-zinc-800 font-mono text-[11px]">
+    <div className="my-2 rounded-md overflow-hidden border border-zinc-800 bg-ink relative text-left">
+      <div className="flex items-center justify-between px-3 py-1.5 bg-panel border-b border-zinc-800 font-mono text-[11px]">
         <span className="text-cyan-400 font-semibold">{lang || 'text'}</span>
         <button
           type="button"
@@ -239,7 +248,7 @@ export const MarkdownMessage: React.FC<MarkdownMessageProps> = React.memo(({ con
             );
           },
           thead({ children }) {
-            return <thead className="bg-[#1C1B1A]">{children}</thead>;
+            return <thead className="bg-panel">{children}</thead>;
           },
           th({ children }) {
             return <th className="border-b border-zinc-800 px-2.5 py-1.5 text-left font-semibold text-zinc-100">{children}</th>;

@@ -34,15 +34,15 @@ class AppErrorBoundary extends React.Component<{ children: React.ReactNode }, { 
             alignItems: 'center',
             justifyContent: 'center',
             gap: 12,
-            background: '#100F0F',
-            color: '#F2F0E5',
+            background: 'rgb(var(--tlm-ink))',
+            color: 'rgb(var(--tlm-fg))',
             fontFamily: 'Segoe UI Variable, system-ui, sans-serif',
             padding: 24,
             textAlign: 'center',
           }}
         >
           <div style={{ fontSize: 13, fontWeight: 600 }}>Thalamus hit a rendering problem</div>
-          <div style={{ fontSize: 11, color: '#A8A49E', maxWidth: 520 }}>
+          <div style={{ fontSize: 11, color: 'rgb(var(--tlm-fg-muted))', maxWidth: 520 }}>
             {String(this.state.error.message || this.state.error)}
           </div>
           <button
@@ -51,7 +51,7 @@ class AppErrorBoundary extends React.Component<{ children: React.ReactNode }, { 
             style={{
               border: '1px solid rgba(255,255,255,0.15)',
               background: 'none',
-              color: '#F2F0E5',
+              color: 'rgb(var(--tlm-fg))',
               padding: '8px 16px',
               borderRadius: 6,
               cursor: 'pointer',

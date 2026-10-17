@@ -429,7 +429,12 @@ pub async fn ai_chat(
     // Blocking client async çalışanda çağrılamaz — spawn_blocking'e taşındı
     // (aksi halde uzun provider gecikmesi tüm HTTP sunucusunu kilitler).
     let all_failed = edits.is_empty() || edits.iter().all(|e| e["applied"] == Value::Bool(false));
-    let edits = if all_failed && !blocks.is_empty() {
+    // Yedek YALNIZCA model gerçekten düzenleme denediyse (SEARCH/REPLACE
+    // ürettiyse) çalışır. Soru-cevap turunda bağlam için eklenen code_blocks
+    // yüzünden yedek tetiklenip ikinci bir LLM çağrısıyla dosyayı habersizce
+    // baştan yazmasın (sahte "applied" raporunun kaynağı buydu).
+    let edit_attempted = !edits::parse_edit_blocks(&result.0).is_empty();
+    let edits = if all_failed && edit_attempted && !blocks.is_empty() {
         let fallback_messages = messages_before_context;
         let fallback_url = url.clone();
         let fallback_key = req.api_key.clone();

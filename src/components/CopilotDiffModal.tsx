@@ -200,7 +200,7 @@ export function CopilotDiffModal({
         height: isMaximized ? 'auto' : `${sizeRef.current.height}px`,
         willChange: 'transform, width, height'
       }}
-      className={`fixed z-50 bg-[#100F0F] border border-[#282726] shadow-2xl flex flex-col font-mono text-[#F2F0E5] ${
+      className={`fixed z-50 bg-ink border border-surface shadow-2xl flex flex-col font-mono text-fg ${
         isMaximized
           ? 'inset-2 w-[calc(100%-16px)] h-[calc(100%-16px)] rounded-lg overflow-hidden'
           : 'top-0 left-0 rounded-lg overflow-hidden'
@@ -209,33 +209,33 @@ export function CopilotDiffModal({
       {/* TOP HEADER BAR */}
       <div
         onMouseDown={handleStartDragModal}
-        className="px-3.5 py-2 bg-[#1C1B1A] border-b border-[#282726] flex items-center justify-between cursor-move select-none flex-shrink-0"
+        className="px-3.5 py-2 bg-panel border-b border-surface flex items-center justify-between cursor-move select-none flex-shrink-0"
       >
         <div className="flex items-center gap-2 text-[11px]">
-          <FileText size={14} className="text-[#87857F]" />
-          <span className="font-semibold text-[#CECDC3]">
+          <FileText size={14} className="text-fg-faint" />
+          <span className="font-semibold text-fg-soft">
             {payload.targetFile}
           </span>
         </div>
 
         <div className="flex items-center gap-3">
           <div className="hidden sm:flex items-center gap-2 text-[11px]">
-            <span className="text-[#D14D41] bg-[#282726] border border-[#34332F] px-2 py-0.5 rounded font-mono">
+            <span className="text-danger bg-surface border border-line px-2 py-0.5 rounded font-mono">
               -{stats.removed}
             </span>
-            <span className="text-[#3AA99F] bg-[#282726] border border-[#34332F] px-2 py-0.5 rounded font-mono">
+            <span className="text-aqua bg-surface border border-line px-2 py-0.5 rounded font-mono">
               +{stats.added}
             </span>
           </div>
 
           {/* HINT ICON AND VERTICAL LINE */}
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1 border-r border-[#34332F] pr-2">
+            <div className="flex items-center gap-1 border-r border-line pr-2">
               <button
                 type="button"
                 onClick={() => setIsBannerVisible(!isBannerVisible)}
-                className={`p-1 rounded hover:bg-[#282726] cursor-pointer transition-colors flex items-center justify-center ${
-                  isBannerVisible ? 'text-[#4385BE]' : 'text-[#A8A49E] hover:text-white'
+                className={`p-1 rounded hover:bg-surface cursor-pointer transition-colors flex items-center justify-center ${
+                  isBannerVisible ? 'text-accent' : 'text-fg-muted hover:text-white'
                 }`}
                 title="Toggle Help Banner"
               >
@@ -247,7 +247,7 @@ export function CopilotDiffModal({
               <button
                 type="button"
                 onClick={() => setIsMaximized(!isMaximized)}
-                className="text-[#A8A49E] hover:text-white p-1 rounded hover:bg-[#282726] cursor-pointer transition-colors"
+                className="text-fg-muted hover:text-white p-1 rounded hover:bg-surface cursor-pointer transition-colors"
                 title={isMaximized ? "Switch to Windowed" : "Toggle Fullscreen"}
               >
                 {isMaximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
@@ -255,7 +255,7 @@ export function CopilotDiffModal({
               <button
                 type="button"
                 onClick={onClose}
-                className="text-[#A8A49E] hover:text-white p-1 rounded hover:bg-[#282726] cursor-pointer transition-colors"
+                className="text-fg-muted hover:text-white p-1 rounded hover:bg-surface cursor-pointer transition-colors"
                 title="Close"
               >
                 <X size={14} />
@@ -267,24 +267,24 @@ export function CopilotDiffModal({
 
       {/* SECTION 1: WINDOW MODE */}
       {!isMaximized ? (
-        <div className="flex-1 flex flex-col min-h-0 bg-[#100F0F] relative">
+        <div className="flex-1 flex flex-col min-h-0 bg-ink relative">
 
           {payload.originalCodeSnippet && payload.codeSnippet ? (
-            <div className="flex-1 flex flex-col min-h-0 bg-[#100F0F]">
-              <div className="px-4 pt-3 pb-1 text-[11px] text-[#A8A49E] font-bold uppercase border-b border-[#282726]">
-                Suggested change — {activeFile} · <span className="text-[#3AA99F]">+{stats.added}</span> <span className="text-[#D14D41]">-{stats.removed}</span>
+            <div className="flex-1 flex flex-col min-h-0 bg-ink">
+              <div className="px-4 pt-3 pb-1 text-[11px] text-fg-muted font-bold uppercase border-b border-surface">
+                Suggested change — {activeFile} · <span className="text-aqua">+{stats.added}</span> <span className="text-danger">-{stats.removed}</span>
               </div>
               <div className="flex-1 overflow-auto pretty-scrollbar p-0 font-mono text-[11px] leading-[1.55]">
                 {lines.map((l, idx) => (
                   <div
                     key={idx}
                     className={`flex ${
-                      l.type === 'removed' ? 'bg-[#3b181a]/50 border-l-2 border-[#D14D41]'
-                      : l.type === 'added' ? 'bg-[#1e2f22]/60 border-l-2 border-[#3AA99F]'
+                      l.type === 'removed' ? 'bg-[#3b181a]/50 border-l-2 border-danger'
+                      : l.type === 'added' ? 'bg-[#1e2f22]/60 border-l-2 border-aqua'
                       : 'border-l-2 border-transparent'
                     }`}
                   >
-                    <span className="w-10 flex-shrink-0 text-right pr-2 text-[#575654] select-none">
+                    <span className="w-10 flex-shrink-0 text-right pr-2 text-fg-dim select-none">
                       {l.type === 'removed' ? '-' : l.type === 'added' ? '+' : ' '}
                     </span>
                     <span className="whitespace-pre-wrap break-all pr-3">
@@ -295,19 +295,19 @@ export function CopilotDiffModal({
               </div>
             </div>
           ) : (
-            <div className="flex-1 overflow-auto p-4 text-[11.5px] leading-[1.7] pretty-scrollbar font-mono whitespace-pre-wrap text-[#CECDC3]">
+            <div className="flex-1 overflow-auto p-4 text-[11.5px] leading-[1.7] pretty-scrollbar font-mono whitespace-pre-wrap text-fg-soft">
               {message.text}
             </div>
           )}
 
           {/* Bottom Bar (Footer) */}
-          <div className="px-3.5 py-2 bg-[#1C1B1A] border-t border-[#282726] flex items-center justify-between flex-shrink-0">
+          <div className="px-3.5 py-2 bg-panel border-t border-surface flex items-center justify-between flex-shrink-0">
             <div className="flex items-center gap-2 text-[11px]">
-              <span className="text-[#A8A49E] bg-[#282726] border border-[#34332F] px-2.5 py-0.5 rounded font-mono">
+              <span className="text-fg-muted bg-surface border border-line px-2.5 py-0.5 rounded font-mono">
                 {stats.changed} Lines Changed
               </span>
               {opt.length > 0 && (
-                <span className="text-[#A8A49E] bg-[#282726] border border-[#34332F] px-2.5 py-0.5 rounded font-mono">
+                <span className="text-fg-muted bg-surface border border-line px-2.5 py-0.5 rounded font-mono">
                   {opt.length} B
                 </span>
               )}
@@ -315,16 +315,16 @@ export function CopilotDiffModal({
 
             <div className="flex items-center gap-2">
               {executed ? (
-                <span className="text-[#3AA99F] text-[11px] font-medium flex items-center gap-1 px-2.5 py-0.5 bg-[#1e3a2b]/60 border border-[#2d5a45]/50 rounded font-sans">
+                <span className="text-aqua text-[11px] font-medium flex items-center gap-1 px-2.5 py-0.5 bg-[#1e3a2b]/60 border border-[#2d5a45]/50 rounded font-sans">
                   <Check size={12} /> Applied to Code
                 </span>
               ) : (
                 <button
                   type="button"
                   onClick={() => onApply(payload)}
-                  className="px-2.5 py-0.5 bg-[#282726] hover:bg-[#34332F] border border-[#34332F] text-[#A8A49E] hover:text-white font-medium rounded text-[11px] flex items-center gap-1.5 cursor-pointer transition-colors font-sans shadow-sm"
+                  className="px-2.5 py-0.5 bg-surface hover:bg-line border border-line text-fg-muted hover:text-white font-medium rounded text-[11px] flex items-center gap-1.5 cursor-pointer transition-colors font-sans shadow-sm"
                 >
-                  <CheckCircle2 size={13} className="text-[#4385BE]" /> Apply to Code
+                  <CheckCircle2 size={13} className="text-accent" /> Apply to Code
                 </button>
               )}
             </div>
@@ -332,19 +332,19 @@ export function CopilotDiffModal({
         </div>
       ) : (
         /* SECTION 2: FULLSCREEN MODE */
-        <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-[#100F0F]">
+        <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-ink">
 
           {/* Deciding unified diff (fullscreen) */}
-          <div className="flex-1 flex flex-col min-h-0 bg-[#100F0F]">
-            <div className="px-3 py-2 bg-[#1C1B1A] text-[#A8A49E] text-[11px] border-b border-[#282726] flex items-center justify-between flex-shrink-0">
-              <span className="font-semibold text-[#CECDC3] flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-[#3AA99F]" />
+          <div className="flex-1 flex flex-col min-h-0 bg-ink">
+            <div className="px-3 py-2 bg-panel text-fg-muted text-[11px] border-b border-surface flex items-center justify-between flex-shrink-0">
+              <span className="font-semibold text-fg-soft flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-aqua" />
                 Suggested change — {payload.targetFile}
               </span>
               <div className="flex items-center gap-2 text-[11px]">
-                <span className="text-[#D14D41] bg-[#3b181a]/40 border border-[#824449]/30 px-2 py-0.5 rounded font-mono">-{stats.removed}</span>
-                <span className="text-[#3AA99F] bg-[#1e3a2b]/40 border border-[#2d5a45]/30 px-2 py-0.5 rounded font-mono">+{stats.added}</span>
-                <span className="text-[#A8A49E] bg-[#282726] border border-[#34332F] px-2 py-0.5 rounded font-mono">{orig.length} B → {opt.length} B</span>
+                <span className="text-danger bg-[#3b181a]/40 border border-[#824449]/30 px-2 py-0.5 rounded font-mono">-{stats.removed}</span>
+                <span className="text-aqua bg-[#1e3a2b]/40 border border-[#2d5a45]/30 px-2 py-0.5 rounded font-mono">+{stats.added}</span>
+                <span className="text-fg-muted bg-surface border border-line px-2 py-0.5 rounded font-mono">{orig.length} B → {opt.length} B</span>
               </div>
             </div>
             <div className="flex-1 overflow-auto pretty-scrollbar font-mono text-[11.5px] leading-[1.55]">
@@ -352,12 +352,12 @@ export function CopilotDiffModal({
                 <div
                   key={idx}
                   className={`flex ${
-                    l.type === 'removed' ? 'bg-[#3b181a]/50 border-l-2 border-[#D14D41]'
-                      : l.type === 'added' ? 'bg-[#1e2f22]/60 border-l-2 border-[#3AA99F]'
+                    l.type === 'removed' ? 'bg-[#3b181a]/50 border-l-2 border-danger'
+                      : l.type === 'added' ? 'bg-[#1e2f22]/60 border-l-2 border-aqua'
                       : 'border-l-2 border-transparent'
                   }`}
                 >
-                  <span className="w-10 flex-shrink-0 text-right pr-2 text-[#575654] select-none">
+                  <span className="w-10 flex-shrink-0 text-right pr-2 text-fg-dim select-none">
                     {l.type === 'removed' ? '-' : l.type === 'added' ? '+' : ' '}
                   </span>
                   <span className="whitespace-pre-wrap break-all pr-3">{l.text || ' '}</span>
@@ -367,9 +367,9 @@ export function CopilotDiffModal({
           </div>
 
           {/* Bottom Buttons (Fullscreen Mode Footer) */}
-          <div className="px-3.5 py-2 bg-[#1C1B1A] border-t border-[#282726] flex items-center justify-between flex-shrink-0">
+          <div className="px-3.5 py-2 bg-panel border-t border-surface flex items-center justify-between flex-shrink-0">
             <div className="flex items-center gap-2 text-[11px]">
-              <span className="text-[#A8A49E] bg-[#282726] border border-[#34332F] px-2.5 py-0.5 rounded font-mono">
+              <span className="text-fg-muted bg-surface border border-line px-2.5 py-0.5 rounded font-mono">
                 {stats.changed} Lines Changed
               </span>
             </div>
@@ -378,9 +378,9 @@ export function CopilotDiffModal({
               <button
                 type="button"
                 onClick={() => onApply(payload)}
-                className="px-2.5 py-0.5 bg-[#282726] hover:bg-[#34332F] border border-[#34332F] text-[#A8A49E] hover:text-white font-medium rounded text-[11px] flex items-center gap-1.5 cursor-pointer transition-colors font-sans shadow-sm"
+                className="px-2.5 py-0.5 bg-surface hover:bg-line border border-line text-fg-muted hover:text-white font-medium rounded text-[11px] flex items-center gap-1.5 cursor-pointer transition-colors font-sans shadow-sm"
               >
-                <CheckCircle2 size={13} className="text-[#4385BE]" /> Apply to Code
+                <CheckCircle2 size={13} className="text-accent" /> Apply to Code
               </button>
             </div>
           </div>
@@ -398,10 +398,10 @@ export function CopilotDiffModal({
           <div onMouseDown={(e) => handleStartResizeModal(e, 'ne')} className="absolute -top-1 -right-1 w-3.5 h-3.5 cursor-ne-resize z-30" />
           <div onMouseDown={(e) => handleStartResizeModal(e, 'nw')} className="absolute -top-1 -left-1 w-3.5 h-3.5 cursor-nw-resize z-30" />
           <div onMouseDown={(e) => handleStartResizeModal(e, 'se')} className="absolute -bottom-1 -right-1 w-3.5 h-3.5 cursor-se-resize z-30 flex items-end justify-end p-0.5">
-            <div className="w-1.5 h-1.5 border-r-2 border-b-2 border-[#575654]" />
+            <div className="w-1.5 h-1.5 border-r-2 border-b-2 border-fg-dim" />
           </div>
           <div onMouseDown={(e) => handleStartResizeModal(e, 'sw')} className="absolute -bottom-1 -left-1 w-3.5 h-3.5 cursor-sw-resize z-30 flex items-end justify-start p-0.5">
-            <div className="w-1.5 h-1.5 border-l-2 border-b-2 border-[#575654]" />
+            <div className="w-1.5 h-1.5 border-l-2 border-b-2 border-fg-dim" />
           </div>
         </>
       )}

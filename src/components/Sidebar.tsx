@@ -169,9 +169,9 @@ export function Sidebar({
                   : 'pointer-events-none opacity-0 scale-90'
               }`}
               style={{
-                backgroundColor: isNewBtnHovered ? '#575654' : '#282f3d',
-                borderColor: isNewBtnHovered ? '#575654' : '#353f4f',
-                color: isNewBtnHovered ? '#F2F0E5' : '#A8A49E'
+                backgroundColor: isNewBtnHovered ? 'rgb(var(--tlm-fg-dim))' : 'rgb(var(--tlm-surface))',
+                borderColor: isNewBtnHovered ? 'rgb(var(--tlm-fg-dim))' : 'rgb(var(--tlm-line))',
+                color: isNewBtnHovered ? 'rgb(var(--tlm-fg))' : 'rgb(var(--tlm-fg-muted))'
               }}
             >
               <Plus size={14} className="flex-shrink-0" />
@@ -192,7 +192,7 @@ export function Sidebar({
                   if (onNewChat) onNewChat();
                 }}
                 title="New chat session"
-                className={`flex-1 min-w-0 flex items-center justify-center gap-1.5 rounded-md border border-[#353f4f] bg-[#282f3d] text-[#A8A49E] hover:border-[#575654] hover:bg-[#575654] hover:text-[#F2F0E5] cursor-pointer transition-colors ${
+                className={`flex-1 min-w-0 flex items-center justify-center gap-1.5 rounded-md border border-line bg-surface text-fg-muted hover:border-fg-dim hover:bg-fg-dim hover:text-fg cursor-pointer transition-colors ${
                   isOpen ? 'text-[11.5px] font-medium' : ''
                 }`}
               >
@@ -205,8 +205,8 @@ export function Sidebar({
                 title="Open a project"
                 className={`flex-1 min-w-0 flex items-center justify-center gap-1.5 rounded-md border cursor-pointer transition-colors ${
                   sessionMenu === 'project'
-                    ? 'border-[#575654] bg-[#575654] text-[#F2F0E5]'
-                    : 'border-[#353f4f] bg-[#282f3d] text-[#A8A49E] hover:border-[#575654] hover:bg-[#575654] hover:text-[#F2F0E5]'
+                    ? 'border-fg-dim bg-fg-dim text-fg'
+                    : 'border-line bg-surface text-fg-muted hover:border-fg-dim hover:bg-fg-dim hover:text-fg'
                 } ${isOpen ? 'text-[11.5px] font-medium' : ''}`}
               >
                 <FolderOpen size={13} className="flex-shrink-0" />
@@ -217,8 +217,8 @@ export function Sidebar({
 
           {/* project path prompt */}
           {sessionMenu === 'project' && isOpen && (
-            <div className="mt-1.5 w-full overflow-hidden rounded-md border border-[#282726] bg-[#1C1B1A] p-2">
-              <label className="block px-0.5 pb-1.5 text-[11px] font-mono uppercase tracking-wider text-[#87857F]">
+            <div className="mt-1.5 w-full overflow-hidden rounded-md border border-surface bg-panel p-2">
+              <label className="block px-0.5 pb-1.5 text-[11px] font-mono uppercase tracking-wider text-fg-faint">
                 Project folder path
               </label>
               <div className="flex items-center gap-1.5">
@@ -235,7 +235,7 @@ export function Sidebar({
                   }}
                   placeholder="C:\\dev\\my-project"
                   spellCheck={false}
-                  className="min-w-0 flex-1 rounded-md border border-white/[0.08] bg-white/[0.03] px-2 py-1.5 font-mono text-[11.5px] text-[#F2F0E5] placeholder-white/20 focus:border-[#575654] focus:outline-none"
+                  className="min-w-0 flex-1 rounded-md border border-white/[0.08] bg-white/[0.03] px-2 py-1.5 font-mono text-[11.5px] text-fg placeholder-white/20 focus:border-fg-dim focus:outline-none"
                 />
                 <button
                   type="button"
@@ -243,12 +243,12 @@ export function Sidebar({
                     const p = projectPath.trim();
                     if (p) { setProjectPath(''); setSessionMenu('closed'); onOpenProject?.(p); }
                   }}
-                  className="flex-shrink-0 rounded-md border border-[#353f4f] bg-[#282f3d] px-2.5 py-1.5 text-[11.5px] font-medium text-[#CECDC3] hover:border-[#575654] hover:bg-[#575654] hover:text-[#F2F0E5] cursor-pointer transition-colors"
+                  className="flex-shrink-0 rounded-md border border-line bg-surface px-2.5 py-1.5 text-[11.5px] font-medium text-fg-soft hover:border-fg-dim hover:bg-fg-dim hover:text-fg cursor-pointer transition-colors"
                 >
                   Open
                 </button>
               </div>
-              <p className="px-0.5 pt-1.5 text-[11px] leading-snug text-[#87857F]">
+              <p className="px-0.5 pt-1.5 text-[11px] leading-snug text-fg-faint">
                 Tip: pick one of your recent projects below instead.
               </p>
             </div>
@@ -304,7 +304,7 @@ export function Sidebar({
                     type="button"
                     onClick={() => setPendingDelete(null)}
                     title="Cancel"
-                    className="text-[#87857F] hover:text-[#CECDC3] p-0.5 cursor-pointer"
+                    className="text-fg-faint hover:text-fg-soft p-0.5 cursor-pointer"
                   >
                     <X size={12} />
                   </button>
@@ -332,7 +332,7 @@ export function Sidebar({
                     <FolderOpen
                       key={`open-${project.root}`}
                       size={13}
-                      className="flex-shrink-0 text-[#dcb67a] folder-pop"
+                      className="flex-shrink-0 text-gold folder-pop"
                     />
                   ) : (
                     <Folder
@@ -433,7 +433,7 @@ export function Sidebar({
                     type="button"
                     onClick={() => setPendingDelete(null)}
                     title="Cancel"
-                    className="text-[#87857F] hover:text-[#CECDC3] p-0.5 cursor-pointer"
+                    className="text-fg-faint hover:text-fg-soft p-0.5 cursor-pointer"
                   >
                     <X size={12} />
                   </button>
@@ -462,7 +462,7 @@ export function Sidebar({
                 >
                   {/* Aktif sohbet: pop animasyonlu ikon. Digerleri: sade, soluk. */}
                   {isActive ? (
-                    <MessageSquare key={`chat-open-${chat.id}`} size={13} className="flex-shrink-0 text-[#C6C0B2] chat-pop" />
+                    <MessageSquare key={`chat-open-${chat.id}`} size={13} className="flex-shrink-0 text-fg-soft chat-pop" />
                   ) : (
                     <MessageSquare size={13} className="flex-shrink-0 opacity-50" />
                   )}
@@ -508,26 +508,26 @@ export function Sidebar({
 
         <div className="relative" ref={profileMenuRef}>
           {profileMenuOpen && isOpen && (
-            <div className="absolute bottom-full left-0 right-0 mb-1.5 overflow-hidden rounded-md bg-[#1C1B1A] border border-[#282726] shadow-[0_12px_32px_-14px_rgba(0,0,0,0.8)] z-50">
+            <div className="absolute bottom-full left-0 right-0 mb-1.5 overflow-hidden rounded-md bg-panel border border-surface shadow-[0_12px_32px_-14px_rgba(0,0,0,0.8)] z-50">
 
               <div className="p-1">
                 <button
                   type="button"
                   onClick={() => { setProfileMenuOpen(false); if (onOpenSettings) onOpenSettings(); }}
-                  className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[#A8A49E] hover:bg-[#282726] hover:text-[#F2F0E5] text-left cursor-pointer transition-colors"
+                  className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-fg-muted hover:bg-surface hover:text-fg text-left cursor-pointer transition-colors"
                 >
                   <Settings size={14} className="flex-shrink-0" />
                   <span className="flex-1 text-[12px]">Settings</span>
                 </button>
               </div>
 
-              <div className="border-t border-[#282726]" />
+              <div className="border-t border-surface" />
 
               <div className="p-1">
                 <button
                   type="button"
                   onClick={() => { setProfileMenuOpen(false); if (onLogout) onLogout(); }}
-                  className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[#A8A49E] hover:bg-[#282726] hover:text-[#D14D41] text-left cursor-pointer transition-colors"
+                  className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-fg-muted hover:bg-surface hover:text-danger text-left cursor-pointer transition-colors"
                 >
                   <LogoutIcon size={14} className="flex-shrink-0" />
                   <span className="flex-1 text-[12px]">Sign out</span>
@@ -554,11 +554,11 @@ export function Sidebar({
               isOpen ? 'justify-start gap-2.5' : 'justify-center'
             } ${
               profileMenuOpen
-                ? 'bg-[#282726] border-[#3a3936]'
+                ? 'bg-surface border-line'
                 : 'border-transparent hover:bg-obsidian-panel/40'
             }`}
           >
-            <span className="w-7 h-7 rounded-full bg-[#282726] border border-[#3a3936] flex items-center justify-center flex-shrink-0 overflow-hidden text-[#87857F] group-hover:text-[#CECDC3] transition-colors">
+            <span className="w-7 h-7 rounded-full bg-surface border border-line flex items-center justify-center flex-shrink-0 overflow-hidden text-fg-faint group-hover:text-fg-soft transition-colors">
               {userAvatarUrl ? (
                 <img src={userAvatarUrl} alt="" className="w-full h-full object-cover" />
               ) : (
@@ -568,14 +568,14 @@ export function Sidebar({
             {isOpen && (
               <>
                 <span className="min-w-0 flex-1 flex flex-col items-start leading-tight text-left">
-                  <span className="text-[12px] text-[#CECDC3] group-hover:text-[#F2F0E5] truncate w-full transition-colors">{displayName}</span>
+                  <span className="text-[12px] text-fg-soft group-hover:text-fg truncate w-full transition-colors">{displayName}</span>
                   {planLabel && (
-                    <span className="text-[11px] text-[#87857F] truncate w-full">{planLabel}</span>
+                    <span className="text-[11px] text-fg-faint truncate w-full">{planLabel}</span>
                   )}
                 </span>
                 <ChevronUp
                   size={12}
-                  className={`flex-shrink-0 text-[#87857F] transition-transform duration-150 ${
+                  className={`flex-shrink-0 text-fg-faint transition-transform duration-150 ${
                     profileMenuOpen ? 'rotate-180' : ''
                   }`}
                 />

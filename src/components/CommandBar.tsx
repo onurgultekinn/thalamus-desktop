@@ -201,7 +201,7 @@ export function CommandBar({
                   title={imageModeHint(m)}
                   className={`flex-1 rounded-md border px-1.5 py-1 text-[11px] transition-colors cursor-pointer ${
                     imageMode === m
-                      ? 'border-[#dcb67a]/50 bg-[#dcb67a]/10 text-[#dcb67a]'
+                      ? 'border-gold/50 bg-gold/10 text-gold'
                       : 'border-obsidian-border text-obsidian-muted hover:text-obsidian-text'
                   }`}
                 >
@@ -222,12 +222,12 @@ export function CommandBar({
             onDrop={handleDrop}
             className={`border border-dashed rounded-md p-3 text-center flex flex-col items-center gap-1 cursor-pointer transition-colors ${
               isDragging
-                ? 'border-[#dcb67a]/60 bg-[#dcb67a]/10'
+                ? 'border-gold/60 bg-gold/10'
                 : 'border-obsidian-border bg-obsidian-bg/50 hover:border-obsidian-muted/40'
             }`}
           >
-            <UploadCloud size={14} className={isDragging ? 'text-[#dcb67a]' : 'text-obsidian-muted'} />
-            <span className={`text-[11px] ${isDragging ? 'text-[#dcb67a]' : 'text-obsidian-muted'}`}>
+            <UploadCloud size={14} className={isDragging ? 'text-gold' : 'text-obsidian-muted'} />
+            <span className={`text-[11px] ${isDragging ? 'text-gold' : 'text-obsidian-muted'}`}>
               {isDragging ? 'Release to attach' : 'Upload or drag dataset'}
             </span>
           </div>
@@ -243,7 +243,7 @@ export function CommandBar({
                       title={`${img.name} · ${img.width}×${img.height} · detail:${img.detail} · ${img.reason}${img.visionDiag ? ' · ' + img.visionDiag : ''}\n${img.options.map((o) => `${o.label}: ${Math.round(o.ratio * 100)}% · ≈${o.tokens} tok · ${o.retention}% detail`).join('\n')}`}
                       className="h-12 w-12 rounded-md object-cover border border-obsidian-border"
                     />
-                    <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 rounded bg-obsidian-panel/90 px-1 text-[8.5px] font-mono text-[#dcb67a] whitespace-nowrap">
+                    <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 rounded bg-obsidian-panel/90 px-1 text-[8.5px] font-mono text-gold whitespace-nowrap">
                       ≈{img.estTokens} · %{img.retention}
                     </span>
                     <button
@@ -265,7 +265,7 @@ export function CommandBar({
                   <span className="text-[11px] text-obsidian-muted/70 truncate">{last.name} — mode comparison</span>
                   {last.options.map((o) => (
                     <div key={o.mode} className="flex items-center justify-between gap-2 text-[11px]">
-                      <span className={o.mode === last.chosenMode ? 'text-[#dcb67a]' : 'text-obsidian-muted'}>
+                      <span className={o.mode === last.chosenMode ? 'text-gold' : 'text-obsidian-muted'}>
                         {o.mode === last.chosenMode ? '●' : '○'} {o.label}
                         {o.mode === 'economy' && last.textLike && (
                           <span title="This image looks like text/UI — low detail may hurt legibility"> ⚠</span>
@@ -295,7 +295,7 @@ export function CommandBar({
       )}
 
       {/* Main Command Input Box */}
-      <form onSubmit={onSend} className="w-full bg-obsidian-panel border border-obsidian-border rounded-xl flex flex-col p-3 gap-2 shadow-2xl transition-all duration-200 focus-within:border-[#dcb67a]/40">
+      <form onSubmit={onSend} className="w-full bg-obsidian-panel border border-obsidian-border rounded-xl flex flex-col p-3 gap-2 shadow-2xl transition-all duration-200 focus-within:border-gold/40">
         <textarea
           ref={textareaRef}
           value={input}
@@ -321,7 +321,7 @@ export function CommandBar({
               <Paperclip size={12} />
               <span>Attach</span>
               {images.length > 0 && (
-                <span className="text-[11px] text-[#dcb67a]">{images.length} image{images.length > 1 ? 's' : ''}</span>
+                <span className="text-[11px] text-gold">{images.length} image{images.length > 1 ? 's' : ''}</span>
               )}
             </button>
           </div>
@@ -351,7 +351,7 @@ export function CommandBar({
               <button
                 type="button"
                 onClick={onStop}
-                className="flex items-center justify-center w-6 h-6 bg-[#D14D41] hover:bg-[#E0685C] text-white rounded-md cursor-pointer transition-all"
+                className="flex items-center justify-center w-6 h-6 bg-danger hover:bg-danger-soft text-white rounded-md cursor-pointer transition-all"
                 title="Stop request"
               >
                 <Square size={9} strokeWidth={0} fill="currentColor" />

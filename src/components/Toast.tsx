@@ -77,7 +77,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
           return (
             <div
               key={toast.id}
-              className="pointer-events-auto relative w-full rounded-md bg-[#201F1D] border border-[#3A3835] shadow-2xl px-3.5 py-3 pb-3.5 flex flex-col gap-1.5 overflow-hidden animate-in fade-in slide-in-from-bottom-1 duration-150"
+              className="pointer-events-auto relative w-full rounded-md bg-surface border border-line shadow-2xl px-3.5 py-3 pb-3.5 flex flex-col gap-1.5 overflow-hidden animate-in fade-in slide-in-from-bottom-1 duration-150"
             >
               <div className="flex items-baseline gap-2">
                 {toast.type === 'error' && code ? (
@@ -91,14 +91,14 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                   />
                 )}
 
-                <span className="text-[12.5px] font-semibold tracking-tight text-[#F4F2ED] leading-[19px] flex-1 min-w-0">
+                <span className="text-[12.5px] font-semibold tracking-tight text-fg leading-[19px] flex-1 min-w-0">
                   {toast.title}
                 </span>
 
                 <button
                   type="button"
                   onClick={() => removeToast(toast.id)}
-                  className="text-[#807C74] hover:text-[#F4F2ED] cursor-pointer transition-colors flex-shrink-0 self-center"
+                  className="text-fg-faint hover:text-fg cursor-pointer transition-colors flex-shrink-0 self-center"
                   aria-label="Close"
                 >
                   <X size={13} />
@@ -109,7 +109,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                   atilir, yalniz aksiyon/aciklama satiri kalir. Aksiyon yoksa
                   mesajin tamami gosterilir. */}
               {(action ?? (cause ? cause : undefined)) && (
-                <span className="text-[11.5px] text-[#C6C1B8] leading-[18px] tracking-[-0.01em]">
+                <span className="text-[11.5px] text-fg-soft leading-[18px] tracking-[-0.01em]">
                   {action ?? cause}
                 </span>
               )}
@@ -121,12 +121,12 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                     href={wikiUrlFor(code) as string}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-[10px] font-mono leading-[15px] mt-0.5 pt-1.5 border-t border-[#2E2C29] text-[#8A867E] hover:text-[#CFCAC2] hover:underline cursor-pointer w-fit"
+                    className="text-[10px] font-mono leading-[15px] mt-0.5 pt-1.5 border-t border-surface text-fg-faint hover:text-fg-soft hover:underline cursor-pointer w-fit"
                   >
                     For more info, check the wiki ↗
                   </a>
                 ) : (
-                  <span className="text-[10px] text-[#7E7A73] font-mono leading-[15px] mt-0.5 pt-1.5 border-t border-[#2E2C29] w-fit">
+                  <span className="text-[10px] text-fg-faint font-mono leading-[15px] mt-0.5 pt-1.5 border-t border-surface w-fit">
                     For more info, check the wiki
                   </span>
                 )

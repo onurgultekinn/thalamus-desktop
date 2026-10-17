@@ -62,12 +62,61 @@
    touches are added on top. The variables here are the single source of truth.
    ========================================================================== */
 :root {
-  --sketch-accent: #dcb67a;            /* acanthus leaf gold — pen accent */
+  --sketch-accent: rgb(var(--tlm-gold)); /* acanthus leaf gold — pen accent */
   --sketch-accent-soft: rgba(220, 182, 122, 0.38);
   --sketch-pencil: rgba(220, 182, 122, 0.55);
   --sketch-line: rgba(255, 255, 255, 0.07);
-  --sketch-ink: #CECDC3;
+  --sketch-ink: rgb(var(--tlm-fg-soft));
   --sketch-hand: 'Caveat', 'Ink Free', 'Segoe Print', cursive;
+}
+
+/* ==========================================================================
+   Theme palette — single source of truth.
+   Channel triplets (R G B) so Tailwind's `/opacity` modifiers keep working.
+   `:root` is the default "Obsidian" theme; `html[data-theme='nord-red']`
+   re-tints every token below, which is why a theme can now actually apply.
+   ========================================================================== */
+:root {
+  --tlm-ink: 16 15 15;              /* deepest app background   (#100F0F) */
+  --tlm-panel: 28 27 26;            /* panel / card surface     (#1C1B1A) */
+  --tlm-surface: 40 39 38;          /* raised surface           (#282726) */
+  --tlm-line: 52 51 47;             /* borders + elevated       (#34332F) */
+  --tlm-raise: 64 62 60;            /* hover surface            (#403E3C) */
+  --tlm-fg: 242 240 229;            /* primary text             (#F2F0E5) */
+  --tlm-fg-soft: 206 205 195;       /* soft text                (#CECDC3) */
+  --tlm-fg-muted: 168 164 158;      /* muted text               (#A8A49E) */
+  --tlm-fg-faint: 135 133 127;      /* faint text               (#87857F) */
+  --tlm-fg-dim: 87 86 84;           /* dimmest text             (#575654) */
+  --tlm-accent: 67 133 190;         /* interactive accent       (#4385BE) */
+  --tlm-accent-deep: 32 94 166;     /* accent button base       (#205EA6) */
+  --tlm-aqua: 58 169 159;           /* success / engine         (#3AA99F) */
+  --tlm-aqua-soft: 69 184 173;      /* success hover            (#45B8AD) */
+  --tlm-gold: 220 182 122;          /* pen / folder accent      (#dcb67a) */
+  --tlm-danger: 209 77 65;          /* destructive              (#D14D41) */
+  --tlm-danger-soft: 224 104 92;    /* destructive hover        (#E0685C) */
+  --tlm-warn: 208 162 21;           /* warning                  (#D0A215) */
+}
+
+/* Nord Red — warm, red-tinted dark theme (same tokens, new values). */
+html[data-theme='nord-red'] {
+  --tlm-ink: 18 12 12;
+  --tlm-panel: 30 20 20;
+  --tlm-surface: 44 30 29;
+  --tlm-line: 58 40 38;
+  --tlm-raise: 74 50 48;
+  --tlm-fg: 245 234 228;
+  --tlm-fg-soft: 216 199 191;
+  --tlm-fg-muted: 180 158 149;
+  --tlm-fg-faint: 143 118 110;
+  --tlm-fg-dim: 96 75 69;
+  --tlm-accent: 217 90 78;
+  --tlm-accent-deep: 176 64 55;
+  --tlm-aqua: 90 168 143;
+  --tlm-aqua-soft: 110 186 160;
+  --tlm-gold: 224 184 122;
+  --tlm-danger: 233 101 92;
+  --tlm-danger-soft: 240 130 120;
+  --tlm-warn: 224 160 60;
 }
 
 /* Paper texture: grain drifting over the whole interface (does not harm readability) */
@@ -114,8 +163,8 @@
   color-scheme: dark;
 }
 select option {
-  background-color: #1C1B1A;
-  color: #F2F0E5;
+  background-color: rgb(var(--tlm-panel));
+  color: rgb(var(--tlm-fg));
 }
 
 /* DiffView: code lines are full width and schema (added) lines are highlighted.
@@ -131,7 +180,7 @@ select option {
 }
 .diff-code-pane .diff-line-added {
   background: rgba(78, 201, 176, 0.08) !important;
-  box-shadow: inset 2px 0 0 #3AA99F;
+  box-shadow: inset 2px 0 0 rgb(var(--tlm-aqua));
 }
 
 /* ==========================================================================
@@ -146,8 +195,8 @@ select option {
 body, html {
   width: 100%;
   height: 100%;
-  background-color: #100F0F; /* Deepest tone of the palette */
-  color: #F2F0E5; /* Lightest gray tone of the palette */
+  background-color: rgb(var(--tlm-ink)); /* Deepest tone of the palette */
+  color: rgb(var(--tlm-fg)); /* Lightest gray tone of the palette */
   font-family: 'Segoe UI Variable', 'Segoe UI', system-ui, -apple-system, Roboto, sans-serif;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
@@ -166,11 +215,11 @@ code, pre, .metrics-row, .model-badge, .header-path, .diff-code-scroll-area, .an
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #282726; /* Palette-matching bar */
+  background: rgb(var(--tlm-surface)); /* Palette-matching bar */
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #575654;
+  background: rgb(var(--tlm-fg-dim));
 }
 
 /* ==========================================================================
@@ -181,7 +230,7 @@ code, pre, .metrics-row, .model-badge, .header-path, .diff-code-scroll-area, .an
   flex-direction: column;
   height: 100vh;
   width: 100vw;
-  background-color: #100F0F;
+  background-color: rgb(var(--tlm-ink));
   overflow: hidden;
 }
 
@@ -204,7 +253,7 @@ code, pre, .metrics-row, .model-badge, .header-path, .diff-code-scroll-area, .an
   flex-direction: column;
   height: 100%;
   /* NEW COLOR PALETTE: The darkest and noblest night-slate tone */
-  background-color: #100F0F !important; 
+  background-color: rgb(var(--tlm-ink)); 
   position: relative;
   overflow: hidden;
   padding: 0; 
@@ -252,7 +301,7 @@ code, pre, .metrics-row, .model-badge, .header-path, .diff-code-scroll-area, .an
 .msg-bubble {
   position: relative;
   width: 100%;
-  background-color: #282726 !important; 
+  background-color: rgb(var(--tlm-surface)); 
   border: 1px solid rgba(255, 255, 255, 0.05);
   border-radius: 8px;
   padding: 10px 14px;
@@ -278,14 +327,14 @@ code, pre, .metrics-row, .model-badge, .header-path, .diff-code-scroll-area, .an
   gap: 6px;
   font-size: 13px;
   font-weight: 600;
-  color: #F2F0E5;
+  color: rgb(var(--tlm-fg));
   white-space: nowrap;
 }
 
 .msg-avatar {
   width: 13px;
   height: 13px;
-  fill: #F2F0E5;
+  fill: rgb(var(--tlm-fg));
 }
 
 .msg-header-right {
@@ -293,11 +342,11 @@ code, pre, .metrics-row, .model-badge, .header-path, .diff-code-scroll-area, .an
   align-items: center;
   gap: 5px;
   font-size: 11px;
-  color: #A8A49E; /* Faded gray within the palette */
+  color: rgb(var(--tlm-fg-muted)); /* Faded gray within the palette */
 }
 
 .msg-model-name {
-  color: #F2F0E5;
+  color: rgb(var(--tlm-fg));
   font-weight: 500;
 }
 /* ==========================================================================
@@ -318,8 +367,8 @@ code, pre, .metrics-row, .model-badge, .header-path, .diff-code-scroll-area, .an
 /* NEW COLOR PALETTE: The deepest tone so code blocks inside Markdown pop at full contrast */
 .mod-text .code-block-wrapper,
 .mod-text .my-2.rounded-md {
-  background-color: #100F0F !important;
-  border: 1px solid #282726 !important;
+  background-color: rgb(var(--tlm-ink)) !important;
+  border: 1px solid rgb(var(--tlm-surface)) !important;
 }
 
 .msg-wrapper.msg-user-right {
@@ -371,7 +420,7 @@ code, pre, .metrics-row, .model-badge, .header-path, .diff-code-scroll-area, .an
 .msg-btn-action {
   background: transparent;
   border: none;
-  color: #A8A49E;
+  color: rgb(var(--tlm-fg-muted));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -380,7 +429,7 @@ code, pre, .metrics-row, .model-badge, .header-path, .diff-code-scroll-area, .an
   padding: 1px;
 }
 
-.msg-btn-action:hover { color: #F2F0E5; }
+.msg-btn-action:hover { color: rgb(var(--tlm-fg)); }
 .msg-btn-action svg { width: 13px; height: 13px; stroke: currentColor; stroke-width: 2; fill: none; }
 
 .msg-metrics {
@@ -388,11 +437,11 @@ code, pre, .metrics-row, .model-badge, .header-path, .diff-code-scroll-area, .an
   align-items: center;
   gap: 6px;
   font-size: 10.5px;
-  color: #A8A49E;
+  color: rgb(var(--tlm-fg-muted));
   user-select: none;
 }
 
-.dot-separator { color: #575654; font-size: 11px; }
+.dot-separator { color: rgb(var(--tlm-fg-dim)); font-size: 11px; }
 .command-bar-wrapper { width: 100%; max-width: 820px; margin: 0 auto; padding: 0 1rem 1rem 1rem; flex-shrink: 0; }
 
 /* ==========================================================================
@@ -441,12 +490,12 @@ code, pre, .metrics-row, .model-badge, .header-path, .diff-code-scroll-area, .an
   transform: rotate(-1.2deg);
   transform-origin: left bottom;
 }
-.analytics-text-green { color: #879A39; font-weight: 600; }
-.analytics-tokens-note { font-family: 'Cormorant Garamond', serif; font-style: italic; color: #A8A49E; font-size: 12px; margin-left: 0.3rem; }
-.analytics-text-gold { color: #D0A215; font-weight: 600; }
+.analytics-text-green { color: rgb(var(--tlm-aqua)); font-weight: 600; }
+.analytics-tokens-note { font-family: 'Cormorant Garamond', serif; font-style: italic; color: rgb(var(--tlm-fg-muted)); font-size: 12px; margin-left: 0.3rem; }
+.analytics-text-gold { color: rgb(var(--tlm-warn)); font-weight: 600; }
 .inner-divider { height: 16px; width: 1px; background: linear-gradient(to bottom, transparent, rgba(255, 255, 255, 0.06), transparent); }
-.analytics-diff-btn { background: transparent; border: none; font-family: 'Cormorant Garamond', serif; font-style: italic; font-size: 13px; color: #A8A49E; cursor: pointer; }
-.analytics-diff-btn:hover { color: #F2F0E5; }
+.analytics-diff-btn { background: transparent; border: none; font-family: 'Cormorant Garamond', serif; font-style: italic; font-size: 13px; color: rgb(var(--tlm-fg-muted)); cursor: pointer; }
+.analytics-diff-btn:hover { color: rgb(var(--tlm-fg)); }
 
 /* ==========================================================================
    5. Sidebar, CommandBar & Header (Slate Base + Matte Crimson Accent Integration)
@@ -454,8 +503,8 @@ code, pre, .metrics-row, .model-badge, .header-path, .diff-code-scroll-area, .an
 .custom-header { 
   width: 100%; 
   height: 38px; 
-  background-color: #1C1B1A !important; 
-  border-bottom: 1px solid #282726; 
+  background-color: rgb(var(--tlm-panel)) !important; 
+  border-bottom: 1px solid rgb(var(--tlm-surface)); 
   display: flex; 
   align-items: center; 
   justify-content: space-between; 
@@ -465,26 +514,26 @@ code, pre, .metrics-row, .model-badge, .header-path, .diff-code-scroll-area, .an
 .header-left, .header-right, .header-logo-group, .header-metric-item { display: flex; align-items: center; }
 .header-left { gap: 0.85rem; }
 .header-logo-group { gap: 0.35rem; font-weight: 600; letter-spacing: 0.5px; }
-.header-studio-badge { background-color: rgba(217, 119, 6, 0.08); color: #D0A215; border: 1px solid rgba(217, 119, 6, 0.2); font-size: 8px; padding: 0.1rem 0.3rem; border-radius: 3px; font-weight: 600; }
-.header-divider { width: 1px; height: 12px; background-color: #282726; }
-.header-path { display: flex; align-items: center; gap: 0.4rem; color: #A8A49E; font-size: 10px; }
-.header-right { gap: 0.85rem; font-size: 10px; color: #A8A49E; }
-.header-status-dot { width: 5px; height: 5px; background-color: #879A39; border-radius: 50%; display: inline-block; margin-right: 4px; }
+.header-studio-badge { background-color: rgba(217, 119, 6, 0.08); color: rgb(var(--tlm-warn)); border: 1px solid rgba(217, 119, 6, 0.2); font-size: 8px; padding: 0.1rem 0.3rem; border-radius: 3px; font-weight: 600; }
+.header-divider { width: 1px; height: 12px; background-color: rgb(var(--tlm-surface)); }
+.header-path { display: flex; align-items: center; gap: 0.4rem; color: rgb(var(--tlm-fg-muted)); font-size: 10px; }
+.header-right { gap: 0.85rem; font-size: 10px; color: rgb(var(--tlm-fg-muted)); }
+.header-status-dot { width: 5px; height: 5px; background-color: rgb(var(--tlm-aqua)); border-radius: 50%; display: inline-block; margin-right: 4px; }
 
 .custom-sidebar { 
-  background-color: #1C1B1A !important; 
-  border-right: 1px solid #282726; 
+  background-color: rgb(var(--tlm-panel)) !important; 
+  border-right: 1px solid rgb(var(--tlm-surface)); 
   display: flex; 
   flex-direction: column; 
   justify-content: space-between; 
   padding: 1rem 0.6rem; 
   flex-shrink: 0; 
   font-size: 11px; 
-  color: #A8A49E; 
+  color: rgb(var(--tlm-fg-muted)); 
   transition: width 0.2s ease; 
   position: relative; 
 }
-.sidebar-edge-toggle { position: absolute; top: 50%; right: -9px; transform: translateY(-50%); width: 18px; height: 18px; background-color: #1C1B1A; border: 1px solid #282726; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #A8A49E; cursor: pointer; z-index: 100; }
+.sidebar-edge-toggle { position: absolute; top: 50%; right: -9px; transform: translateY(-50%); width: 18px; height: 18px; background-color: rgb(var(--tlm-panel)); border: 1px solid rgb(var(--tlm-surface)); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: rgb(var(--tlm-fg-muted)); cursor: pointer; z-index: 100; }
 .sidebar-top, .sidebar-bottom { display: flex; flex-direction: column; gap: 0.5rem; width: 100%; overflow: hidden; }
 
 /* 🔴 NEW MATTE CRIMSON: "+ New Session" Button Area */
@@ -496,7 +545,7 @@ code, pre, .metrics-row, .model-badge, .header-path, .diff-code-scroll-area, .an
   gap: 0.5rem; 
   background-color: #693236 !important; /* Matte crimson main body */
   border: 1px solid #824449 !important; /* Stylish border one shade lighter */
-  color: #F2F0E5 !important; 
+  color: rgb(var(--tlm-fg)) !important; 
   font-weight: 600; 
   padding: 0.45rem; 
   border-radius: 6px; 
@@ -510,25 +559,25 @@ code, pre, .metrics-row, .model-badge, .header-path, .diff-code-scroll-area, .an
 }
 
 .sidebar-group { display: flex; flex-direction: column; gap: 0.2rem; width: 100%; }
-.sidebar-group-title { font-size: 9px; font-weight: 600; color: #575654; text-transform: uppercase; padding: 0 0.4rem; margin-bottom: 0.1rem; letter-spacing: 0.4px; }
-.sidebar-item-link { width: 100%; display: flex; align-items: center; gap: 0.5rem; padding: 0.45rem 0.5rem; border-radius: 5px; color: #A8A49E; background: none; border: none; text-align: left; cursor: pointer; transition: all 0.12s ease; }
-.sidebar-item-link:hover { background-color: #282726; color: #F2F0E5; }
+.sidebar-group-title { font-size: 9px; font-weight: 600; color: rgb(var(--tlm-fg-dim)); text-transform: uppercase; padding: 0 0.4rem; margin-bottom: 0.1rem; letter-spacing: 0.4px; }
+.sidebar-item-link { width: 100%; display: flex; align-items: center; gap: 0.5rem; padding: 0.45rem 0.5rem; border-radius: 5px; color: rgb(var(--tlm-fg-muted)); background: none; border: none; text-align: left; cursor: pointer; transition: all 0.12s ease; }
+.sidebar-item-link:hover { background-color: rgb(var(--tlm-surface)); color: rgb(var(--tlm-fg)); }
 
 /* 🔴 NEW MATTE CRIMSON: Border and Fill of the Active Chat Tab */
 .sidebar-item-link.active { 
   background-color: rgba(59, 24, 26, 0.35) !important; /* Dark transparent maroon background */
-  color: #F2F0E5 !important; 
+  color: rgb(var(--tlm-fg)) !important; 
   font-weight: 600; 
   border: 1px solid #693236 !important; /* Matte crimson border line */
 }
 
-.sidebar-bottom { padding-top: 0.5rem; border-top: 1px solid #282726; }
-.sidebar-btn-settings { width: 100%; display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0.5rem; background: none; border: none; color: #A8A49E; text-align: left; cursor: pointer; }
-.sidebar-profile-card { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0.5rem; background-color: #282726; border: 1px solid #575654; border-radius: 6px; }
-.profile-avatar { width: 22px; height: 22px; border-radius: 4px; background-color: #575654; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 600; color: #F2F0E5; flex-shrink: 0; }
+.sidebar-bottom { padding-top: 0.5rem; border-top: 1px solid rgb(var(--tlm-surface)); }
+.sidebar-btn-settings { width: 100%; display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0.5rem; background: none; border: none; color: rgb(var(--tlm-fg-muted)); text-align: left; cursor: pointer; }
+.sidebar-profile-card { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0.5rem; background-color: rgb(var(--tlm-surface)); border: 1px solid rgb(var(--tlm-fg-dim)); border-radius: 6px; }
+.profile-avatar { width: 22px; height: 22px; border-radius: 4px; background-color: rgb(var(--tlm-fg-dim)); display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 600; color: rgb(var(--tlm-fg)); flex-shrink: 0; }
 .profile-info { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
-.profile-name { color: #F2F0E5; font-size: 11px; font-weight: 500; display: flex; align-items: center; gap: 0.2rem; }
-.profile-role { font-size: 8px; color: #A8A49E; text-transform: uppercase; }
+.profile-name { color: rgb(var(--tlm-fg)); font-size: 11px; font-weight: 500; display: flex; align-items: center; gap: 0.2rem; }
+.profile-role { font-size: 8px; color: rgb(var(--tlm-fg-muted)); text-transform: uppercase; }
 .cb-form { width: 100%; display: flex; flex-direction: column; position: relative; }
 
 /* ==========================================================================
@@ -537,12 +586,12 @@ code, pre, .metrics-row, .model-badge, .header-path, .diff-code-scroll-area, .an
 .diff-view-layout {
   height: 100%;
   width: 100%;
-  background-color: #100F0F !important;
+  background-color: rgb(var(--tlm-ink)) !important;
 }
 
 .diff-header-bar {
-  background-color: #1C1B1A !important;
-  border-color: #282726 !important;
+  background-color: rgb(var(--tlm-panel)) !important;
+  border-color: rgb(var(--tlm-surface)) !important;
 }
 
 /* General column width rule for the code line list */
@@ -551,7 +600,7 @@ code, pre, .metrics-row, .model-badge, .header-path, .diff-code-scroll-area, .an
   display: inline-block !important;
   text-align: right !important;
   padding-right: 8px !important;
-  color: #575654 !important;
+  color: rgb(var(--tlm-fg-dim)) !important;
   font-family: -apple-system, sans-serif !important;
   font-size: 10px !important;
   user-select: none !important;
@@ -564,7 +613,7 @@ code, pre, .metrics-row, .model-badge, .header-path, .diff-code-scroll-area, .an
   width: 100%;
 }
 .profiler-row-removed code {
-  color: #D14D41 !important;
+  color: rgb(var(--tlm-danger)) !important;
 }
 
 /* 🟩 RIGHT PANEL: STRICTLY MATTE AND DARK MILITARY GREEN LINES */
@@ -592,18 +641,18 @@ code, pre, .metrics-row, .model-badge, .header-path, .diff-code-scroll-area, .an
 
 /* 📱 Independent Panel Scrollbars */
 .custom-diff-scrollbar::-webkit-scrollbar {
-  width: 6px !important;
-  height: 6px !important;
+  width: 8px;
+  height: 8px;
 }
 .custom-diff-scrollbar::-webkit-scrollbar-track {
-  background: transparent !important;
+  background: transparent;
 }
 .custom-diff-scrollbar::-webkit-scrollbar-thumb {
-  background: #1C1B1A !important;
-  border-radius: 3px !important;
+  background: rgb(var(--tlm-line));
+  border-radius: 4px;
 }
 .custom-diff-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: #282726 !important;
+  background: rgb(var(--tlm-fg-faint));
 }
 
 /* Graph Lines and Text Harmonies */
@@ -611,41 +660,31 @@ code, pre, .metrics-row, .model-badge, .header-path, .diff-code-scroll-area, .an
   font-family: 'Cascadia Code', 'Ubuntu Sans Mono', ui-monospace, monospace !important;
 }
 
-.custom-diff-scrollbar::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-.custom-diff-scrollbar::-webkit-scrollbar-track {
-  background: #050508;
-}
-
-.custom-diff-scrollbar::-webkit-scrollbar-thumb {
-  background: #1e2333;
-  border-radius: 4px;
-}
-
-.custom-diff-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: #2f3750;
-}
 /* Custom-Designed Elegant Scrollbar */
 .pretty-scrollbar::-webkit-scrollbar {
   width: 4px;
+  height: 4px;
+  transition: width 0.2s ease;
+}
+
+.pretty-scrollbar:hover::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
 }
 
 .pretty-scrollbar::-webkit-scrollbar-track {
-  background: rgba(20, 23, 32, 0.4);
+  background: transparent;
   border-radius: 4px;
 }
 
 .pretty-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(45, 90, 69, 0.6);
+  background: rgb(var(--tlm-line));
   border-radius: 4px;
   transition: background 0.2s ease;
 }
 
 .pretty-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: rgba(115, 186, 155, 0.9);
+  background: rgb(var(--tlm-fg-faint));
 }
 /* Default: Clean and Scrollbar Hidden */
 .auto-scrollbar::-webkit-scrollbar {
@@ -659,18 +698,18 @@ code, pre, .metrics-row, .model-badge, .header-path, .diff-code-scroll-area, .an
 }
 
 .auto-scrollbar.has-overflow::-webkit-scrollbar-track {
-  background: rgba(20, 23, 32, 0.4);
+  background: transparent;
   border-radius: 4px;
 }
 
 .auto-scrollbar.has-overflow::-webkit-scrollbar-thumb {
-  background: rgba(45, 90, 69, 0.6);
+  background: rgb(var(--tlm-line));
   border-radius: 4px;
   transition: background 0.2s ease;
 }
 
 .auto-scrollbar.has-overflow::-webkit-scrollbar-thumb:hover {
-  background: rgba(115, 186, 155, 0.9);
+  background: rgb(var(--tlm-fg-faint));
 }
 /* ==========================================================================
    7. Smart Flexing and Elegant In-Message Scrollbar
@@ -695,33 +734,33 @@ code, pre, .metrics-row, .model-badge, .header-path, .diff-code-scroll-area, .an
 }
 
 .msg-content-scrollable::-webkit-scrollbar-track {
-  background: rgba(20, 23, 32, 0.4);
+  background: transparent;
   border-radius: 4px;
 }
 
 .msg-content-scrollable::-webkit-scrollbar-thumb {
-  background: rgba(45, 90, 69, 0.6);
+  background: rgb(var(--tlm-line));
   border-radius: 4px;
   transition: background 0.2s ease;
 }
 
 .msg-content-scrollable::-webkit-scrollbar-thumb:hover {
-  background: rgba(115, 186, 155, 0.9);
+  background: rgb(var(--tlm-fg-faint));
 }
 
 /* ==========================================================================
    8. Custom Words Spinner Loader
    ========================================================================== */
 .custom-loader-card {
-  --bg-color: #0c0d12;
+  --bg-color: rgb(var(--tlm-ink));
   background-color: var(--bg-color);
   padding: 8px 16px;
   border-radius: 8px;
-  border: 1px solid #282726;
+  border: 1px solid rgb(var(--tlm-surface));
 }
 
 .custom-loader-container {
-  color: #A8A49E;
+  color: rgb(var(--tlm-fg-muted));
   font-weight: 500;
   font-size: 11px;
   font-family: monospace;
@@ -792,24 +831,10 @@ code, pre, .metrics-row, .model-badge, .header-path, .diff-code-scroll-area, .an
   }
 }
 /* ---------------------------------------------------------------------------
- * Nord Red theme — applied via `html[data-theme='nord-red']`
- * (instead of the old <style> injection; same rules, same !important precedence)
+ * Nord Red theme — the token overrides live at the top of this file
+ * (`html[data-theme='nord-red'] { --tlm-*: ... }`). Nothing else needs to be
+ * remapped here: every surface, border, text and accent reads a token.
  * ------------------------------------------------------------------------- */
-html[data-theme='nord-red'] body,
-html[data-theme='nord-red'] .app-container,
-html[data-theme='nord-red'] .main-content {
-  background-color: #0f0a0a !important;
-}
-html[data-theme='nord-red'] .acanthus-ivy-container {
-  border-color: #5a2a2d !important;
-  background-color: #1a0f10 !important;
-}
-html[data-theme='nord-red'] .analytics-text-green {
-  color: #ff6b6b !important;
-}
-html[data-theme='nord-red'] .pretty-scrollbar::-webkit-scrollbar-thumb {
-  background: #3a1a1c !important;
-}
 
 .toast-timer {
   width: 100%;
@@ -871,7 +896,7 @@ html[data-theme='nord-red'] .pretty-scrollbar::-webkit-scrollbar-thumb {
  * ------------------------------------------------------------------------- */
 .code-skeleton {
   position: relative;
-  background: #100F0F;
+  background: rgb(var(--tlm-ink));
   animation: tlm_skeleton_pulse 1400ms ease-in-out infinite;
 }
 
@@ -885,7 +910,7 @@ html[data-theme='nord-red'] .pretty-scrollbar::-webkit-scrollbar-thumb {
   font-family: 'Cascadia Code', 'Ubuntu Sans Mono', Consolas, monospace;
   font-size: 0.7rem;
   letter-spacing: 0.04em;
-  color: #4a4945;
+  color: rgb(var(--tlm-fg-dim));
   user-select: none;
 }
 

@@ -70,11 +70,11 @@ function ChatViewInner({
       {messages.length <= 1 && !loading ? (
         <div className="flex flex-col items-center justify-center min-h-[400px] h-full max-w-3xl mx-auto px-4 py-8 select-none">
           <div className="text-center mb-8">
-            <h2 className="hand text-[26px] leading-tight mb-1" style={{ color: '#dcb67a' }}>Welcome to Thalamus</h2>
+            <h2 className="hand text-[26px] leading-tight mb-1" style={{ color: 'rgb(var(--tlm-gold))' }}>Welcome to Thalamus</h2>
             <svg className="sketch-underline" viewBox="0 0 220 8" fill="none" aria-hidden="true">
-              <path d="M2 5 C 30 2, 55 7, 85 4 S 150 2, 180 5 S 210 3, 218 4" stroke="#dcb67a" strokeWidth="1.6" strokeLinecap="round" />
+              <path d="M2 5 C 30 2, 55 7, 85 4 S 150 2, 180 5 S 210 3, 218 4" style={{ stroke: 'rgb(var(--tlm-gold))' }} strokeWidth="1.6" strokeLinecap="round" />
             </svg>
-            <p className="text-xs text-[#A8A49E] max-w-md mx-auto leading-relaxed mt-4">
+            <p className="text-xs text-fg-muted max-w-md mx-auto leading-relaxed mt-4">
               Thalamus is your local AI assistant — behind the scenes it compresses context losslessly to save context and cost. Pick a starting point:
             </p>
           </div>
@@ -84,14 +84,14 @@ function ChatViewInner({
             <button
               type="button"
               onClick={() => onSampleCode(`def calc_data(items):\n    # Redundant calculation optimization example\n    total = 0\n    for x in items:\n        val = x * 2.0\n        total += val\n    return total`)}
-              className="sketch-border flex items-start gap-3.5 p-4 bg-[#1C1B1A]/80 hover:bg-[#282726] hover:border-[#dcb67a]/60 text-left cursor-pointer transition-all duration-300 group"
+              className="sketch-border flex items-start gap-3.5 p-4 bg-panel/80 hover:bg-surface hover:border-gold/60 text-left cursor-pointer transition-all duration-300 group"
             >
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-[#dcb67a] transition-colors group-hover:border-[#dcb67a]/40 group-hover:bg-[#dcb67a]/10 flex-shrink-0">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-gold transition-colors group-hover:border-gold/40 group-hover:bg-gold/10 flex-shrink-0">
                 <FileCode2 size={17} strokeWidth={1.75} />
               </div>
               <div className="flex flex-col gap-1 min-w-0">
-                <span className="text-[13px] font-semibold text-[#F2F0E5] group-hover:text-white transition-colors">Sample prompt</span>
-                <span className="text-[11px] text-[#A8A49E] leading-normal">A short Python snippet to start a conversation with.</span>
+                <span className="text-[13px] font-semibold text-fg group-hover:text-white transition-colors">Sample prompt</span>
+                <span className="text-[11px] text-fg-muted leading-normal">A short Python snippet to start a conversation with.</span>
               </div>
             </button>
 
@@ -99,14 +99,14 @@ function ChatViewInner({
             <button
               type="button"
               onClick={onOpenProject}
-              className="sketch-border flex items-start gap-3.5 p-4 bg-[#1C1B1A]/80 hover:bg-[#282726] hover:border-[#dcb67a]/60 text-left cursor-pointer transition-all duration-300 group"
+              className="sketch-border flex items-start gap-3.5 p-4 bg-panel/80 hover:bg-surface hover:border-gold/60 text-left cursor-pointer transition-all duration-300 group"
             >
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-[#dcb67a] transition-colors group-hover:border-[#dcb67a]/40 group-hover:bg-[#dcb67a]/10 flex-shrink-0">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-gold transition-colors group-hover:border-gold/40 group-hover:bg-gold/10 flex-shrink-0">
                 <FolderOpen size={17} strokeWidth={1.75} />
               </div>
               <div className="flex flex-col gap-1 min-w-0">
-                <span className="text-[13px] font-semibold text-[#F2F0E5] group-hover:text-white transition-colors">Open project</span>
-                <span className="text-[11px] text-[#A8A49E] leading-normal">Browse {projectName}: files, editor, terminal.</span>
+                <span className="text-[13px] font-semibold text-fg group-hover:text-white transition-colors">Open project</span>
+                <span className="text-[11px] text-fg-muted leading-normal">Browse {projectName}: files, editor, terminal.</span>
               </div>
             </button>
 
@@ -114,14 +114,14 @@ function ChatViewInner({
             <button
               type="button"
               onClick={onOpenSettings}
-              className="sketch-border flex items-start gap-3.5 p-4 bg-[#1C1B1A]/80 hover:bg-[#282726] hover:border-[#dcb67a]/60 text-left cursor-pointer transition-all duration-300 group"
+              className="sketch-border flex items-start gap-3.5 p-4 bg-panel/80 hover:bg-surface hover:border-gold/60 text-left cursor-pointer transition-all duration-300 group"
             >
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-[#dcb67a] transition-colors group-hover:border-[#dcb67a]/40 group-hover:bg-[#dcb67a]/10 flex-shrink-0">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-gold transition-colors group-hover:border-gold/40 group-hover:bg-gold/10 flex-shrink-0">
                 <KeyRound size={17} strokeWidth={1.75} />
               </div>
               <div className="flex flex-col gap-1 min-w-0">
-                <span className="text-[13px] font-semibold text-[#F2F0E5] group-hover:text-white transition-colors">Connect a model</span>
-                <span className="text-[11px] text-[#A8A49E] leading-normal">Add provider keys so replies can use a model.</span>
+                <span className="text-[13px] font-semibold text-fg group-hover:text-white transition-colors">Connect a model</span>
+                <span className="text-[11px] text-fg-muted leading-normal">Add provider keys so replies can use a model.</span>
               </div>
             </button>
 
@@ -129,14 +129,14 @@ function ChatViewInner({
             <button
               type="button"
               onClick={onEngineDiagnostic}
-              className="sketch-border flex items-start gap-3.5 p-4 bg-[#1C1B1A]/80 hover:bg-[#282726] hover:border-[#dcb67a]/60 text-left cursor-pointer transition-all duration-300 group"
+              className="sketch-border flex items-start gap-3.5 p-4 bg-panel/80 hover:bg-surface hover:border-gold/60 text-left cursor-pointer transition-all duration-300 group"
             >
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-[#dcb67a] transition-colors group-hover:border-[#dcb67a]/40 group-hover:bg-[#dcb67a]/10 flex-shrink-0">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-gold transition-colors group-hover:border-gold/40 group-hover:bg-gold/10 flex-shrink-0">
                 <Gauge size={17} strokeWidth={1.75} />
               </div>
               <div className="flex flex-col gap-1 min-w-0">
-                <span className="text-[13px] font-semibold text-[#F2F0E5] group-hover:text-white transition-colors">Engine status</span>
-                <span className="text-[11px] text-[#A8A49E] leading-normal">Pings the local engine and reports latency.</span>
+                <span className="text-[13px] font-semibold text-fg group-hover:text-white transition-colors">Engine status</span>
+                <span className="text-[11px] text-fg-muted leading-normal">Pings the local engine and reports latency.</span>
               </div>
             </button>
           </div>
@@ -148,11 +148,11 @@ function ChatViewInner({
             <button
               type="button"
               onClick={() => setVisibleCount(c => c + WINDOW_STEP)}
-              className="mx-auto mt-1 mb-2 px-3 py-1.5 rounded-md border border-white/[0.08] bg-white/[0.03] text-[11px] text-[#A8A49E] hover:text-[#F2F0E5] hover:bg-white/[0.06] cursor-pointer transition-colors"
+              className="mx-auto mt-1 mb-2 px-3 py-1.5 rounded-md border border-white/[0.08] bg-white/[0.03] text-[11px] text-fg-muted hover:text-fg hover:bg-white/[0.06] cursor-pointer transition-colors"
               title={`${hiddenCount} earlier message${hiddenCount === 1 ? '' : 's'} hidden for speed`}
             >
               Load {Math.min(WINDOW_STEP, hiddenCount)} older message{Math.min(WINDOW_STEP, hiddenCount) === 1 ? '' : 's'}
-              <span className="text-[#6F6C66]"> · {hiddenCount} hidden</span>
+              <span className="text-fg-faint"> · {hiddenCount} hidden</span>
             </button>
           )}
 
