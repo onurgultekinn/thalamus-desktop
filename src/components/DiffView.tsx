@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Copy, Check, AlertTriangle } from 'lucide-react';
 import { SyntaxHighlighter, vscDarkPlus } from '../lib/codeHighlight';
 import { MODELS } from '../constants';
+import { useT } from '../lib/i18n';
 
 export interface DiffCodeData {
   originalCode: string;
@@ -68,6 +69,7 @@ interface CodePaneProps {
 }
 
 function CodePane({ label, dotClass, code, lang, metric, tsvHint, scrollRef, onScroll }: CodePaneProps) {
+  const t = useT();
   const [copied, setCopied] = useState(false);
   const lines = code.split('\n');
 
@@ -83,14 +85,14 @@ function CodePane({ label, dotClass, code, lang, metric, tsvHint, scrollRef, onS
 
   return (
     <div className="flex h-full min-w-0 flex-col overflow-hidden">
-      <div className="flex flex-shrink-0 items-center justify-between gap-3 border-b border-surface bg-panel px-4 py-2">
-        <span className="flex flex-shrink-0 items-center gap-1.5 text-[11px] font-semibold text-fg-muted">
+      <div className="flex flex-shrink-0 items-center justify-between gap-3 border-b border-[#282726] bg-[#1C1B1A] px-4 py-2">
+        <span className="flex flex-shrink-0 items-center gap-1.5 text-[11px] font-semibold text-[#A8A49E]">
           <span className={`h-2 w-2 rounded-full ${dotClass}`} />
           {label}
           {tsvHint && (
             <span
               title={TSV_LEGEND}
-              className="ml-1 cursor-help rounded border border-white/[0.08] bg-white/[0.05] px-1.5 py-px font-mono text-[11px] font-normal text-fg-dim"
+              className="ml-1 cursor-help rounded border border-white/[0.08] bg-white/[0.05] px-1.5 py-px font-mono text-[11px] font-normal text-[#575654]"
             >
               TSV
             </span>
@@ -98,14 +100,14 @@ function CodePane({ label, dotClass, code, lang, metric, tsvHint, scrollRef, onS
         </span>
 
         <div className="flex min-w-0 items-center gap-2">
-          <span className="truncate font-mono text-[11px] text-fg-muted">{metric}</span>
+          <span className="truncate font-mono text-[11px] text-[#A8A49E]">{metric}</span>
           <button
             type="button"
             onClick={handleCopy}
-            title="Copy"
-            className="flex-shrink-0 cursor-pointer rounded p-1 text-fg-dim transition-colors hover:bg-white/[0.05] hover:text-fg-muted"
+            title={t('diff.copy')}
+            className="flex-shrink-0 cursor-pointer rounded p-1 text-[#575654] transition-colors hover:bg-white/[0.05] hover:text-[#A8A49E]"
           >
-            {copied ? <Check size={12} className="text-aqua" /> : <Copy size={12} />}
+            {copied ? <Check size={12} className="text-[#3AA99F]" /> : <Copy size={12} />}
           </button>
         </div>
       </div>
@@ -113,7 +115,7 @@ function CodePane({ label, dotClass, code, lang, metric, tsvHint, scrollRef, onS
       <div
         ref={scrollRef}
         onScroll={onScroll}
-        className="diff-code-pane min-h-0 flex-1 overflow-auto bg-ink pretty-scrollbar"
+        className="diff-code-pane min-h-0 flex-1 overflow-auto bg-[#100F0F] pretty-scrollbar"
       >
         {code ? (
           <SyntaxHighlighter
@@ -129,7 +131,7 @@ function CodePane({ label, dotClass, code, lang, metric, tsvHint, scrollRef, onS
             lineNumberStyle={{
               minWidth: '2.4em',
               paddingRight: '1.1em',
-              color: 'rgb(var(--tlm-fg-dim))',
+              color: '#575654',
               textAlign: 'right',
               userSelect: 'none',
             }}
@@ -145,8 +147,8 @@ function CodePane({ label, dotClass, code, lang, metric, tsvHint, scrollRef, onS
             {code}
           </SyntaxHighlighter>
         ) : (
-          <div className="flex h-full min-h-[140px] items-center justify-center px-4 py-8 font-mono text-[11px] text-fg-dim">
-            No data
+          <div className="flex h-full min-h-[140px] items-center justify-center px-4 py-8 font-mono text-[11px] text-[#575654]">
+            {t('diff.noData')}
           </div>
         )}
       </div>
@@ -160,6 +162,7 @@ function fmtUsd(v: number): string {
 }
 
 export const DiffView: React.FC<DiffViewProps> = ({ onCloseDiff, diffData, title, modelName, pricePerToken }) => {
+  const t = useT();
   // Empty state when there is no data (no fake sample code is ever shown)
   const origCode = diffData?.originalCode || '';
   const optCode = diffData?.optimizedCode || '';
@@ -235,24 +238,24 @@ export const DiffView: React.FC<DiffViewProps> = ({ onCloseDiff, diffData, title
 
   const fmtBytes = (b: number) => (b > 1024 ? `${(b / 1024).toFixed(1)} KB` : `${b} B`);
   const fmtInt = (n: number) => n.toLocaleString('en-US');
-  const origMetric = `${fmtInt(origTokens)} tok · ${fmtBytes(origBytes)}`;
-  const optMetric = `${fmtInt(optTokens)} tok · ${fmtBytes(optBytes)}`;
+  const origMetric = `${fmtInt(origTokens)} ${t('diff.tok')} · ${fmtBytes(origBytes)}`;
+  const optMetric = `${fmtInt(optTokens)} ${t('diff.tok')} · ${fmtBytes(optBytes)}`;
 
   const origLang = detectLanguage(origCode);
   const optLang = origCode && origCode !== optCode && origLang === 'json' ? 'text' : origLang;
 
   return (
-    <div className="diff-view-layout flex h-full w-full select-none flex-col overflow-hidden bg-ink font-sans text-fg">
+    <div className="diff-view-layout flex h-full w-full select-none flex-col overflow-hidden bg-[#100F0F] font-sans text-[#F2F0E5]">
       {/* TOP BAR */}
-      <div className="flex h-[42px] flex-shrink-0 items-center justify-between border-b border-surface bg-panel px-4 font-mono text-[12px]">
-        <div className="flex items-center gap-2 whitespace-nowrap text-fg-muted lowercase tracking-tight">
-          <span className="max-w-[120px] truncate text-fg-dim" title="chats">
-            chats
+      <div className="flex h-[42px] flex-shrink-0 items-center justify-between border-b border-[#282726] bg-[#1C1B1A] px-4 font-mono text-[12px]">
+        <div className="flex items-center gap-2 whitespace-nowrap text-[#A8A49E] lowercase tracking-tight">
+          <span className="max-w-[120px] truncate text-[#575654]" title={t('diff.chats')}>
+            {t('diff.chats')}
           </span>
           {title && (
             <>
-              <span className="select-none text-fg-dim">/</span>
-              <span className="max-w-[200px] truncate font-medium text-fg">{title}</span>
+              <span className="select-none text-[#575654]">/</span>
+              <span className="max-w-[200px] truncate font-medium text-[#F2F0E5]">{title}</span>
             </>
           )}
         </div>
@@ -260,18 +263,18 @@ export const DiffView: React.FC<DiffViewProps> = ({ onCloseDiff, diffData, title
         <button
           type="button"
           onClick={onCloseDiff}
-          className="flex flex-shrink-0 cursor-pointer items-center gap-1.5 rounded-md border border-fg-dim bg-surface px-3 py-1 font-mono text-[11px] text-fg-muted transition-colors hover:bg-fg-dim hover:text-fg"
+          className="flex flex-shrink-0 cursor-pointer items-center gap-1.5 rounded-md border border-[#575654] bg-[#282726] px-3 py-1 font-mono text-[11px] text-[#A8A49E] transition-colors hover:bg-[#575654] hover:text-[#F2F0E5]"
         >
-          ← Close
+          {t('diff.close')}
         </button>
       </div>
 
       {/* CODE PANES — highlighted, schema lines marked, scroll-synced. Falls back to an empty hero. */}
       {hasData ? (
-        <div className="grid min-h-[240px] flex-1 grid-cols-2 divide-x divide-surface overflow-hidden bg-ink">
+        <div className="grid min-h-[240px] flex-1 grid-cols-2 divide-x divide-[#282726] overflow-hidden bg-[#100F0F]">
           <CodePane
-            label="Original"
-            dotClass="bg-danger"
+            label={t('diff.original')}
+            dotClass="bg-[#D14D41]"
             code={origCode}
             lang={origLang}
             metric={origMetric}
@@ -279,8 +282,8 @@ export const DiffView: React.FC<DiffViewProps> = ({ onCloseDiff, diffData, title
             onScroll={handleScrollSync('left')}
           />
           <CodePane
-            label="Optimized"
-            dotClass="bg-aqua"
+            label={t('diff.optimized')}
+            dotClass="bg-[#3AA99F]"
             code={optCode}
             lang={optLang}
             metric={optMetric}
@@ -290,87 +293,87 @@ export const DiffView: React.FC<DiffViewProps> = ({ onCloseDiff, diffData, title
           />
         </div>
       ) : (
-        <div className="flex flex-1 flex-col items-center justify-center gap-2 bg-ink text-center">
-          <span className="text-[13px] font-semibold text-fg-muted">No compression data yet</span>
-          <span className="text-[11px] text-fg-dim">Pick a compressed message in the chat to see the before and after.</span>
+        <div className="flex flex-1 flex-col items-center justify-center gap-2 bg-[#100F0F] text-center">
+          <span className="text-[13px] font-semibold text-[#A8A49E]">{t('diff.noDataTitle')}</span>
+          <span className="text-[11px] text-[#575654]">{t('diff.noDataHint')}</span>
         </div>
       )}
 
       {/* BOTTOM: four KPI tiles — the answer at a glance, all values computed, clean with zero data */}
-      <div className="flex-shrink-0 bg-ink p-3">
-        <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-surface bg-surface lg:grid-cols-4">
+      <div className="flex-shrink-0 bg-[#100F0F] p-3">
+        <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-[#282726] bg-[#282726] lg:grid-cols-4">
           {/* 1 · TOKEN SAVINGS */}
-          <div className="flex min-w-0 flex-col gap-1.5 bg-panel p-4">
-            <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-fg-dim">Token savings</span>
+          <div className="flex min-w-0 flex-col gap-1.5 bg-[#1C1B1A] p-4">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#575654]">{t('diff.tokenSavings')}</span>
             <span
               className={`truncate font-mono text-[28px] font-bold leading-none ${
-                isSaved ? 'text-aqua' : savingsPct < 0 && hasData ? 'text-danger' : 'text-fg-dim'
+                isSaved ? 'text-[#3AA99F]' : savingsPct < 0 && hasData ? 'text-[#D14D41]' : 'text-[#575654]'
               }`}
             >
               {!hasData ? '—' : savingsPct > 0 ? `-${savingsPct}%` : savingsPct < 0 ? `+${Math.abs(savingsPct)}%` : '0%'}
             </span>
-            <span className="truncate font-mono text-[11px] text-fg-muted">
-              {hasData ? `${fmtInt(origTokens)} → ${fmtInt(optTokens)} tok` : 'awaiting analysis'}
+            <span className="truncate font-mono text-[11px] text-[#A8A49E]">
+              {hasData ? `${fmtInt(origTokens)} → ${fmtInt(optTokens)} ${t('diff.tok')}` : t('diff.awaiting')}
             </span>
             {hasData && baselinePct !== null && (
-              <span className="truncate font-mono text-[11px] text-fg-dim">
+              <span className="truncate font-mono text-[11px] text-[#575654]">
                 {savingsPct > baselinePct
-                  ? `+${(savingsPct - baselinePct).toFixed(1)} p.p. above JSON minify`
-                  : `JSON minify alone: -${baselinePct}%`}
+                  ? t('diff.aboveMinify', { n: (savingsPct - baselinePct).toFixed(1) })
+                  : t('diff.minifyAlone', { n: baselinePct })}
               </span>
             )}
           </div>
 
           {/* 2 · COST / CALL on the user's selected model */}
-          <div className="flex min-w-0 flex-col gap-1.5 bg-panel p-4">
-            <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-fg-dim">Cost / call</span>
-            <span className="truncate font-mono text-[28px] font-bold leading-none text-fg">
+          <div className="flex min-w-0 flex-col gap-1.5 bg-[#1C1B1A] p-4">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#575654]">{t('diff.costPerCall')}</span>
+            <span className="truncate font-mono text-[28px] font-bold leading-none text-[#F2F0E5]">
               {hasData ? fmtUsd(costAfter) : '—'}
             </span>
-            <span className="truncate font-mono text-[11px] text-fg-muted">{activeModelName}</span>
+            <span className="truncate font-mono text-[11px] text-[#A8A49E]">{activeModelName}</span>
             {hasData && isSaved && (
-              <span className="truncate font-mono text-[11px] text-fg-dim">was {fmtUsd(costBefore)} uncompressed</span>
+              <span className="truncate font-mono text-[11px] text-[#575654]">{t('diff.wasUncompressed', { v: fmtUsd(costBefore) })}</span>
             )}
           </div>
 
           {/* 3 · PROJECTED SAVINGS AT VOLUME */}
-          <div className="flex min-w-0 flex-col gap-1.5 bg-panel p-4">
-            <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-fg-dim">Saved / 1K calls</span>
-            <span className={`truncate font-mono text-[28px] font-bold leading-none ${isSaved ? 'text-aqua' : 'text-fg-dim'}`}>
+          <div className="flex min-w-0 flex-col gap-1.5 bg-[#1C1B1A] p-4">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#575654]">{t('diff.saved1k')}</span>
+            <span className={`truncate font-mono text-[28px] font-bold leading-none ${isSaved ? 'text-[#3AA99F]' : 'text-[#575654]'}`}>
               {isSaved ? `-${fmtUsd(monthlySavedUsd)}` : '—'}
             </span>
-            <span className="truncate font-mono text-[11px] text-fg-muted">per 1,000 prompts</span>
+            <span className="truncate font-mono text-[11px] text-[#A8A49E]">{t('diff.per1k')}</span>
             {isSaved && (
-              <span className="truncate font-mono text-[11px] text-fg-dim">vs {fmtUsd(costBefore * 1000)} without it</span>
+              <span className="truncate font-mono text-[11px] text-[#575654]">{t('diff.vsWithout', { v: fmtUsd(costBefore * 1000) })}</span>
             )}
           </div>
 
           {/* 4 · ENGINE — speed + integrity */}
-          <div className="flex min-w-0 flex-col gap-1.5 bg-panel p-4">
-            <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-fg-dim">Engine time</span>
-            <span className="truncate font-mono text-[28px] font-bold leading-none text-fg">
+          <div className="flex min-w-0 flex-col gap-1.5 bg-[#1C1B1A] p-4">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#575654]">{t('diff.engineTime')}</span>
+            <span className="truncate font-mono text-[28px] font-bold leading-none text-[#F2F0E5]">
               {engineTimeMs !== undefined ? `${engineTimeMs} ms` : '—'}
             </span>
             {hasData && hasChange ? (
               diffData?.losslessVerified === false ? (
                 // D2: veto_override dogrulamayi atadi — rozet YALAN SOYLEMEZ.
                 <span
-                  title="veto_override forced the structural change; the engine did not verify losslessness for this output."
-                  className="flex items-center gap-1 truncate font-mono text-[11px] text-danger"
+                  title={t('diff.losslessSkippedTitle')}
+                  className="flex items-center gap-1 truncate font-mono text-[11px] text-[#D14D41]"
                 >
-                  <AlertTriangle size={11} /> lossless check skipped (veto override)
+                  <AlertTriangle size={11} /> {t('diff.losslessSkipped')}
                 </span>
               ) : (
                 <span
-                  title="Engine verifies losslessness by comparing the expansion against the original exactly"
-                  className="flex items-center gap-1 truncate font-mono text-[11px] text-aqua"
+                  title={t('diff.losslessVerifiedTitle')}
+                  className="flex items-center gap-1 truncate font-mono text-[11px] text-[#3AA99F]"
                 >
-                  <Check size={11} /> verified lossless (engine)
+                  <Check size={11} /> {t('diff.losslessVerified')}
                 </span>
               )
             ) : (
-              <span className="truncate font-mono text-[11px] text-fg-dim">
-                {hasData ? 'no compression applied' : 'engine idle'}
+              <span className="truncate font-mono text-[11px] text-[#575654]">
+                {hasData ? t('diff.noCompression') : t('diff.engineIdle')}
               </span>
             )}
           </div>
