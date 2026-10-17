@@ -465,7 +465,7 @@ export default function App() {
       role: 'user',
       content: userText.trim() || (activeImages.length ? `[${activeImages.length} image${activeImages.length > 1 ? 's' : ''}]` : userText),
       timestamp: nowTime,
-      ...(activeImages.length > 0 ? { modelName: 'Vision model' } : {}),
+      ...(activeImages.length > 0 ? { modelName: t('app.visionModel') } : {}),
       ...(activeImages.length > 0 ? { images: activeImages } : {}),
     };
 
@@ -505,7 +505,7 @@ export default function App() {
             role: 'assistant',
             content: `No model key is set, so the image was measured on this device instead:\n\n${fallback}\n\nAdd a provider key in Settings to let a vision model look at the image.`,
             timestamp: ts(),
-            modelName: 'Local device measurement',
+            modelName: t('app.localDeviceMeasurement'),
           }]);
         } else {
           // D3/D14: son 8 mesaj baglam gonderilir; regenerate'te yeniden
@@ -521,7 +521,7 @@ export default function App() {
             .map(m => ({ role: m.role, content: m.content as string }));
           const res = await aiChat([
             ...history,
-            userMessage(userText.trim() || 'Describe this image in detail.', images.map((i) => ({ url: i.url, detail: i.detail }))),
+            userMessage(userText.trim() || t('app.describeImage'), images.map((i) => ({ url: i.url, detail: i.detail }))),
           ], [], null, signal);
           applyMessages(prev => [...prev, {
             role: 'assistant',
@@ -539,7 +539,7 @@ export default function App() {
             role: 'assistant',
             content: kind === 'stop' ? t('chat.requestStopped') : t('chat.requestTimedOut'),
             timestamp: ts(),
-            modelName: 'Vision model (request aborted)',
+            modelName: t('app.visionAborted'),
           }]);
         } else {
           const x = explainError(err, 'Vision request');
@@ -549,7 +549,7 @@ export default function App() {
             role: 'assistant',
             content: `**[${x.code}] ${x.title}**\n\n${splitExplanation(x.explanation).rest ?? x.explanation}\n\n*${t('toast.wiki')}*`,
             timestamp: ts(),
-            modelName: 'Vision model (request failed)',
+            modelName: t('app.visionFailed'),
           }]);
         }
       } finally {
@@ -607,7 +607,7 @@ export default function App() {
       if (kind) {
         applyMessages(prev => [...prev, {
           role: 'assistant',
-          content: kind === 'stop' ? 'Request stopped.' : '**Request timed out** after 180 s — no response arrived.',
+          content: kind === 'stop' ? t('chat.requestStopped') : t('chat.requestTimedOut'),
           timestamp: ts(),
           modelName: localEngineStamp(),
         }]);
