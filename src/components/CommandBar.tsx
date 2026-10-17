@@ -348,7 +348,17 @@ export function CommandBar({
               }}
               className="flex items-center gap-1.5 bg-obsidian-button/40 border border-obsidian-border px-2.5 py-1 rounded-md text-obsidian-text text-[11px] cursor-pointer hover:bg-obsidian-button transition-colors font-medium"
             >
-              <span>≈ {targetModel}</span>
+              {/* Saglayici anahtari yoksa bu GORUNUR uyari olur: kullanici
+                  yazip gonderdikten sonra "no provider" hatasi almadan once
+                  neyin eksik oldugunu bilir (eskiden yalniz tooltip'te idi). */}
+              {activeModelLabel ? (
+                <span>≈ {targetModel}</span>
+              ) : (
+                <span className="flex items-center gap-1 text-[#dcb67a]">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#dcb67a]" />
+                  No model key
+                </span>
+              )}
               <ChevronUp 
                 size={11} 
                 className={`text-obsidian-muted transition-transform duration-150 ${isModelMenuOpen ? 'rotate-180' : ''}`} 
