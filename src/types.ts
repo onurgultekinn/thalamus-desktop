@@ -24,6 +24,23 @@ export interface Message {
   content: string;
   timestamp?: string;
   modelName?: string;
+  /** İsteğin gerçekten sürdüğü süre (ms) — sohbet bloğunun sağ üstünde. */
+  latencyMs?: number;
+  /**
+   * Modelin düşünme (reasoning) metni — destekleyen sağlayıcılarda gelir.
+   * Arayüzde katlanabilir "Düşünme" bloğunda gösterilir; içerik ayrı tutulur.
+   */
+  reasoning?: string;
+  /** Cevap hâlâ akıyor: ChatView artımlı (dondurulmuş blok + canlı kuyruk) çizer. */
+  streaming?: boolean;
+  /** Akış yarıda kaldıysa sebep — cevap silinmez, küçük bir not düşülür. */
+  stopped?: 'stop' | 'timeout' | 'error';
+  /**
+   * Cevap akışla geldi: 260 px iç kaydırma kutusuna SIKIŞTIRILMAZ. Aksi halde
+   * akış sırasında yeni metin kutunun dışında kalır ve bitişte balon aniden
+   * küçülür (istenmeyen sıçrama).
+   */
+  streamed?: boolean;
   originalCodeSnippet?: string;
   compressedCodeSnippet?: string;
   metrics?: MessageMetrics;

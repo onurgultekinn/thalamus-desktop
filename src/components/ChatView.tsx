@@ -1,10 +1,14 @@
-import { Fragment, memo, useEffect, useState, type RefObject } from 'react';
-import { FileCode2, FolderOpen, KeyRound, Gauge } from 'lucide-react';
+import { Fragment, memo, useEffect, useRef, useState, type RefObject } from 'react';
+import { FileCode2, FolderOpen, KeyRound, Gauge, Pencil } from 'lucide-react';
 import { MarkdownMessage } from './MarkdownMessage';
+import { StreamingMessage } from './StreamingMarkdown';
 import { TextDivider } from './TextDivider';
 import { useToast } from './Toast';
 import { useT } from '../lib/i18n';
 import type { Message } from '../types';
+
+/** Gecikme: 1 sn altı ms, üstü tek ondalıkla saniye. */
+const fmtLatency = (ms: number) => (ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`);
 
 /**
  * Rendering window: opening a long chat mounts every message, and each mount
@@ -34,6 +38,8 @@ function ChatViewInner({
   onEngineDiagnostic,
   onRegenerate,
   onInspectDiff,
+  onEditMessage,
+  hasProvider = false,
 }: {
   messages: Message[];
   loading: boolean;
@@ -50,13 +56,33 @@ function ChatViewInner({
   onEngineDiagnostic: () => void;
   onRegenerate: (idx: number) => void;
   onInspectDiff: (msg: Message, idx: number) => void;
+  /** Kullanıcı mesajını düzeltip o noktadan yeniden yanıt üretir. */
+  onEditMessage: (idx: number, content: string) => void;
+  /** En az bir sağlayıcı anahtarı bağlı mı? Bağlıysa "model bağla" kartı gizlenir. */
+  hasProvider?: boolean;
 }) {
   const [visibleCount, setVisibleCount] = useState(WINDOW_INITIAL);
+  const [editingIdx, setEditingIdx] = useState<number | null>(null);
+  const [draft, setDraft] = useState('');
+  const editRef = useRef<HTMLTextAreaElement>(null);
+
+  // Metin kutusu içeriğe göre KENDİLİĞİNDEN büyür (elle boyutlandırma yok);
+  // bir noktadan sonra kendi içinde kaydırır.
+  useEffect(() => {
+    const el = editRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    const next = Math.min(el.scrollHeight, 360);
+    el.style.height = `${next}px`;
+    el.style.overflowY = el.scrollHeight > 360 ? 'auto' : 'hidden';
+  }, [draft, editingIdx]);
 
   // Yeni sohbete gecince pencere sifirlanir: eski sohbette acilan 200 mesaj
   // yeni sohbete tasinip ayni donmayi yaratmasin.
   useEffect(() => {
     setVisibleCount(WINDOW_INITIAL);
+    setEditingIdx(null);
+    setDraft('');
   }, [chatKey]);
 
   const { showToast } = useToast();
@@ -67,9 +93,18 @@ function ChatViewInner({
   const visibleMessages = windowStart > 0 ? messages.slice(windowStart) : messages;
   const hiddenCount = windowStart;
 
+  const saveEdit = () => {
+    if (editingIdx === null) return;
+    const text = draft.trim();
+    if (!text) return;
+    onEditMessage(editingIdx, text);
+    setEditingIdx(null);
+    setDraft('');
+  };
+
   return (
     <>
-      {messages.length <= 1 && !loading ? (
+      {messages.length === 0 && !loading ? (
         <div className="flex flex-col items-center justify-center min-h-[400px] h-full max-w-3xl mx-auto px-4 py-8 select-none">
           <div className="text-center mb-8">
             <h2 className="hand text-[26px] leading-tight mb-1" style={{ color: 'rgb(var(--tlm-gold))' }}>{t('chat.welcome')}</h2>
@@ -114,7 +149,8 @@ function ChatViewInner({
               </div>
             </button>
 
-            {/* CARD 3: Connect a model */}
+            {/* CARD 3: Connect a model — yalnız bağlı sağlayıcı yokken */}
+            {!hasProvider && (
             <button
               type="button"
               onClick={onOpenSettings}
@@ -128,6 +164,7 @@ function ChatViewInner({
                 <span className="text-[11px] text-[#A8A49E] leading-normal">{t('chat.card.model.desc')}</span>
               </div>
             </button>
+            )}
 
             {/* CARD 4: Engine status */}
             <button
@@ -162,6 +199,7 @@ function ChatViewInner({
 
           {visibleMessages.map((msg, i) => {
             const idx = windowStart + i;
+            const latencyMs = msg.latencyMs ?? msg.metrics?.executionTimeMs;
             return (
           <Fragment key={idx}>
 
@@ -221,20 +259,79 @@ function ChatViewInner({
                     <span>{msg.role === 'user' ? (userName || t('sidebar.anonymous')) : t('chat.thalamus')}</span>
                   </div>
                   <div className="msg-header-right">
-                    {/* D1: modelName yoksa pazarlama modeli uydurma */}
-                    <span className="msg-model-name">{msg.modelName || t('chat.localMessage')}</span>
-                    <span className="dot-separator">·</span>
-                    <span>
-                      {msg.metrics?.executionTimeMs
-                        ? `${msg.metrics.executionTimeMs}ms`
-                        : '—'}
-                    </span>
+                    {msg.role === 'assistant' && (
+                      <>
+                        {/* D1: modelName yoksa pazarlama modeli uydurma */}
+                        <span className="msg-model-name">{msg.modelName || t('chat.localMessage')}</span>
+                        <span className="dot-separator">·</span>
+                        <span title={msg.streaming ? t('chat.streaming') : t('chat.latency')}>
+                          {msg.streaming ? t('chat.streaming') : latencyMs ? fmtLatency(latencyMs) : '—'}
+                        </span>
+                      </>
+                    )}
                   </div>
                 </div>
 
-                <div className={`mod-text ${msg.content.length > 300 ? 'msg-content-scrollable pretty-scrollbar' : ''}`}>
-                  <MarkdownMessage content={msg.content} />
-                </div>
+                {/* Düşünme (reasoning): model destekliyorsa ve kullanıcı
+                    kapatmadıysa gelir. Varsayılan KAPALI gelir (gürültü değil,
+                    isteğe bağlı ayrıntı); tıklayınca açılır. */}
+                {msg.role === 'assistant' && !!msg.reasoning?.trim() && (
+                  <details className="msg-reasoning">
+                    <summary>{t('chat.reasoning')}</summary>
+                    <pre className="msg-reasoning-text pretty-scrollbar">{msg.reasoning.trim()}</pre>
+                  </details>
+                )}
+
+                {editingIdx === idx ? (
+                  <div className="flex flex-col gap-2 pb-0.5">
+                    <textarea
+                      ref={editRef}
+                      autoFocus
+                      value={draft}
+                      onChange={(e) => setDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') setEditingIdx(null);
+                        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) saveEdit();
+                      }}
+                      rows={4}
+                      className="pretty-scrollbar min-h-[118px] w-full resize-none overflow-hidden rounded-md bg-[#100F0F]/60 px-3 py-3 text-[13.5px] leading-relaxed text-[#F2F0E5] outline-none ring-1 ring-inset ring-white/[0.07] transition-shadow focus:ring-[#dcb67a]/40"
+                    />
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setEditingIdx(null)}
+                          className="cursor-pointer rounded px-2 py-1 text-[11px] text-[#87857F] transition-colors hover:bg-white/[0.05] hover:text-[#CECDC3]"
+                        >
+                          {t('common.cancel')}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={saveEdit}
+                          disabled={!draft.trim() || loading}
+                          className="cursor-pointer rounded border border-[#dcb67a]/30 bg-[#dcb67a]/10 px-2.5 py-1 text-[11px] font-medium text-[#dcb67a] transition-colors hover:border-[#dcb67a]/50 hover:bg-[#dcb67a]/15 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          {t('chat.resend')}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className={`mod-text ${msg.content.length > 300 && !msg.streaming && !msg.streamed ? 'msg-content-scrollable pretty-scrollbar' : ''}`}>
+                    {msg.streaming
+                      ? <StreamingMessage content={msg.content} />
+                      : <MarkdownMessage content={msg.content} />}
+                    {msg.stopped && (
+                      <div className="msg-stopped-note">
+                        {msg.stopped === 'timeout'
+                          ? t('chat.timeoutNote')
+                          : msg.stopped === 'error'
+                            ? t('chat.brokenNote')
+                            : t('chat.stoppedNote')}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <div className="msg-footer">
                   <div className="msg-actions">
@@ -245,6 +342,19 @@ function ChatViewInner({
                         onClick={() => onRegenerate(idx)}
                       >
                         <svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>
+                      </button>
+                    )}
+                    {msg.role === 'user' && (
+                      <button
+                        className="msg-btn-action"
+                        title={t('chat.edit')}
+                        disabled={loading}
+                        onClick={() => {
+                          setEditingIdx(editingIdx === idx ? null : idx);
+                          setDraft(msg.content);
+                        }}
+                      >
+                        <Pencil />
                       </button>
                     )}
                     <button

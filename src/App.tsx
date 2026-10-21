@@ -14,9 +14,28 @@ import { SettingsModal } from './components/SettingsModal';
 import { AuthScreen } from './components/auth/AuthScreen';
 import { useToast } from './components/Toast';
 import { API_BASE } from './services/ThalamusClient';
-import { aiChat, userMessage, getActiveProvider } from './services/aiClient';
-import { DEFAULT_MODEL_NAME, MODEL_PRICING } from './constants';
+import { aiChat, aiChatStream, userMessage, getActiveProvider } from './services/aiClient';
+import { setProviderModel } from './lib/models';
+import { priceForModel, usePriceMap } from './lib/pricing';
+import {
+  LOCAL_MODELS_EVENT,
+  getCachedLocalScan,
+  isLocalProvider,
+  listServing,
+  localEndpointsFresh,
+  normalizeBaseUrl,
+  providerForBase,
+  scanLocalModels,
+  serveLocalModel,
+  stopLocalModel,
+  type ModelFile,
+} from './lib/localModels';
+import { API_PROVIDERS, activeProviderStorageKey, baseStorageKey } from './lib/providers';
 import { getWorkspaceName, getWorkspaceRoot, openProject, pruneRecentProjects, rememberProject } from './lib/workspace';
+import { planFileContext, addSavings, loadSavings, estimateTokens, cacheAwareHistory, type SessionSavings } from './lib/contextPlan';
+import { expandCompactDiff } from './lib/compactDiff';
+import { policyFromSettings, policyDirective, type AnswerMode } from './lib/intentPolicy';
+import { routeModel, type RoutingMode, type TaskClass } from './lib/modelRouter';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { explainError, splitExplanation } from './lib/errors';
 import { markSwitchStart, reportSwitchPaint } from './lib/perfTrace';
@@ -30,16 +49,11 @@ import './App.css';
 // kullanılanı yazar.
 const localEngineStamp = () => t('app.engineStamp');
 
-const getDefaultMessages = (): Message[] => {
-  return [
-    {
-      role: 'assistant',
-      content: t('app.welcome1'),
-      timestamp: ts(),
-      modelName: localEngineStamp()
-    }
-  ];
-};
+// Yerel model yalnızca sohbet sürerken açık kalsın: son etkinlikten bu kadar
+// sonra uygulamanın başlattığı sunucular durdurulur (sonraki istekte yeniden başlar).
+const LOCAL_MODEL_IDLE_MS = 3 * 60 * 1000;
+
+const getDefaultMessages = (): Message[] => [];
 
 /** Maximum number of messages written to localStorage per chat. */
 const MAX_STORED_MESSAGES = 200;
@@ -58,31 +72,112 @@ export default function App() {
     const saved = localStorage.getItem('tlm_start_view');
     return saved === 'project' ? 'project' : 'chat';
   });
-  const [targetModel, setTargetModel] = useState<string>(() => {
-    return localStorage.getItem('tlm_default_model') || DEFAULT_MODEL_NAME;
-  });
   // Gerçekte yanıtlayacak sağlayıcı · model; composer'ın dürüst ipucu için.
-  // Ayarlar değişince (anahtar kaydı/sağlayıcı seçimi) yeniden çözülür.
+  // Ayarlar değişince (anahtar kaydı, sağlayıcı seçimi, model) yeniden çözülür.
+  const [activeProviderId, setActiveProviderId] = useState<string>('');
+  const [activeModel, setActiveModel] = useState<string>('');
   const [activeModelLabel, setActiveModelLabel] = useState<string>('');
   useEffect(() => {
     let cancelled = false;
     const resolve = async () => {
       try {
         const p = await getActiveProvider();
-        if (!cancelled) setActiveModelLabel(p ? `${p.name} · ${p.model}` : '');
+        if (cancelled) return;
+        setActiveProviderId(p?.id ?? '');
+        setActiveModel(p?.model ?? '');
+        setActiveModelLabel(p ? `${p.name} · ${p.model}` : '');
       } catch {
-        if (!cancelled) setActiveModelLabel('');
+        if (cancelled) return;
+        setActiveProviderId('');
+        setActiveModel('');
+        setActiveModelLabel('');
       }
     };
     void resolve();
     window.addEventListener('thalamus_config_changed', resolve);
     window.addEventListener('storage', resolve);
+    window.addEventListener(LOCAL_MODELS_EVENT, resolve);
     return () => {
       cancelled = true;
       window.removeEventListener('thalamus_config_changed', resolve);
       window.removeEventListener('storage', resolve);
+      window.removeEventListener(LOCAL_MODELS_EVENT, resolve);
     };
   }, []);
+
+  // Yerel sağlayıcı seçiliyse AÇILIŞTA bir kez tara (önbellek bayatsa): böylece
+  // kullanıcı Ayarlar'ı açmadan gerçekten indirilmiş modeller kullanılır.
+  // Sonuç LOCAL_MODELS_EVENT yayar → model yukarıdaki effect'te yeniden çözülür.
+  const [, setLocalModelsVersion] = useState(0);
+  useEffect(() => {
+    const bump = () => setLocalModelsVersion((v) => v + 1);
+    window.addEventListener(LOCAL_MODELS_EVENT, bump);
+    void (async () => {
+      try {
+        const p = await getActiveProvider();
+        if (!p || !isLocalProvider(p.id) || localEndpointsFresh()) return;
+        await scanLocalModels(p.baseUrl ? [p.baseUrl] : []);
+      } catch { /* tarama başarısız — sağlayıcı varsayılanı kullanılır */ }
+    })();
+    return () => window.removeEventListener(LOCAL_MODELS_EVENT, bump);
+  }, []);
+
+  // Yerel model boşta durdurulur; her seçim/istek bu zamanı tazeler.
+  const lastModelUseRef = useRef(Date.now());
+
+  const useLocalEndpoint = useCallback((provider: string, baseUrl: string, model: string) => {
+    lastModelUseRef.current = Date.now();
+    try {
+      localStorage.setItem(activeProviderStorageKey, provider);
+      localStorage.setItem(baseStorageKey(provider), baseUrl);
+    } catch { /* noop */ }
+    setProviderModel(provider, model);
+    const name = API_PROVIDERS.find((p) => p.id === provider)?.name ?? provider;
+    setActiveProviderId(provider);
+    setActiveModel(model);
+    setActiveModelLabel(`${name} · ${model}`);
+  }, []);
+
+  const selectProviderModel = useCallback((provider: string, model: string) => {
+    lastModelUseRef.current = Date.now();
+    try {
+      localStorage.setItem(activeProviderStorageKey, provider);
+    } catch { /* noop */ }
+    setProviderModel(provider, model);
+    const name = API_PROVIDERS.find((p) => p.id === provider)?.name ?? provider;
+    setActiveProviderId(provider);
+    setActiveModel(model);
+    setActiveModelLabel(`${name} · ${model}`);
+  }, []);
+
+  const activateLocalFile = useCallback(async (file: ModelFile) => {
+    const served = file.servedBy[0];
+    if (served) {
+      useLocalEndpoint(providerForBase(served), served, file.model);
+      return;
+    }
+    const result = await serveLocalModel(file.id, file.path);
+    useLocalEndpoint('managed', result.baseUrl, result.model);
+  }, [useLocalEndpoint]);
+
+  /**
+   * Seçili yerel model boşta durdurulduysa göndermeden önce yeniden başlatır.
+   * Sunucu zaten ayaktaysa hiçbir şey yapmaz; hata sohbeti engellemez.
+   */
+  const ensureLocalModelReady = useCallback(async () => {
+    try {
+      const p = await getActiveProvider();
+      if (!p || p.id !== 'managed' || !p.model) return;
+      const servers = await listServing();
+      const base = normalizeBaseUrl(p.baseUrl || '');
+      if (servers.some((s) => normalizeBaseUrl(s.base_url) === base || s.model === p.model)) return;
+      const file = getCachedLocalScan()?.files.find((f) => f.model === p.model && f.servable);
+      if (!file) return;
+      const served = await serveLocalModel(file.id, file.path);
+      useLocalEndpoint('managed', served.baseUrl, served.model);
+    } catch { /* sohbet mevcut sağlayıcıyla devam eder */ }
+  }, [useLocalEndpoint]);
+
   const [input, setInput] = useState<string>('');
   // Dosya önizlemesi: chat düzeninde SAĞDA bir sütun (chat'i örtmez, daraltır).
   const [previewItem, setPreviewItem] = useState<PreviewItem | null>(null);
@@ -94,31 +189,59 @@ export default function App() {
   useEffect(() => {
     try { localStorage.setItem('tlm_preview_width', String(previewWidth)); } catch { /* noop */ }
   }, [previewWidth]);
-  // İçerik (PDF/office) genişliği: panel açıldığı andaki genişliğe sabitlenir.
-  // Panel büyütülünce PDF BÜYÜMEZ — yalnız çalışma alanı büyür; zoom'u kullanıcı
-  // viewer'ın kendi araç çubuğundan yapar.
+  // İçerik (PDF/office) genişliği: panelin gerçek genişliğini izler. Sabit
+  // tutulduğunda panel genişletilince içerik sol kenara yapışıyordu.
   const [previewContentW, setPreviewContentW] = useState<number>(640);
+  const previewColRef = useRef<HTMLDivElement>(null);
   const openPreview = useCallback((item: PreviewItem) => {
     setPreviewItem(item);
-    // İçerik genişliği = panelin AÇILIŞ anındaki genişliği; sonra panel
-    // büyütülse de içerik bu boyutta kalır (PDF kendi kendine büyümez).
-    setPreviewContentW(previewWidth);
+    // Panel `maxWidth: calc(100vw - 560px)` ile kırpılabildiği için içeriği
+    // kırpılmamış `previewWidth`e değil, gerçek panel genişliğine sığdır.
+    const maxPanel = Math.max(320, window.innerWidth - 560);
+    setPreviewContentW(Math.min(previewWidth, maxPanel));
   }, [previewWidth]);
+  // Panel gerçekten kaç px yer buldu? (flex küçültmesi + maxWidth). İçerik
+  // genişliğini bir kez gerçek ölçüye sabitle; taşma/kırpılma olmasın.
+  useEffect(() => {
+    if (!previewItem) return;
+    const w = previewColRef.current?.clientWidth;
+    if (w && w > 0) setPreviewContentW(w);
+  }, [previewItem]);
 
   // Sol kenardan çekip bırakarak ÇALIŞMA ALANI (panel) genişliği ayarlanır.
   const startPreviewResize = (e: { clientX: number; preventDefault: () => void }) => {
     e.preventDefault();
     const startX = e.clientX;
     const startW = previewWidth;
+    let raf = 0;
+    let latestW = startW;
     document.body.style.userSelect = 'none';
+    // Sürükleme sırasında içerik genişliğini de canlı güncelle (rAF ile
+    // sınırlı) → içerik bırakınca sıçramaz, panel kenarıyla birlikte akar.
+    const apply = () => {
+      raf = 0;
+      setPreviewWidth(latestW);
+      const maxPanel = Math.max(320, window.innerWidth - 560);
+      setPreviewContentW(Math.min(latestW, maxPanel));
+    };
     const move = (ev: PointerEvent) => {
-      const w = Math.max(320, Math.min(startW + (startX - ev.clientX), window.innerWidth - 380));
-      setPreviewWidth(w);
+      latestW = Math.max(320, Math.min(startW + (startX - ev.clientX), window.innerWidth - 380));
+      if (!raf) raf = requestAnimationFrame(apply);
     };
     const up = () => {
+      if (raf) { cancelAnimationFrame(raf); raf = 0; }
       document.body.style.userSelect = '';
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
+      setPreviewWidth(latestW);
+      const maxPanel = Math.max(320, window.innerWidth - 560);
+      setPreviewContentW(Math.min(latestW, maxPanel));
+      // Flex/maxWidth yüzünden panel gerçekte daha dar kaldıysa son ölçüyü
+      // (commit sonrası) kullan.
+      requestAnimationFrame(() => {
+        const actual = previewColRef.current?.clientWidth;
+        if (actual && actual > 0) setPreviewContentW(actual);
+      });
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
@@ -180,6 +303,9 @@ export default function App() {
   // 🎯 Active file tracking on the project screen (synced with Header)
   const [activeTab, setActiveTab] = useState<string>('');
 
+  // Oturum tasarrufu (görünür kılınır): planlayıcının yeniden göndermediği içerik.
+  const [sessionSave, setSessionSave] = useState<SessionSavings>({ avoidedChars: 0, files: 0, turns: 0 });
+
   // 🎯 Live data state for DiffView
   const [selectedDiffData, setSelectedDiffData] = useState<DiffCodeData | null>(null);
   
@@ -218,44 +344,16 @@ export default function App() {
   // uygulama yeniden başlatılınca etkili oluyordu.)
   useEffect(() => {
     const syncSettings = () => {
-      setTargetModel(localStorage.getItem('tlm_default_model') || DEFAULT_MODEL_NAME);
       setOnlinePricing(localStorage.getItem('tlm_online_pricing') === 'true');
     };
     window.addEventListener('thalamus_config_changed', syncSettings);
     return () => window.removeEventListener('thalamus_config_changed', syncSettings);
   }, []);
 
-  // 💰 Live / local price map state
-  const [modelPricing, setModelPricing] = useState<Record<string, number>>(MODEL_PRICING);
-
-  useEffect(() => {
-    if (onlinePricing) {
-      // Dynamically fetch the latest price list from GitHub/LiteLLM
-      fetch('https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json')
-        .then(res => res.json())
-        .then(data => {
-          const updatedPricing = { ...MODEL_PRICING };
-          
-          if (data['claude-3-5-sonnet-20241022']?.input_cost_per_token) {
-            updatedPricing['Claude 3.5 Sonnet'] = data['claude-3-5-sonnet-20241022'].input_cost_per_token;
-          }
-          if (data['gpt-4o']?.input_cost_per_token) {
-            updatedPricing['GPT-4o'] = data['gpt-4o'].input_cost_per_token;
-          }
-          if (data['deepseek-chat']?.input_cost_per_token) {
-            updatedPricing['DeepSeek V3'] = data['deepseek-chat'].input_cost_per_token;
-          }
-          
-          setModelPricing(updatedPricing);
-          console.log('✓ Prices updated from live source:', updatedPricing);
-        })
-        .catch(err => {
-          console.log('⚠️ Live price list could not be fetched, built-in list in use:', err);
-        });
-    } else {
-      setModelPricing(MODEL_PRICING);
-    }
-  }, [onlinePricing]);
+  // 💰 Fiyat listesi: yerleşik referans + (açıksa) LiteLLM kataloğu; anahtar
+  // gerçek model id'sidir (pazarlama adı değil).
+  const modelPricing = usePriceMap(onlinePricing);
+  const activePrice = priceForModel(modelPricing, activeModel);
 
   const { isLoading: engineLoading, checkHealth } = useThalamus();
 
@@ -278,6 +376,29 @@ export default function App() {
   const chatEndRef = useRef<HTMLDivElement>(null);
   // T2: süren AI isteğini iptal etmek için (Stop düğmesi).
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Boşta kalan yerel modeli kapat: istek yoksa ve son etkinlikten
+  // LOCAL_MODEL_IDLE_MS geçtiyse uygulamanın başlattığı tüm sunucuları durdur.
+  const loadingRef = useRef(false);
+  useEffect(() => {
+    loadingRef.current = loading;
+    lastModelUseRef.current = Date.now();
+  }, [loading]);
+  useEffect(() => {
+    const tick = window.setInterval(() => {
+      if (loadingRef.current) return;
+      if (Date.now() - lastModelUseRef.current < LOCAL_MODEL_IDLE_MS) return;
+      void (async () => {
+        try {
+          const servers = await listServing();
+          if (servers.length === 0) return;
+          await Promise.all(servers.map((s) => stopLocalModel(s.id)));
+          window.dispatchEvent(new Event(LOCAL_MODELS_EVENT));
+        } catch { /* noop */ }
+      })();
+    }, 30_000);
+    return () => window.clearInterval(tick);
+  }, []);
 
   const [chats, setChats] = useState<ChatItem[]>(() => {
     try {
@@ -308,10 +429,19 @@ export default function App() {
 
   const activeChat = chats.find(c => c.id === activeChatId) || chats[0] || { id: '', title: t('app.newChatTitle') };
 
+  // Sohbet değişince o sohbetin birikimli tasarrufu gösterilir.
+  useEffect(() => {
+    setSessionSave(activeChatId ? loadSavings(activeChatId) : { avoidedChars: 0, files: 0, turns: 0 });
+  }, [activeChatId]);
+
   const [messages, setMessages] = useState<Message[]>([]);
   // Perf: acilista okunan sohbetin hemen geri yazilmasini engelleyen isaret
   // (bkz. kalicilik efektindeki loadedChatRef).
   const loadedChatRef = useRef<string | null>(null);
+  /** Akış sırasında kalıcılık yazımını saniyede 1 ile sınırlar. */
+  const streamPersistAtRef = useRef(0);
+  /** Şu an akışı süren sohbet: sohbetten çıkıp dönersek akış devam eder. */
+  const streamingChatIdRef = useRef<string | null>(null);
 
   // Load messages whenever activeChatId changes
   useEffect(() => {
@@ -323,7 +453,18 @@ export default function App() {
     if (savedMsg) {
       try {
         const t0 = performance.now();
-        const parsed = JSON.parse(savedMsg) as Message[];
+        // Eski sohbetlerdeki otomatik "hazır" karşılama mesajı artık yok.
+        const legacyWelcome = new Set([t('app.welcome1'), t('app.welcome2')]);
+        const parsed = (JSON.parse(savedMsg) as Message[])
+          .filter((m) => !(m.role === 'assistant' && legacyWelcome.has(m.content)))
+          // Uygulama akış ortasında kapanmışsa ya da akışı olmayan bir sohbet
+          // açıldıysa: bayat "streaming" bayrağı kalıcı olmasın; yarım cevap
+          // korunur, "koptu" notu düşülür. Canlı akış sürüyorsa dokunma.
+          .map((m) =>
+            m.streaming && activeChatId !== streamingChatIdRef.current
+              ? { ...m, streaming: false, stopped: m.stopped ?? 'error' }
+              : m
+          );
         if (import.meta.env.DEV) {
           const total = parsed.reduce((s, m) => s + (m.content?.length ?? 0), 0);
           const biggest = parsed.reduce((b, m, i) => (m.content && m.content.length > b.len ? { len: m.content.length, i } : b), { len: 0, i: -1 });
@@ -356,6 +497,13 @@ export default function App() {
       if (loadedChatRef.current === activeChatId) {
         loadedChatRef.current = null;
         return;
+      }
+      // Akış sırasında her karede tüm sohbeti JSON'lamak pahalı; saniyede en
+      // fazla bir kez yaz (bitişte zaten yazılacak).
+      if (messages.some((m) => m.streaming)) {
+        const now = Date.now();
+        if (now - streamPersistAtRef.current < 1000) return;
+        streamPersistAtRef.current = now;
       }
       const capped = messages.length > MAX_STORED_MESSAGES ? messages.slice(-MAX_STORED_MESSAGES) : messages;
       // Görseller (data URL'ler) kalıcı depoya gitmez — 5 MB kota rekoru
@@ -413,14 +561,7 @@ export default function App() {
     };
     setChats(prev => [newChat, ...prev]);
     setActiveChatId(newId);
-    setMessages([
-      {
-        role: 'assistant',
-        content: t('app.welcome2'),
-        timestamp: ts(),
-        modelName: localEngineStamp()
-      }
-    ]);
+    setMessages([]);
   };
 
   const handleDeleteChat = (chatId: string) => {
@@ -462,7 +603,9 @@ export default function App() {
     isRegenerate = false,
     imagesFromRegenerate?: AttachedImage[],
     /** Ekli dosyalar: input'a YAZILMAZ, modele görünmez bağlam (code_blocks) olarak gider. */
-    fileContext?: { name: string; body: string }[]
+    fileContext?: { name: string; body: string }[],
+    /** Düzenlenen mesajı yeniden göndermede: geçmiş, o mesajdan ÖNCEKİLER. */
+    historyOverride?: Message[]
   ) => {
     const nowTime = ts();
     let currentId = activeChatId;
@@ -503,7 +646,9 @@ export default function App() {
     // Regenerate, mesaj üzerinde saklanan görselleri yeniden kullanır; aksi
     // halde pendingImages ilk gönderimde silinmiş olduğundan regenerate sessizce
     // metin-sıkıştırma yoluna düşüyordu.
-    const activeImages = pendingImages.length > 0 ? pendingImages : (imagesFromRegenerate ?? []);
+    const activeImages = historyOverride
+      ? (imagesFromRegenerate ?? [])
+      : pendingImages.length > 0 ? pendingImages : (imagesFromRegenerate ?? []);
 
     // Rozet gerçekten ne işleyeceğini söyler: görsel → provider yolu, metin →
     // asistan yolu (motor backend'de sessizdir; P2 katmanı orada çalışır).
@@ -521,6 +666,8 @@ export default function App() {
       setMessages(prev => [...prev, userMsg]);
     }
     setLoading(true);
+    // Yerel model boşta kapatıldıysa isteği göndermeden önce geri aç.
+    await ensureLocalModelReady();
 
     // V3: istek sürerken kullanıcı başka sohbete geçerse yanıt bu sohbete
     // dönmeli: hâlâ aynı sohbetteysek ekrana, değilsek o sohbetin kalıcı
@@ -558,23 +705,27 @@ export default function App() {
         } else {
           // D3/D14: son 8 mesaj baglam gonderilir; regenerate'te yeniden
           // sorulan soru ve yerine uretilecek eski yanit baglama ALINMAZ.
-          let historySrc = messages;
+          let historySrc = historyOverride ?? messages;
           if (isRegenerate) {
             const lastUserIdx = messages.map(m => m.role).lastIndexOf('user');
             if (lastUserIdx !== -1) historySrc = messages.slice(0, lastUserIdx);
           }
-          const history = historySrc
-            .filter(m => typeof m.content === 'string' && m.content.trim().length > 0)
-            .slice(-8)
-            .map(m => ({ role: m.role, content: m.content as string }));
+          const history = cacheAwareHistory(
+            historySrc.filter(m => typeof m.content === 'string' && m.content.trim().length > 0),
+            ownerChatId
+          ).map(m => ({ role: m.role, content: m.content as string }));
+          const visionStartedAt = performance.now();
           const res = await aiChat([
             ...history,
             userMessage(userText.trim() || t('app.describeImage'), images.map((i) => ({ url: i.url, detail: i.detail }))),
           ], [], null, signal);
           applyMessages(prev => [...prev, {
             role: 'assistant',
-            content: res.content,
+            content: expandCompactDiff(res.content),
+            // Düşünme metni (destekleyen sağlayıcılarda) ayrı gösterilir.
+            reasoning: res.reasoning || undefined,
             timestamp: ts(),
+            latencyMs: Math.round(performance.now() - visionStartedAt),
             // D1: gercekten cagrilan saglayici + model yazilir.
             modelName: `${provider.name} · ${provider.model}`,
           }]);
@@ -622,33 +773,225 @@ export default function App() {
         }]);
       } else {
         // Regenerate'te yeniden sorulan soru, bağlama tekrar girilmez.
-        let historySrc = messages;
+        let historySrc = historyOverride ?? messages;
         if (isRegenerate) {
           const lastUserIdx = messages.map(m => m.role).lastIndexOf('user');
           if (lastUserIdx !== -1) historySrc = messages.slice(0, lastUserIdx);
         }
-        const history = historySrc
-          .filter(m =>
+        const history = cacheAwareHistory(
+          historySrc.filter(m =>
             typeof m.content === 'string' &&
             m.content.trim().length > 0 &&
             !m.content.startsWith('**[')
-          )
-          .slice(-8)
-          .map(m => ({ role: m.role, content: m.content as string }));
-        const res = await aiChat([
-          {
-            role: 'system',
-            content: 'You are Thalamus, a helpful desktop assistant for coding. Always answer in the same language the user writes in (Turkish user → Turkish answer).',
-          },
-          ...history,
-          userMessage(userText),
-        ], (fileContext ?? []).map((f, i) => ({ id: `file${i}`, name: f.name, body: f.body })), null, signal);
+          ),
+          ownerChatId
+        ).map(m => ({ role: m.role, content: m.content as string }));
+        // OTURUM PLANLAYICI (lab'da ölçülmüş, kayıpsız): değişmeyen ve hâlâ
+        // bağlamda olan dosyalar referansa dönüşür — içerik yeniden gönderilmez.
+        const ctxPlan = planFileContext(ownerChatId, messages.length + 1, fileContext ?? []);
+        if (ctxPlan.avoidedChars > 0) {
+          setSessionSave(addSavings(ownerChatId, ctxPlan.avoidedChars, ctxPlan.referenced.length));
+        }
+        const textStartedAt = performance.now();
+        // KULLANICI NİYETİ: varsayılan maliyet politikası (kısa prose,
+        // diff-only, görünmez sıkıştırma) yalnız kullanıcı açıkça aksini
+        // istemediğinde geçerli. Yönerge isteğin KUYRUĞUNA eklenir; sabit
+        // sistem öneki ve cache bozulmaz.
+        // Politika YALNIZ açık ayardan gelir; kelime eşleştirmesi yok.
+        const answerMode = (() => {
+          try {
+            const v = localStorage.getItem('tlm_answer_mode');
+            return v === 'terse' || v === 'detailed' ? v : 'auto';
+          } catch { return 'auto'; }
+        })() as AnswerMode;
+        const rawMode = (() => {
+          try { return localStorage.getItem('tlm_raw_context') === 'true'; } catch { return false; }
+        })();
+        const policy = policyFromSettings(answerMode, rawMode);
+        const directive = policyDirective(policy);
+
+        // MODEL ROUTER — varsayılan KAPALI. Gömülü model adı yok: hızlı model
+        // kullanıcının seçtiği model, derin model Ayarlar'da elle girilir.
+        // Auto yalnız ilk turda ve yalnız yapısal veri ekinde yönlendirir;
+        // sohbet ortasında önek cache'ini korumak için seçim sabit kalır.
+        const routerEnabled = (() => {
+          try { return localStorage.getItem('tlm_router_enabled') === 'true'; } catch { return false; }
+        })();
+        const routerMode = (() => {
+          try {
+            const v = localStorage.getItem('tlm_router_mode');
+            return v === 'fast' || v === 'deep' ? v : 'auto';
+          } catch { return 'auto'; }
+        })() as RoutingMode;
+        const deepModel = (() => {
+          try { return localStorage.getItem('tlm_deep_model_' + provider.id) || null; } catch { return null; }
+        })();
+        const routeKey = 'tlm_route_' + ownerChatId;
+        let previousRoute: { model: string; task: TaskClass } | undefined;
+        try {
+          const raw = localStorage.getItem(routeKey);
+          if (raw) {
+            const r = JSON.parse(raw) as { providerId?: string; model?: string; task?: TaskClass };
+            if (r.providerId === provider.id && r.model && r.task) {
+              previousRoute = { model: r.model, task: r.task };
+            }
+          }
+        } catch { /* yok say */ }
+        const structuredExts = new Set(['json','jsonl','csv','tsv','xml','yaml','yml','toml','ini','sql','ndjson','log']);
+        const codeExts = new Set(['ts','tsx','js','jsx','py','rs','go','java','kt','c','h','cpp','hpp','cs','rb','php','swift','css','scss','html','vue','svelte','sh']);
+        let hasStructuredData = false;
+        let hasCodeFiles = false;
+        for (const b of ctxPlan.blocks) {
+          const ext = (b.name.split('.').pop() || '').toLowerCase();
+          if (structuredExts.has(ext)) hasStructuredData = true;
+          else if (codeExts.has(ext)) hasCodeFiles = true;
+          else {
+            const t = b.body.trimStart();
+            if (t.startsWith('{') || t.startsWith('[')) hasStructuredData = true;
+          }
+        }
+        const route = routeModel({
+          enabled: routerEnabled,
+          mode: routerMode,
+          fastModel: provider.model,
+          activeModel: provider.model,
+          deepModel,
+          hasStructuredData,
+          hasCodeFiles,
+          isFirstTurn: messages.every((m) => m.role !== 'user'),
+          previous: previousRoute,
+        });
+        // AUTO yalnız ÖNERİR (UI'da tek tıkla geçilir). Yalnız açık
+        // Hızlı/Derin modu isteği doğrudan yönlendirir.
+        const applyRoute = routerMode !== 'auto';
+        const usedModel = applyRoute ? (route.model ?? provider.model) : provider.model;
+        if (applyRoute && route.model) {
+          try {
+            localStorage.setItem(routeKey, JSON.stringify({
+              providerId: provider.id, model: route.model, task: route.task,
+            }));
+          } catch { /* yok say */ }
+        }
+        const policyMsgs = directive ? [{ role: 'system' as const, content: directive }] : [];
+        // Akış: balon hemen görünür, parçalar ~40 ms'de bir boyanır. ChatView
+        // metni her zaman biçimli çizer (dondurulmuş bloklar + canlı kuyruk).
+        streamingChatIdRef.current = ownerChatId;
         applyMessages(prev => [...prev, {
           role: 'assistant',
-          content: res.content,
+          content: '',
           timestamp: ts(),
-          modelName: `${provider.name} · ${provider.model}`,
-        }]);
+          modelName: `${provider.name} · ${usedModel}`,
+          streaming: true,
+        } satisfies Message]);
+
+        let streamed = '';
+        let reasoningAcc = '';
+        let flushTimer: number | undefined;
+        const paint = () => {
+          flushTimer = undefined;
+          const contentSnapshot = streamed;
+          const reasoningSnapshot = reasoningAcc;
+          applyMessages(prev => {
+            const copy = [...prev];
+            for (let i = copy.length - 1; i >= 0; i--) {
+              if (copy[i].streaming) {
+                copy[i] = { ...copy[i], content: contentSnapshot, reasoning: reasoningSnapshot || undefined };
+                break;
+              }
+            }
+            return copy;
+          });
+        };
+        const schedulePaint = () => {
+          if (flushTimer !== undefined) return;
+          flushTimer = window.setTimeout(paint, 40);
+        };
+        const stopPaint = () => {
+          if (flushTimer !== undefined) {
+            window.clearTimeout(flushTimer);
+            flushTimer = undefined;
+          }
+        };
+        /** Akışı bitirir: son hâli yazar (yarım cevap SİLİNMEZ, not düşülür). */
+        const settle = (patch: Partial<Message>) => {
+          stopPaint();
+          streamingChatIdRef.current = null;
+          applyMessages(prev => {
+            const copy = [...prev];
+            for (let i = copy.length - 1; i >= 0; i--) {
+              if (copy[i].streaming) {
+                copy[i] = { ...copy[i], ...patch, streaming: false };
+                break;
+              }
+            }
+            return copy;
+          });
+        };
+
+        try {
+          const res = await aiChatStream([
+            {
+              role: 'system',
+              content:
+                'You are Thalamus, a helpful desktop assistant for coding. Always answer in the same language the user writes in (Turkish user → Turkish answer). ' +
+                'Keep prose minimal: at most two short sentences unless the user asks for more detail. ' +
+                // Sözcükten bağımsız güvenlik ağı: kullanıcı tercihi her zaman varsayılanı ezer.
+                'EXCEPTION: whenever the user asks for more detail, a complete file, or exact/original text — however they phrase it — honor that request; never let the brevity or diff default override an explicit user preference. If unsure, ask one short clarifying question. ' +
+                // Kod yanıtı biçimi (ölçülmüş karar, lab TRIALS-014): dosyayı baştan
+                // yazmak yerine yalnız değişen satırları `git diff` biçiminde yaz.
+                // Çıktı token'ı ~%82 azalıyor; anlama farkı ölçülemedi.
+                'When you propose a change to existing code, DO NOT rewrite the whole file. ' +
+                'Emit a COMPACT diff inside a single ```diff block, plus a one-line explanation. ' +
+                'Format: a line `F <path>`, then hunks. A hunk starts with ' +
+                '`@<old_start>[,<old_count>] <new_start>[,<new_count>]`, followed by -removed and ' +
+                '+added lines (context lines start with a space). Do NOT emit diff --git/---/+++/@@ ' +
+                'headers; the app expands them. Write a file in full ONLY when it is brand new. ' +
+                'If the user attaches a file marked as "DEĞİŞMEDİ" (unchanged), its content is already ' +
+                'above in this conversation — rely on it and do not ask for it again.',
+            },
+            ...history,
+            ...policyMsgs,
+            userMessage(userText),
+          ], ctxPlan.blocks, null, signal, { preserve: policy.preserve, model: applyRoute ? route.model ?? undefined : undefined }, {
+            onDelta: (chunk) => {
+              streamed += chunk;
+              schedulePaint();
+            },
+            onReasoning: (chunk) => {
+              reasoningAcc += chunk;
+              schedulePaint();
+            },
+          });
+          if (res.content) streamed = res.content;
+          if (res.reasoning) reasoningAcc = res.reasoning;
+          settle({
+            content: expandCompactDiff(streamed),
+            reasoning: reasoningAcc || undefined,
+            latencyMs: Math.round(performance.now() - textStartedAt),
+            streamed: true,
+          });
+        } catch (streamErr) {
+          const timedOut = String((streamErr as Error)?.message ?? '').includes('TIMEOUT');
+          const kind = abortKind() ?? (timedOut ? 'timeout' : null);
+          if (!kind && !streamed.trim()) {
+            // Hiç metin gelmedi: yarım balon bırakma, normal hata yoluna düş.
+            stopPaint();
+            streamingChatIdRef.current = null;
+            applyMessages(prev => {
+              const idx = prev.map(m => !!m.streaming).lastIndexOf(true);
+              return idx === -1 ? prev : [...prev.slice(0, idx), ...prev.slice(idx + 1)];
+            });
+            throw streamErr;
+          }
+          // Karar: yazılan kısım KALIR; sebebi küçük bir not olarak gösterilir.
+          settle({
+            content: expandCompactDiff(streamed),
+            reasoning: reasoningAcc || undefined,
+            latencyMs: Math.round(performance.now() - textStartedAt),
+            stopped: kind ?? 'error',
+            streamed: true,
+          });
+        }
       }
   } catch (err) {
       const kind = abortKind();
@@ -699,6 +1042,19 @@ export default function App() {
     setInput(code);
     showToast(t('preset.snippetLoaded'), t('preset.snippetLoadedMsg'), 'info');
   }, [showToast]);
+
+  /**
+   * Kullanıcı mesajını düzeltip o noktadan yeniden yanıt üretir: düzenlenen
+   * mesajın ardındaki her şey atılır, istem yeni bir kullanıcı mesajı olarak
+   * gönderilir (görseller korunur).
+   */
+  const handleEditMessage = async (idx: number, content: string) => {
+    if (loading || engineLoading) return;
+    const original = messages[idx];
+    const history = messages.slice(0, idx);
+    setMessages(history);
+    await handleSendMessage(content, false, original?.images, undefined, history);
+  };
 
   const handleOpenProjectView = useCallback(() => setCurrentView('project'), []);
   const handleOpenSettings = useCallback(() => setIsSettingsOpen(true), []);
@@ -845,7 +1201,7 @@ export default function App() {
                   messages={messages}
                   loading={loading}
                   userName={user?.name?.trim()?.toLowerCase() === 'guest user' ? '' : (user?.name?.trim() || '')}
-                  targetModel={targetModel}
+                  targetModel={activeModel}
                   onlinePricing={onlinePricing}
                   projectName={projectName}
                   chatEndRef={chatEndRef}
@@ -856,9 +1212,27 @@ export default function App() {
                   onEngineDiagnostic={handleEngineDiagnostic}
                   onRegenerate={handleRegenerate}
                   onInspectDiff={handleInspectDiff}
+                  onEditMessage={handleEditMessage}
+                  hasProvider={!!activeProviderId}
                 />
               </div>
 
+              {sessionSave.avoidedChars > 0 && (
+                <div
+                  className="flex items-center gap-2 px-3 py-1 text-[10.5px] font-mono text-[#3AA99F] border-t border-[#34332F]/60 select-none"
+                  title={t('session.savedTitle')}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#3AA99F]" />
+                  <span>
+                    {t('session.saved', {
+                      kb: (sessionSave.avoidedChars / 1024).toFixed(1),
+                      tokens: estimateTokens(sessionSave.avoidedChars).toLocaleString('en-US'),
+                      files: sessionSave.files,
+                      turns: sessionSave.turns,
+                    })}
+                  </span>
+                </div>
+              )}
               <div className="command-bar-wrapper" style={{ flexShrink: 0 }}>
                 <CommandBar 
                   input={input}
@@ -866,12 +1240,12 @@ export default function App() {
                   onSend={handleSend}
                   onStop={handleStopRequest}
                   setInput={setInput}
-                  setTargetModel={(m) => {
-                    setTargetModel(m);
-                    localStorage.setItem('tlm_default_model', m);
-                  }}
-                  targetModel={targetModel}
+                  onSelectProviderModel={selectProviderModel}
+                  currentModel={activeModel}
                   activeModelLabel={activeModelLabel}
+                  activeProviderId={activeProviderId}
+                  onUseLocalEndpoint={useLocalEndpoint}
+                  onActivateLocalFile={activateLocalFile}
                   images={pendingImages}
                   setImages={setPendingImages}
                   onOpenPreview={openPreview}
@@ -890,7 +1264,7 @@ export default function App() {
                     role="separator"
                     aria-orientation="vertical"
                   />
-                  <div style={{ width: previewWidth, maxWidth: 'calc(100vw - 360px)', flexShrink: 0, minWidth: 0, height: '100%', overflow: 'hidden' }}>
+                  <div ref={previewColRef} style={{ width: previewWidth, maxWidth: 'calc(100vw - 560px)', flexShrink: 1, minWidth: 320, height: '100%', overflow: 'hidden' }}>
                     <FilePreviewDrawer
                       item={previewItem}
                       onClose={() => setPreviewItem(null)}
@@ -909,8 +1283,8 @@ export default function App() {
               onCloseDiff={() => setCurrentView('chat')} 
               diffData={selectedDiffData ?? undefined}
               title={activeChat.title}
-              modelName={targetModel}
-              pricePerToken={modelPricing[targetModel] || 0.000003}
+              modelName={activeModel || activeModelLabel}
+              pricePerToken={activePrice}
             />
           )}
 
@@ -919,6 +1293,7 @@ export default function App() {
               key={workspaceVersion}
               activeTab={activeTab} 
               setActiveTab={setActiveTab} 
+              onOpenPreview={openPreview}
             />
           )}
         </main>
@@ -936,7 +1311,7 @@ export default function App() {
           let savedTheme: string | null = 'dark';
           try { savedTheme = localStorage.getItem('tlm_theme'); } catch {}
           applyTheme(savedTheme === 'nord-red' ? 'nord-red' : 'dark');
-          setTargetModel(localStorage.getItem('tlm_default_model') || DEFAULT_MODEL_NAME);
+          // Sağlayıcı/model değişikliği 'thalamus_config_changed' ile çözülür.
           // A workspace path may have been set/changed in General — surface it
           // in the projects list and refresh the dashboard.
           const savedRoot = getWorkspaceRoot();

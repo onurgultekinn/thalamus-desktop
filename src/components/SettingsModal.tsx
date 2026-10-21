@@ -22,10 +22,25 @@ import {
   Server,
   CircleUser,
   Database,
+  RefreshCw,
+  Sparkles,
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useToast } from './Toast';
-import { MODELS, DEFAULT_MODEL_NAME } from '../constants';
+import { LocalModelList } from './LocalModelList';
+import { modelChoices, getProviderModel, setProviderModel } from '../lib/models';
+import {
+  buildLocalModelEntries,
+  getCachedLocalScan,
+  listServing,
+  localEndpointsFresh,
+  providerForBase,
+  scanLocalModels,
+  serveLocalModel,
+  stopLocalModel,
+  type LocalScan,
+  type ModelFile,
+} from '../lib/localModels';
 import type { User } from '../types';
 import {
   API_PROVIDERS,
@@ -35,7 +50,8 @@ import {
   activeProviderStorageKey,
 } from '../lib/providers';
 import { getStoredKey, setStoredKey, clearStoredKeys } from '../lib/secrets';
-import { getWorkspaceRoot } from '../lib/workspace';
+import { readShowReasoning, writeShowReasoning } from '../lib/reasoning';
+import { getWorkspaceRoot, saveWorkspaceRoot, rememberProject } from '../lib/workspace';
 import { explainError } from '../lib/errors';
 import { useT, LANGUAGES, getLang, setLang, type TranslationKey } from '../lib/i18n';
 
@@ -43,6 +59,7 @@ export type SettingsTab =
   | 'general'
   | 'appearance'
   | 'editor'
+  | 'chat'
   | 'providers'
   | 'profile'
   | 'data';
@@ -67,7 +84,10 @@ const NAV_GROUPS: { groupKey: TranslationKey; items: { id: SettingsTab; labelKey
   },
   {
     groupKey: 'settings.group.ai',
-    items: [{ id: 'providers', labelKey: 'settings.tab.providers', icon: Server }],
+    items: [
+      { id: 'chat', labelKey: 'settings.tab.chat', icon: Sparkles },
+      { id: 'providers', labelKey: 'settings.tab.providers', icon: Server },
+    ],
   },
   {
     groupKey: 'settings.group.account',
@@ -93,12 +113,17 @@ const SEARCH_INDEX: { section: SettingsTab; labelKey: TranslationKey }[] = [
   { section: 'appearance', labelKey: 'settings.theme' },
   { section: 'editor', labelKey: 'settings.editorFontSize' },
   { section: 'editor', labelKey: 'settings.editorTabSize' },
-  { section: 'editor', labelKey: 'settings.lineNumbers' },
+  { section: 'chat', labelKey: 'settings.answerMode' },
+  { section: 'chat', labelKey: 'settings.showReasoning' },
+  { section: 'chat', labelKey: 'settings.rawContext' },
+  { section: 'chat', labelKey: 'settings.router' },
+  { section: 'chat', labelKey: 'settings.routerMode' },
+  { section: 'chat', labelKey: 'settings.deepModel' },
   { section: 'providers', labelKey: 'settings.provider' },
   { section: 'providers', labelKey: 'settings.baseUrl' },
   { section: 'providers', labelKey: 'settings.apiKey' },
-  { section: 'providers', labelKey: 'settings.defaultModel' },
-  { section: 'providers', labelKey: 'settings.livePrices' },
+  { section: 'providers', labelKey: 'settings.model' },
+  { section: 'data', labelKey: 'settings.livePrices' },
   { section: 'profile', labelKey: 'settings.displayName' },
   { section: 'data', labelKey: 'settings.resetTitle' },
   { section: 'data', labelKey: 'settings.clearChats' },
@@ -121,13 +146,26 @@ function Row({ label, hint, control }: { label: string; hint?: string; control: 
  * A group of rows. The header is optional: sections whose heading already names
  * the content use a bare group so the title is never repeated on the rows.
  */
-function Card({ title, desc, children }: { title?: string; desc?: string; children: ReactNode }) {
+function Card({
+  title,
+  desc,
+  action,
+  children,
+}: {
+  title?: string;
+  desc?: string;
+  action?: ReactNode;
+  children: ReactNode;
+}) {
   return (
     <section className="mb-4 rounded-lg border border-white/[0.06] bg-white/[0.02] px-4 py-1">
       {title && (
-        <div className="pt-3.5">
-          <h3 className="text-[12.5px] font-semibold text-[#F2F0E5]">{title}</h3>
-          {desc && <p className="mt-0.5 text-[11px] leading-snug text-[#87857F]">{desc}</p>}
+        <div className="flex items-start justify-between gap-3 pt-3.5">
+          <div className="min-w-0">
+            <h3 className="text-[12.5px] font-semibold text-[#F2F0E5]">{title}</h3>
+            {desc && <p className="mt-0.5 text-[11px] leading-snug text-[#87857F]">{desc}</p>}
+          </div>
+          {action && <div className="flex-shrink-0 pt-0.5">{action}</div>}
         </div>
       )}
       <div className="divide-y divide-white/[0.05]">{children}</div>
@@ -286,8 +324,6 @@ export function SettingsModal({
   const [keysLoaded, setKeysLoaded] = useState<boolean>(false);
   const keysStatusRef = useRef<'loading' | 'ok' | 'error'>('loading');
   const loadedKeysRef = useRef<Record<string, string>>({});
-  // D10: modalin acilis anindaki tema (Cancel'da geri alinacak deger).
-  const themeAtOpenRef = useRef<'dark' | 'nord-red'>('dark');
   const [baseUrls, setBaseUrls] = useState<Record<string, string>>({});
   const [activeProvider, setActiveProvider] = useState<string>('openai');
   const [visibleProvider, setVisibleProvider] = useState<string | null>(null);
@@ -295,13 +331,45 @@ export function SettingsModal({
   // Appearance / Editor
   const [fontSize, setFontSize] = useState('13');
   const [tabSize, setTabSize] = useState('4');
-  const [lineNumbers, setLineNumbers] = useState(true);
   const [theme, setTheme] = useState<'dark' | 'nord-red'>('dark');
 
   // General
   const [livePricing, setLivePricing] = useState(false);
   const [workspaceRoot, setWorkspaceRoot] = useState('');
-  const [defaultModel, setDefaultModel] = useState<string>(DEFAULT_MODEL_NAME);
+  const [showReasoning, setShowReasoning] = useState<boolean>(() => readShowReasoning());
+  // Yanıt politikası: kullanıcı kelime yazmasa da açık tercih (H43).
+  const [answerMode, setAnswerMode] = useState<'auto' | 'terse' | 'detailed'>(() => {
+    try {
+      const v = localStorage.getItem('tlm_answer_mode');
+      return v === 'terse' || v === 'detailed' ? v : 'auto';
+    } catch { return 'auto'; }
+  });
+  // Ham bağlam: motor sıkıştırmasını tamamen kapat (birebir/orijinal işler).
+  const [rawContext, setRawContext] = useState<boolean>(() => {
+    try { return localStorage.getItem('tlm_raw_context') === 'true'; } catch { return false; }
+  });
+  // Model yönlendirici: gömülü model adı yok; kullanıcı hızlı/derin modeli seçer.
+  const [routerEnabled, setRouterEnabled] = useState<boolean>(() => {
+    try { return localStorage.getItem('tlm_router_enabled') === 'true'; } catch { return false; }
+  });
+  const [routerMode, setRouterMode] = useState<'auto' | 'fast' | 'deep'>(() => {
+    try {
+      const v = localStorage.getItem('tlm_router_mode');
+      return v === 'fast' || v === 'deep' ? v : 'auto';
+    } catch { return 'auto'; }
+  });
+  const [deepModels, setDeepModels] = useState<Record<string, string>>({});
+
+  // Sağlayıcı başına model seçimi (tlm_model_<id>); boşsa sağlayıcı varsayılanı.
+  const [models, setModels] = useState<Record<string, string>>({});
+  // Bilgisayardaki yerel model sunucuları ve model dosyaları.
+  const [localScan, setLocalScan] = useState<LocalScan | null>(() => getCachedLocalScan());
+  const [servers, setServers] = useState<
+    { id: string; kind: string; label: string; model: string; base_url: string; port: number; pid: number }[]
+  >([]);
+  const [scanning, setScanning] = useState(false);
+  const [scanFailed, setScanFailed] = useState(false);
+  const [busyModel, setBusyModel] = useState<string | null>(null);
   const [startView, setStartView] = useState<'chat' | 'project'>('chat');
 
   // Profile
@@ -340,9 +408,22 @@ export function SettingsModal({
     setBaseUrls(loadedBases);
     setLivePricing(localStorage.getItem('tlm_online_pricing') === 'true');
     const loadedTheme = (localStorage.getItem('tlm_theme') as 'dark' | 'nord-red') || 'dark';
-    themeAtOpenRef.current = loadedTheme;
     setTheme(loadedTheme);
-    setDefaultModel(localStorage.getItem('tlm_default_model') || DEFAULT_MODEL_NAME);
+    const loadedModels: Record<string, string> = {};
+    for (const pr of API_PROVIDERS) loadedModels[pr.id] = getProviderModel(pr.id);
+    setModels(loadedModels);
+    setShowReasoning(readShowReasoning());
+    const am = localStorage.getItem('tlm_answer_mode');
+    setAnswerMode(am === 'terse' || am === 'detailed' ? am : 'auto');
+    setRawContext(localStorage.getItem('tlm_raw_context') === 'true');
+    setRouterEnabled(localStorage.getItem('tlm_router_enabled') === 'true');
+    const rm = localStorage.getItem('tlm_router_mode');
+    setRouterMode(rm === 'fast' || rm === 'deep' ? rm : 'auto');
+    const dm: Record<string, string> = {};
+    for (const pr of API_PROVIDERS) {
+      dm[pr.id] = localStorage.getItem('tlm_deep_model_' + pr.id) || '';
+    }
+    setDeepModels(dm);
     setStartView(localStorage.getItem('tlm_start_view') === 'project' ? 'project' : 'chat');
     setActiveProvider(localStorage.getItem(activeProviderStorageKey) || 'openai');
     setResetArmed(false);
@@ -355,7 +436,6 @@ export function SettingsModal({
       const cfg = JSON.parse(localStorage.getItem('thalamus_config') || '{}');
       if (cfg.appearance?.fontSize) setFontSize(cfg.appearance.fontSize.replace('px', ''));
       if (cfg.appearance?.tabSize) setTabSize(String(cfg.appearance.tabSize));
-      if (cfg.appearance?.showLineNumbers !== undefined) setLineNumbers(cfg.appearance.showLineNumbers);
       if (typeof cfg.workspace_root === 'string') setWorkspaceRoot(cfg.workspace_root);
     } catch {}
 
@@ -372,18 +452,33 @@ export function SettingsModal({
 
   useEffect(() => setActiveSection(initialTab), [initialTab]);
 
-  // D10: tema seçimi ANINDA kalıcıdır (previewTheme ref'i günceller), bu yüzden
-  // kapatmak temayı geri almaz. Diğer (Kaydet'e bağlı) alanlar için Cancel iptal sayılır.
-  const requestClose = useCallback(() => {
-    if (theme !== themeAtOpenRef.current) {
-      setTheme(themeAtOpenRef.current);
-      try { localStorage.setItem('tlm_theme', themeAtOpenRef.current); } catch {}
-      const el = document.documentElement;
-      if (themeAtOpenRef.current === 'nord-red') el.setAttribute('data-theme', 'nord-red');
-      else el.removeAttribute('data-theme');
+  /** Bilgisayardaki yerel sunucuları, motorları ve model dosyalarını tarar. */
+  const runLocalScan = useCallback(async (extra: string[]) => {
+    setScanning(true);
+    setScanFailed(false);
+    try {
+      setLocalScan(await scanLocalModels(extra));
+      setServers(await listServing());
+    } catch {
+      setScanFailed(true);
+    } finally {
+      setScanning(false);
     }
-    onClose();
-  }, [theme, onClose]);
+  }, []);
+
+  // Sağlayıcılar bölümü açıldığında tarama KENDİLİĞİNDEN yapılır (önbellek
+  // tazeyse yalnız çalışan sunucular yenilenir) — kullanıcı "Tara"ya basmasın.
+  useEffect(() => {
+    if (!isOpen || activeSection !== 'providers') return;
+    setLocalScan(getCachedLocalScan());
+    void listServing().then(setServers);
+    if (localEndpointsFresh()) return;
+    void runLocalScan([]);
+  }, [isOpen, activeSection, runLocalScan]);
+
+  // Tema seçimi ANINDA kalıcıdır (previewTheme localStorage'a yazar); bu yüzden
+  // kapatmak temayı geri almaz. Diğer (Kaydet'e bağlı) alanlar için Cancel iptal sayılır.
+  const requestClose = useCallback(() => onClose(), [onClose]);
 
   // Esc closes the dialog (same semantics as the X button).
   useEffect(() => {
@@ -399,6 +494,60 @@ export function SettingsModal({
   // Yalnız KULLANILABILIR sağlayıcılar sayılır: "coming soon" (ör. Anthropic)
   // listelenir ama anahtarı olsa bile kullanılamaz — durum listesine katmak yanıltıcıydı.
   const availableProviders = API_PROVIDERS.filter((x) => x.available !== false);
+  // Yerel tarama sonucunun kısaltmaları (tarama yoksa boş).
+  const localFiles = localScan?.files ?? [];
+  const localEndpoints = localScan?.endpoints ?? [];
+  const localEntries = buildLocalModelEntries({
+    endpoints: localEndpoints,
+    files: localFiles,
+    servers,
+    activeProvider,
+    currentModel: models[activeProvider] || '',
+  });
+
+  /** Sağlayıcı + taban URL + modeli seçer ve kalıcılaştırır. */
+  const useEndpoint = (provider: string, baseUrl: string, model: string) => {
+    setActiveProvider(provider);
+    setBaseUrls((prev) => ({ ...prev, [provider]: baseUrl }));
+    setModels((prev) => ({ ...prev, [provider]: model }));
+    try {
+      localStorage.setItem(activeProviderStorageKey, provider);
+      localStorage.setItem(baseStorageKey(provider), baseUrl);
+    } catch { /* noop */ }
+    // Model yazımı 'thalamus_config_changed' yayar → App sağlayıcıyı yeniden çözer.
+    setProviderModel(provider, model);
+  };
+
+  /**
+   * Bir modeli TEK tıkla kullanılır hale getirir: zaten çalışıyorsa ona
+   * bağlanır; çalışmıyorsa motorla başlatıp sonucu `managed` sağlayıcısına yazar.
+   */
+  const activateModel = async (file: ModelFile) => {
+    const served = file.servedBy[0];
+    if (served) {
+      useEndpoint(providerForBase(served), served, file.model);
+      return;
+    }
+    if (!file.servable || busyModel) return;
+    setBusyModel(file.id);
+    try {
+      const r = await serveLocalModel(file.id, file.path);
+      useEndpoint('managed', r.baseUrl, r.model);
+      setServers(await listServing());
+      showToast(t('settings.localStarted'), r.model, 'success');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      showToast(t('settings.localStartFailed'), msg.slice(0, 300), 'error');
+    } finally {
+      setBusyModel(null);
+    }
+  };
+
+  /** Durdurulan modelin sunucusunu kapatır. */
+  const stopServing = async (id: string) => {
+    await stopLocalModel(id);
+    setServers(await listServing());
+  };
 
   /**
    * Ayar değişikliğini ANINDA kalıcılaştırır ve uygular (Kaydet beklenmez).
@@ -406,13 +555,12 @@ export function SettingsModal({
    * ProjectDashboard'a, model/fiyatlandırma aynı olayla App'e iletilir.
    */
   const persistConfig = (
-    patch: Partial<{ fontSize: string; tabSize: string; lineNumbers: boolean; onlinePricing: boolean }> = {}
+    patch: Partial<{ fontSize: string; tabSize: string; onlinePricing: boolean }> = {}
   ) => {
     const cfg = {
       appearance: {
         fontSize: `${patch.fontSize ?? fontSize}px`,
         tabSize: Number(patch.tabSize ?? tabSize),
-        showLineNumbers: patch.lineNumbers ?? lineNumbers,
       },
       onlinePricing: patch.onlinePricing ?? livePricing,
       workspace_root: getWorkspaceRoot() ?? '',
@@ -422,13 +570,33 @@ export function SettingsModal({
   };
 
   /**
+   * Çalışma klasörünü ANINDA uygular (Kaydet beklenmez): gezgin, düzenleyici
+   * ve terminal yeni köke geçer. Geçersiz yol hiçbir yere yazılmaz.
+   */
+  async function applyWorkspace() {
+    const next = workspaceRoot.trim();
+    if (!next) return;
+    try {
+      const info = await invoke<{ root: string; name: string }>('set_workspace_root', { path: next });
+      if (!info?.root) return;
+      setWorkspaceRoot(info.root);
+      saveWorkspaceRoot(info.root);
+      rememberProject(info.root, info.name);
+      persistConfig();
+      showToast(t('settings.workspaceApplied'), t('settings.workspaceAppliedMsg', { path: info.root }), 'success');
+    } catch (e) {
+      const x = explainError(e, 'Workspace');
+      showToast(t('settings.workspaceError'), `${t('settings.workspaceErrorMsg', { path: next })} ${x.explanation}`, 'error', undefined, `[${x.code}] ${x.detail ?? String(e)}`);
+    }
+  }
+
+  /**
    * Applies the theme immediately AND commits it: a display preference must
-   * stick even if the dialog is dismissed without pressing Save. Updating the
-   * "theme at open" ref stops requestClose() from snapping back to the old theme.
+   * stick even if the dialog is dismissed without pressing Save. Writing it here
+   * makes the chosen theme the one the app starts with on the next launch.
    */
   const previewTheme = (next: 'dark' | 'nord-red') => {
     setTheme(next);
-    themeAtOpenRef.current = next;
     try { localStorage.setItem('tlm_theme', next); } catch {}
     const el = document.documentElement;
     if (next === 'nord-red') el.setAttribute('data-theme', 'nord-red');
@@ -483,7 +651,6 @@ export function SettingsModal({
 
     localStorage.setItem('tlm_online_pricing', String(livePricing));
     localStorage.setItem('tlm_theme', theme);
-    localStorage.setItem('tlm_default_model', defaultModel);
     localStorage.setItem('tlm_start_view', startView);
 
     // Ayarlar: workspace yolu ÖNCE doğrulanır; bozuk yol hiçbir config'e
@@ -503,7 +670,6 @@ export function SettingsModal({
     const config = {
       appearance: {
         fontSize: `${fontSize}px`,
-        showLineNumbers: lineNumbers,
         tabSize: Number(tabSize),
       },
       onlinePricing: livePricing,
@@ -711,6 +877,8 @@ export function SettingsModal({
                     type="text"
                     value={workspaceRoot}
                     onChange={(e) => setWorkspaceRoot(e.target.value)}
+                    onBlur={() => { void applyWorkspace(); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void applyWorkspace(); } }}
                     placeholder="C:/projects/my-app"
                     className={inputCls}
                   />
@@ -752,11 +920,6 @@ export function SettingsModal({
                       ))}
                     </select>
                   }
-                />
-                <Row
-                  label={t('settings.lineNumbers')}
-                  hint={t('settings.lineNumbersHint')}
-                  control={<Switch checked={lineNumbers} onChange={(v) => { setLineNumbers(v); persistConfig({ lineNumbers: v }); }} />}
                 />
               </Card>
             )}
@@ -853,58 +1016,69 @@ export function SettingsModal({
                     )}
                   </div>
 
-                  <div className="py-3.5">
-                    <ul className="flex flex-col gap-1.5">
-                      {availableProviders.map((x) => {
-                        const has = !!(keys[x.id] || '').trim();
-                        return (
-                          <li key={x.id} className="flex items-center gap-2 text-[12px]">
-                            <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${has ? 'bg-[#3AA99F]' : 'bg-white/20'}`} />
-                            <span className="text-[#CECDC3]">{x.name}</span>
-                            <span className="ml-auto text-[11px] text-[#87857F]">{has ? t('settings.keySaved') : t('settings.noKeySaved')}</span>
-                          </li>
-                        );
-                      })}
-                    </ul>
+                  <div className="flex flex-col gap-1.5 py-3.5">
+                    <label className={labelCls} htmlFor={`model-${p.id}`}>{t('settings.model')}</label>
+                    <input
+                      id={`model-${p.id}`}
+                      type="text"
+                      list={`model-list-${p.id}`}
+                      value={models[p.id] ?? p.defaultModel ?? ''}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setModels((prev) => ({ ...prev, [p.id]: v }));
+                        // Model de ANINDA etki eder: getActiveProvider bu
+                        // anahtarı okur; boş bırakılırsa sağlayıcı varsayılanı.
+                        setProviderModel(p.id, v);
+                      }}
+                      placeholder={p.defaultModel || 'model-id'}
+                      className={inputCls}
+                      spellCheck={false}
+                      autoComplete="off"
+                    />
+                    <datalist id={`model-list-${p.id}`}>
+                      {modelChoices(p.id).map((m) => (
+                        <option key={m.id} value={m.id}>{m.label}</option>
+                      ))}
+                    </datalist>
+                    <p className="text-[11px] text-[#87857F]">{t('settings.modelHint')}</p>
                   </div>
                 </Card>
 
-                <Card title={t('settings.card.modelsTitle')} desc={t('settings.card.modelsDesc')}>
-                  <Row
-                    label={t('settings.defaultModel')}
-                    hint={t('settings.defaultModelHint')}
-                    control={
-                      <select
-                        value={defaultModel}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          setDefaultModel(v);
-                          try { localStorage.setItem('tlm_default_model', v); } catch {}
-                          window.dispatchEvent(new Event('thalamus_config_changed'));
-                        }}
-                        className={selectCls}
-                      >
-                        {MODELS.map((m) => (
-                          <option key={m.id} value={m.name}>{m.name}</option>
-                        ))}
-                      </select>
-                    }
-                  />
-                  <Row
-                    label={t('settings.livePrices')}
-                    hint={t('settings.livePricesHint')}
-                    control={
-                      <Switch
-                        checked={livePricing}
-                        onChange={(v) => {
-                          setLivePricing(v);
-                          try { localStorage.setItem('tlm_online_pricing', String(v)); } catch {}
-                          persistConfig({ onlinePricing: v });
-                        }}
-                      />
-                    }
-                  />
+                <Card
+                  title={t('settings.card.localTitle')}
+                  desc={t('settings.card.localDesc')}
+                  action={
+                    <button
+                      type="button"
+                      disabled={scanning}
+                      onClick={() => {
+                        const custom = (baseUrls[p.id] || '').trim();
+                        void runLocalScan(p.needsBaseUrl && custom ? [custom] : []);
+                      }}
+                      className="flex cursor-pointer items-center gap-1.5 rounded-md border border-white/[0.08] px-2.5 py-1 text-[11px] text-[#CECDC3] transition-colors hover:border-white/[0.16] hover:bg-white/[0.04] disabled:cursor-default disabled:opacity-50"
+                    >
+                      <RefreshCw size={11} className={scanning ? 'animate-spin' : ''} />
+                      {t('settings.localScan')}
+                    </button>
+                  }
+                >
+                  <div className="py-1.5">
+                    <LocalModelList
+                      entries={localEntries}
+                      scanning={scanning}
+                      scanFailed={scanFailed}
+                      busyKey={busyModel ? `file:${busyModel}` : null}
+                      onUse={(entry) => useEndpoint(entry.provider, entry.baseUrl, entry.model)}
+                      onStart={(entry) => {
+                        const file = localFiles.find((f) => `file:${f.id}` === entry.key);
+                        if (file) void activateModel(file);
+                      }}
+                      onStop={(id) => void stopServing(id)}
+                      onScan={() => void runLocalScan([])}
+                    />
+                  </div>
                 </Card>
+
               </>
             )}
 

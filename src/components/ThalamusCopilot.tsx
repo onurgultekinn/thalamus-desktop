@@ -5,23 +5,27 @@ import {
   Check, 
   Paperclip, 
   Send, 
-  Sparkles, 
-  MessageSquare, 
   GitPullRequest, 
-  AtSign, 
   User, 
-  Zap,
-  Eye,
-  Camera,
-  ListChecks,
-  ShieldCheck,
-  Minimize2,
-  Undo2,
-  ImagePlus,
-  X,
+  Eye, 
+  ListChecks, 
+  ClipboardList, 
+  CircleCheck, 
+  Zap, 
+  Bot, 
+  Lightbulb, 
+  ShieldCheck, 
+  Terminal, 
+  ScrollText, 
+  FolderOpen, 
+  Search, 
+  Undo2, 
+  ImagePlus, 
+  X, 
+  PictureInPicture2, 
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
-import { CameraPanel } from './CameraPanel';
+import { pickFiles } from '../lib/workspace';
 import { aiChat, userMessage, type AiChatResponse, type AiEditResult } from '../services/aiClient';
 import { prepareImageFile, IMAGE_MODE_ORDER, DEFAULT_IMAGE_MODE, type AttachedImage, type ImageMode } from '../lib/imageAttach';
 import { MarkdownMessage } from './MarkdownMessage';
@@ -52,6 +56,14 @@ interface ThalamusCopilotProps {
   workspaceFiles?: string[];
   onApplyCode?: (file: string, code: string) => void;
   onOpenTerminal?: () => void;
+  /** True when the panel is rendered as an in-app floating window. */
+  floating?: boolean;
+  /** Toggle between docked and floating. */
+  onToggleFloat?: () => void;
+  /** Drag handler for the header while floating. */
+  onHeaderPointerDown?: React.PointerEventHandler<HTMLDivElement>;
+  /** Ref to the header row (used to measure the unbreakable minimum width). */
+  headerRef?: React.RefObject<HTMLDivElement | null>;
 }
 
 /** Slash command templates (Claude Code / ZCode style). */
@@ -62,6 +74,46 @@ const SLASH_TEMPLATES: Record<string, TranslationKey> = {
   '/tests': 'cop.cmdTests',
 };
 
+/** Autonomy/approval levels, from safest to most hands-off. */
+type PermissionMode = 'readonly' | 'plan' | 'ask' | 'auto' | 'safe' | 'autonomous';
+
+/** Everything except 'plan' — the run-time behaviour a mode maps to. */
+type ExecMode = Exclude<PermissionMode, 'plan'>;
+
+/** 'plan' is a workflow wrapper: once a plan is approved it behaves like 'auto'. */
+function effectivePerm(p: PermissionMode): ExecMode {
+  return p === 'plan' ? 'auto' : p;
+}
+
+const PERMISSION_MODES = [
+  { id: 'readonly', icon: Eye, labelKey: 'perm.readonly', descKey: 'perm.readonly.desc', shortKey: 'perm.readonly' },
+  { id: 'plan', icon: Lightbulb, labelKey: 'perm.plan', descKey: 'perm.plan.desc', shortKey: 'perm.plan' },
+  { id: 'ask', icon: CircleCheck, labelKey: 'perm.ask', descKey: 'perm.ask.desc', shortKey: 'cop.confirm' },
+  { id: 'auto', icon: Zap, labelKey: 'perm.auto', descKey: 'perm.auto.desc', shortKey: 'cop.auto' },
+  { id: 'safe', icon: ShieldCheck, labelKey: 'perm.safe', descKey: 'perm.safe.desc', shortKey: 'perm.safe' },
+  { id: 'autonomous', icon: Bot, labelKey: 'perm.autonomous', descKey: 'perm.autonomous.desc', shortKey: 'cop.autonomous' },
+] as const satisfies readonly { id: PermissionMode; icon: typeof CircleCheck; labelKey: TranslationKey; descKey: TranslationKey; shortKey: TranslationKey }[];
+
+/** Read-only shell commands that are safe to auto-run in "Safe commands" mode. */
+const SAFE_COMMAND_PATTERNS: RegExp[] = [
+  /^(ls|dir|pwd|cat|type|head|tail|wc|echo)\b/i,
+  /^git\s+(status|diff|log|show|branch|remote|stash\s+list|rev-parse)\b/i,
+  /^npm\s+(run\s+)?(test|lint|typecheck|build)\b/i,
+  /^(node|npx|cargo|rustc|python|py|pip|go|tsc)\s+(-v|--version|version)\b/i,
+  /^(rg|grep|find|where|which|findstr)\b/i,
+];
+
+/** True only for read-only commands with no chaining/redirect/substitution. */
+function isSafeCommand(cmd: string): boolean {
+  const trimmed = cmd.trim();
+  if (!trimmed) return false;
+  if (/[;&|`$><\n]/.test(trimmed)) return false;
+  return SAFE_COMMAND_PATTERNS.some((re) => re.test(trimmed));
+}
+
+/** Language tags that mark a fenced block as a shell command, not a patch. */
+const SHELL_LANGS = ['sh', 'bash', 'shell', 'zsh', 'ps1', 'powershell', 'cmd', 'bat'];
+
 /** Generates a message id (against Date.now collisions). */
 function newId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -70,12 +122,56 @@ function newId(): string {
   return `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/**
+ * Header tool button: on hover the caption unfolds sideways (to the left,
+ * towards the panel body) so the toolbar stays compact but self-explanatory.
+ */
+function HeaderAction({
+  icon: Icon,
+  label,
+  onClick,
+  disabled = false,
+  active = false,
+  activeClassName,
+}: {
+  icon: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  active?: boolean;
+  activeClassName?: string;
+}) {
+  const stateClass = disabled
+    ? 'text-[#575654] cursor-not-allowed opacity-40'
+    : active
+      ? `${activeClassName ?? 'bg-white/[0.06] text-[#F2F0E5]'} cursor-pointer`
+      : 'text-[#87857F] hover:bg-white/[0.04] hover:text-[#CECDC3] cursor-pointer';
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      className={`group relative flex h-6 w-6 items-center justify-center rounded-md transition-colors ${stateClass}`}
+    >
+      <Icon size={15} strokeWidth={1.75} className="flex-shrink-0" />
+      <span className="pointer-events-none absolute right-full top-1/2 z-20 mr-1 max-w-0 -translate-y-1/2 overflow-hidden whitespace-nowrap rounded-md border border-[#34332F] bg-[#282726] px-0 py-1 text-[10px] font-medium leading-none text-[#CECDC3] opacity-0 shadow-lg transition-all duration-200 ease-out group-hover:max-w-[160px] group-hover:px-2 group-hover:opacity-100">
+        {label}
+      </span>
+    </button>
+  );
+}
+
 export function ThalamusCopilot({
   activeFile = "",
   activeFileCode = "",
   workspaceFiles = [],
   onApplyCode,
-  onOpenTerminal
+  onOpenTerminal,
+  floating = false,
+  onToggleFloat,
+  onHeaderPointerDown,
+  headerRef,
 }: ThalamusCopilotProps) {
   const t = useT();
   const IMAGE_LABEL_KEY = { auto: 'image.auto', economy: 'image.economy', balanced: 'image.balanced', high: 'image.high' } as const;
@@ -96,11 +192,11 @@ export function ThalamusCopilot({
   const [lastEdit, setLastEdit] = useState<{ file: string; prev: string }[]>([]);
   // ZCode/Claude Code style: plan mode, permission mode, context, summarization
   const [planMode, setPlanMode] = useState(false);
-  const [permission, setPermission] = useState<'ask' | 'auto'>('ask');
+  const [permission, setPermission] = useState<PermissionMode>('ask');
+  const [showPermMenu, setShowPermMenu] = useState(false);
   const [lastUsage, setLastUsage] = useState<AiChatResponse['usage'] | null>(null);
   const [pendingEdits, setPendingEdits] = useState<AiEditResult[] | null>(null);
   const [pendingPlan, setPendingPlan] = useState<string | null>(null);
-  const [cameraOpen, setCameraOpen] = useState(false);
 
   // Images attached to the next message, sent as real image parts to the model.
   const [pendingImages, setPendingImages] = useState<AttachedImage[]>([]);
@@ -150,12 +246,15 @@ export function ThalamusCopilot({
   planModeRef.current = planMode;
   const permRef = useRef(permission);
   permRef.current = permission;
+  // Set right before re-running a plan so the execution turn bypasses planning.
+  const forceExecRef = useRef(false);
 
   const handleSend = () => doSend(input);
 
   /** Second-turn send to apply the plan generated in plan mode. */
   const applyPlan = () => {
     if (!pendingPlan) return;
+    forceExecRef.current = true;
     doSend(`IMPLEMENT YOUR PLAN (step by step, with SEARCH/REPLACE blocks):\n${pendingPlan}`);
     setPendingPlan(null);
   };
@@ -199,26 +298,32 @@ export function ThalamusCopilot({
     }
   };
 
-  /** Has the AI interpret the camera measurements (with the error-reducing protocol). */
-  const runCameraInterpret = async (prompt: string) => {
-    setCameraOpen(false);
-    // Placeholder kimliğiyle güncellenir — kullanıcının görünüşün arasında
-    // başka mesaja geçtiğinde 'son mesaj' yanıltıcıydı.
-    const placeholderId = newId();
-    setMessages(prev => [...prev, { id: placeholderId, sender: 'ai', text: t('cop.cameraRequested'), timestamp: ts(), modeUsed: 'chat' }]);
-    try {
-      const res = await callRealAI(prompt);
-      setMessages(prev => prev.map(m => m.id === placeholderId ? { ...m, text: res.content } : m));
-    } catch (err) {
-      setMessages(prev => prev.map(m => m.id === placeholderId ? { ...m, text: `Could not get interpretation: ${err instanceof Error ? err.message : String(err)}` } : m));
-    }
-  };
-
   const [activeModalMessage, setActiveModalMessage] = useState<Message | null>(null);
 
   const [showFileMentionMenu, setShowFileMentionMenu] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
+  const [mentionSearch, setMentionSearch] = useState('');
+  const mentionInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Yazı alanı içeriğe göre KENDİLİĞİNDEN büyür (elle boyutlandırma yok);
+  // sınırı aşınca kendi içinde kaydırır.
+  React.useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+    el.style.overflowY = el.scrollHeight > 120 ? 'auto' : 'hidden';
+  }, [input]);
+
+  // When the "@" menu opens, reset its search and focus the search box so the
+  // user can filter right away (like a small command palette).
+  React.useEffect(() => {
+    if (!showFileMentionMenu) return;
+    setMentionSearch('');
+    const id = window.setTimeout(() => mentionInputRef.current?.focus(), 0);
+    return () => window.clearTimeout(id);
+  }, [showFileMentionMenu]);
 
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -232,13 +337,19 @@ export function ThalamusCopilot({
     }
   ]);
 
+  /** Opens the terminal and types a command. Used by both the Run button and
+   *  the auto-run paths of the Safe/Autonomous modes. */
+  const runCommand = async (command: string) => {
+    onOpenTerminal?.();
+    await invoke('write_terminal', { data: command + '\r' });
+  };
+
   const executeAgentAction = async (msgId: string, action: ActionPayload) => {
     try {
       if (action.type === 'RUN_TERMINAL' && action.command) {
-        onOpenTerminal?.();
-        await invoke('write_terminal', { data: action.command + '\r' });
+        await runCommand(action.command);
       } else if (action.type === 'APPLY_PATCH' && action.targetFile && action.codeSnippet) {
-        if (permRef.current === 'ask') {
+        if (effectivePerm(permRef.current) === 'ask') {
           // 'Confirm' modu TÜM yazma yollarını kapsar: bu "Apply" düğmesi de
           // dosyaya doğrudan yazmaz — bekleyen edit olarak onaya düşer.
           setPendingEdits([{ file: action.targetFile, applied: true, message: '', new_body: action.codeSnippet }]);
@@ -254,7 +365,7 @@ export function ThalamusCopilot({
       setMessages(prev => [...prev, {
         id: newId(),
         sender: 'ai',
-        text: `⚠️ Action could not be applied: ${err instanceof Error ? err.message : String(err)}`,
+        text: t('cop.actionFailed', { error: err instanceof Error ? err.message : String(err) }),
         timestamp: ts(),
         modeUsed: 'chat',
       }]);
@@ -283,6 +394,37 @@ export function ThalamusCopilot({
     }
     textareaRef.current?.focus();
   };
+
+  // Attach files straight from disk (native picker) — handy for files that are
+  // not part of the workspace tree.
+  const handleBrowseFiles = async () => {
+    const paths = await pickFiles(t('cop.chooseFiles'));
+    if (paths.length === 0) return;
+    setSelectedFiles(prev => {
+      const next = [...prev];
+      for (const p of paths) if (!next.includes(p)) next.push(p);
+      return next;
+    });
+    setShowFileMentionMenu(false);
+  };
+
+  // Live filter for the "@" mention menu driven by its own search box, so a
+  // large workspace tree never dumps every path at once.
+  const filteredWorkspaceFiles = workspaceFiles.filter((f) =>
+    f.toLowerCase().includes(mentionSearch.trim().toLowerCase())
+  );
+
+  const currentPermission = PERMISSION_MODES.find((m) => m.id === permission) ?? PERMISSION_MODES[0];
+  // The selected mode tints the header button: plan=amber, auto=blue, safe=teal,
+  // autonomous=red; readonly/ask stay neutral.
+  const permActive = permission === 'plan' || permission === 'auto' || permission === 'safe' || permission === 'autonomous';
+  const permActiveClass = permission === 'plan'
+    ? 'bg-[#D0A215]/15 text-[#D0A215]'
+    : permission === 'safe'
+      ? 'bg-[#3AA99F]/15 text-[#3AA99F]'
+      : permission === 'autonomous'
+        ? 'bg-[#D14D41]/15 text-[#D14D41]'
+        : 'bg-[#4385BE]/20 text-[#4385BE]';
 
   const callRealAI = async (
     prompt: string
@@ -316,7 +458,7 @@ export function ThalamusCopilot({
     // read_file araciyla gercekten acabilecekleri soylenir (backend araclari
     // workspace icinde dosya okuyabiliyor).
     const referenceNote = selectedFiles.length > 0
-      ? `\nReferenced files (workspace-relative paths — open their contents with the read_file tool when needed): ${selectedFiles.join(', ')}`
+      ? `\nAttached file references (open their contents with the read_file tool when needed): ${selectedFiles.join(', ')}`
       : '';
 
     // Slash command expansion: /explain, /review, /refactor, /tests
@@ -352,39 +494,70 @@ export function ThalamusCopilot({
       modeUsed: mode
     }]);
 
-    const inPlanMode = planModeRef.current && isAgent;
+    const forceExec = forceExecRef.current;
+    forceExecRef.current = false;
+    const permRaw = permRef.current;
+    const perm = effectivePerm(permRaw);
+    // 'plan' (as a mode) and the quick plan toggle both force a plan turn, unless
+    // this is the execution turn that follows an approved plan.
+    const inPlanMode = (planModeRef.current || permRaw === 'plan') && isAgent && !forceExec;
+    // Tell the model how hands-off the user wants it to be.
+    const permHint = perm === 'readonly'
+      ? ' Read-only: do NOT edit code — answer and explain only.'
+      : perm === 'ask'
+        ? " Edits require the user's approval before they are applied."
+        : perm === 'auto'
+          ? ' Apply file edits directly; running commands still needs approval.'
+          : perm === 'safe'
+            ? ' Apply file edits directly and run read-only shell commands freely; other commands need approval.'
+            : ' You are fully autonomous: apply edits and run commands directly.';
+    // Let the agent propose a shell command (e.g. to verify its change).
+    const commandHint = isAgent && !inPlanMode && perm !== 'readonly'
+      ? '\nIf running one shell command would help (e.g. to verify your change), put ONLY that command in a fenced block tagged ```sh.'
+      : '';
     let systemPrompt = "";
     if (isAgent) {
-      systemPrompt = inPlanMode
-        ? `Agent Mode (PLAN MODE). Active file: ${activeFile}${referenceNote}\n\nTask: ${aiText}\n\nProduce ONLY a detailed PLAN; do NOT edit code (do not write a SEARCH/REPLACE block). Steps, functions to touch, risks and a verification suggestion.`
-        : `Agent Mode. Active file: ${activeFile}${referenceNote}\n\nUser request: ${aiText}\n\nApply your changes as SEARCH/REPLACE blocks (format is provided to you).`;
+      if (inPlanMode) {
+        systemPrompt = `Agent Mode (PLAN MODE). Active file: ${activeFile}${referenceNote}\n\nTask: ${aiText}\n\nProduce ONLY a detailed PLAN; do NOT edit code (do not write a SEARCH/REPLACE block). Steps, functions to touch, risks and a verification suggestion.`;
+      } else if (perm === 'readonly') {
+        systemPrompt = `Agent Mode (READ-ONLY). Active file: ${activeFile}${referenceNote}\n\nUser request: ${aiText}\n\nExplain and propose an approach; do NOT edit code (no SEARCH/REPLACE block). Give concrete guidance and, if helpful, an illustrative diff inside the answer.`;
+      } else {
+        systemPrompt = `Agent Mode. Active file: ${activeFile}${referenceNote}\n\nUser request: ${aiText}\n\nApply your changes as SEARCH/REPLACE blocks (format is provided to you).${commandHint}${permHint}`;
+      }
     } else {
       // D5: "Answer in English" kaldirildi — kullanicinin diline saygi
       // (Türkce yazana Türkce yanit) birinci kural.
-      systemPrompt = `You are Thalamus Copilot, an AI assistant. Help the user analyze or understand their code. Always answer in the same language the user writes in (Turkish user → answer in Turkish).\nActive file: ${activeFile}${referenceNote}\n\nUser question: ${aiText}`;
+      systemPrompt = `You are Nucleus, Thalamus' coding assistant. Help the user analyze or understand their code. Always answer in the same language the user writes in (Turkish user → answer in Turkish).\nActive file: ${activeFile}${referenceNote}\n\nUser question: ${aiText}`;
     }
 
     callRealAI(systemPrompt)
-      .then(res => {
+      .then(async res => {
         // Remove "Thinking..." message
         setMessages(prev => prev.filter(m => m.id !== placeholderId));
         if (res.usage) setLastUsage(res.usage);
 
         let explanation = res.content;
         let codeSnippet = "";
-        const codeBlockRegex = /```[a-zA-Z]*\n([\s\S]*?)```/;
-        const match = explanation.match(codeBlockRegex);
-        if (match && match[1]) {
-          const raw = match[1].trim();
-          const isSearchReplace =
-            /<{3,}\s*SEARCH/.test(raw) && /={3,}/.test(raw) && /[{>]}{3,}\s*REPLACE/.test(raw);
-          if (isSearchReplace) {
-            // SEARCH/REPLACE bloğu tam-dosya değildir; "Apply" bunu dosyaya
-            // yapıştırdığında marker'lar koda sızmıştı. Bloğu açıkalamada bırak,
-            // Apply düğmesi üretime.
+        let shellCommand = "";
+        const fencedRegex = /```([a-zA-Z0-9]*)\n([\s\S]*?)```/;
+        const match = explanation.match(fencedRegex);
+        if (match && match[2]) {
+          const lang = (match[1] || '').toLowerCase();
+          const raw = match[2].trim();
+          if (SHELL_LANGS.includes(lang)) {
+            shellCommand = raw;
+            explanation = explanation.replace(fencedRegex, "").trim();
           } else {
-            codeSnippet = raw;
-            explanation = explanation.replace(codeBlockRegex, "").trim();
+            const isSearchReplace =
+              /<{3,}\s*SEARCH/.test(raw) && /={3,}/.test(raw) && /[{>]}{3,}\s*REPLACE/.test(raw);
+            if (isSearchReplace) {
+              // SEARCH/REPLACE bloğu tam-dosya değildir; "Apply" bunu dosyaya
+              // yapıştırdığında marker'lar koda sızmıştı. Bloğu açıkalamada bırak,
+              // Apply düğmesi üretime.
+            } else {
+              codeSnippet = raw;
+              explanation = explanation.replace(fencedRegex, "").trim();
+            }
           }
         }
 
@@ -393,7 +566,9 @@ export function ThalamusCopilot({
         // PLAN MODE: a plan arrived instead of an edit → waits for "Apply Plan".
         if (inPlanMode) {
           setPendingPlan(explanation);
-        } else if (applied.length > 0 && permRef.current === 'ask') {
+        } else if (perm === 'readonly') {
+          // Read-only: never write. The answer/diff is shown, nothing is applied.
+        } else if (applied.length > 0 && perm === 'ask') {
           setPendingEdits(applied);
         } else if (applied.length > 0) {
           // Otomatik mod: yine TÜM editler, her biri kendi dosyasına.
@@ -411,12 +586,45 @@ export function ThalamusCopilot({
 
         let text = explanation || (isAgent ? "Patch package prepared:" : "");
         if (applied.length > 0) {
-          text += permRef.current === 'ask'
-            ? `\n\n✓ ${applied.length} edit(s) ready — confirm with the APPLY button (Ctrl+S to save).`
-            : `\n\n✓ ${applied.length} edit(s) applied to ${activeFile} (Ctrl+S to save).`;
+          if (perm === 'readonly') {
+            text += `\n\n${t('cop.readOnlyNote')}`;
+          } else if (perm === 'ask') {
+            text += `\n\n${t('cop.editsReady', { n: applied.length })}`;
+          } else {
+            text += `\n\n${t('cop.editsApplied', { n: applied.length, file: activeFile })}`;
+          }
         }
         if (inPlanMode && !text.trim()) {
-          text = "(could not generate a plan.)";
+          text = t('cop.noPlan');
+        }
+
+        // Autonomous mode: apply the returned patch immediately (no click).
+        const autoApplyPatch =
+          isAgent && !inPlanMode && !applied.length && !!codeSnippet && perm === 'autonomous';
+        if (autoApplyPatch) {
+          onApplyCode?.(activeFile, codeSnippet);
+          if (activeFileCode) setLastEdit([{ file: activeFile, prev: activeFileCode }]);
+          text += `\n\n${t('cop.editsApplied', { n: 1, file: activeFile })}`;
+        }
+
+        // One action bar per message: a shell command takes priority, else a patch.
+        let actionPayload: ActionPayload | undefined;
+        if (isAgent && !inPlanMode && perm !== 'readonly' && shellCommand) {
+          if (perm === 'autonomous' || (perm === 'safe' && isSafeCommand(shellCommand))) {
+            await runCommand(shellCommand);
+            text += `\n\n${t('cop.commandAutoRan')}`;
+          } else {
+            actionPayload = { type: 'RUN_TERMINAL', label: t('cop.runCommand'), command: shellCommand };
+            text += `\n\n${t('cop.commandReady')}`;
+          }
+        } else if (isAgent && !applied.length && codeSnippet && !autoApplyPatch && perm !== 'readonly') {
+          actionPayload = {
+            type: 'APPLY_PATCH',
+            label: `Apply Patch to ${activeFile}`,
+            originalCodeSnippet: activeFileCode || "",
+            codeSnippet: codeSnippet,
+            targetFile: activeFile
+          };
         }
 
         const responseMsg: Message = {
@@ -425,15 +633,7 @@ export function ThalamusCopilot({
           text,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           modeUsed: mode,
-          ...(isAgent && !applied.length && codeSnippet ? {
-            actionPayload: {
-              type: 'APPLY_PATCH',
-              label: `Apply Patch to ${activeFile}`,
-              originalCodeSnippet: activeFileCode || "",
-              codeSnippet: codeSnippet,
-              targetFile: activeFile
-            }
-          } : {})
+          ...(actionPayload ? { actionPayload } : {})
         };
 
         setMessages(prev => [...prev, responseMsg]);
@@ -445,7 +645,7 @@ export function ThalamusCopilot({
         const isKeyMissing = err instanceof Error && err.message === 'API_KEY_MISSING';
         const errorText = isKeyMissing
           ? t('cop.noKey')
-          : `⚠️ The AI request failed: ${err instanceof Error ? err.message : String(err)}`;
+          : t('cop.requestFailed', { error: err instanceof Error ? err.message : String(err) });
 
         setMessages(prev => [...prev, {
           id: newId(),
@@ -459,35 +659,7 @@ export function ThalamusCopilot({
 
   return (
     <div className="w-full h-full bg-[#1C1B1A] flex flex-col font-sans select-none text-xs relative overflow-hidden">
-      {cameraOpen && (
-        <CameraPanel onClose={() => setCameraOpen(false)} onInterpret={runCameraInterpret} />
-      )}
-      
-      {/* CSS FOR THE SLIM HOVER-GROWING SCROLLBAR */}
-      <style>{`
-        .pretty-scrollbar::-webkit-scrollbar {
-          width: 4px;
-          height: 4px;
-          transition: width 0.2s ease;
-        }
-        .pretty-scrollbar:hover::-webkit-scrollbar {
-          width: 6px;
-          height: 6px;
-        }
-        .pretty-scrollbar::-webkit-scrollbar-track {
-          background: transparent;
-        }
-        .pretty-scrollbar::-webkit-scrollbar-thumb {
-          background: #34332F;
-          border-radius: 4px;
-          transition: background 0.2s ease;
-        }
-        .pretty-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: #403E3C;
-        }
-      `}</style>
-
-      {/* 🎯 CODE INSPECTION MODAL */}
+      {/* Code inspection modal */}
       {activeModalMessage && activeModalMessage.actionPayload && (
         <CopilotDiffModal
           message={activeModalMessage}
@@ -501,116 +673,125 @@ export function ThalamusCopilot({
         />
       )}
 
+      {/* Header: brand · mode · actions */}
+      <div
+        ref={headerRef}
+        onPointerDown={floating ? onHeaderPointerDown : undefined}
+        className={`h-10 px-2 bg-[#282726] border-b border-[#34332F] flex items-center gap-2 overflow-hidden whitespace-nowrap flex-shrink-0 ${floating ? 'cursor-move' : ''}`}
+      >
+        <span className="font-mono text-xs font-bold tracking-tight text-[#3AA99F] flex-shrink-0">Nucleus</span>
 
-      {/* 1. HEADER AND MODE SELECTOR */}
-      <div className="h-9 px-2 bg-[#282726] border-b border-[#34332F] flex items-center gap-1.5 justify-between flex-shrink-0">
-        <div className="flex items-center gap-1 min-w-0 overflow-x-auto">
-          <div className="flex items-center gap-0.5 bg-[#1C1B1A] p-0.5 rounded-md border border-[#34332F]">
-            <button
-              type="button"
-              onClick={() => setMode('chat')}
-              className={`flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer ${
-                mode === 'chat' ? 'bg-[#34332F] text-[#F2F0E5]' : 'text-[#87857F] hover:text-[#CECDC3]'
-              }`}
-            >
-              <MessageSquare size={11} /> {t('cop.chat')}
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode('agent')}
-              className={`flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer ${
-                mode === 'agent' ? 'bg-[#34332F] text-[#F2F0E5]' : 'text-[#87857F] hover:text-[#CECDC3]'
-              }`}
-            >
-              <Zap size={11} /> {t('cop.agent')}
-            </button>
-          </div>
-
-          <span className="mx-0.5 h-4 w-px flex-shrink-0 bg-[#34332F]" />
-
-          {/* Plan mode (Claude Code /plan) */}
+        <div className="flex items-center bg-[#1C1B1A] p-[3px] rounded-md border border-[#34332F] flex-shrink-0 whitespace-nowrap">
           <button
             type="button"
-            onClick={() => { if (mode === 'agent') setPlanMode(v => !v); }}
-            disabled={mode !== 'agent'}
-            title={mode === 'agent' ? t('cop.planTitleAgent') : t('cop.planTitleDisabled')}
-            className={`flex h-6 items-center gap-1.5 rounded-md border px-2 text-[11px] font-medium transition-colors ${
-              mode !== 'agent'
-                ? 'border-transparent text-[#575654] cursor-not-allowed opacity-50'
-                : planMode
-                  ? 'bg-white/[0.06] border-white/[0.10] text-[#F2F0E5] cursor-pointer'
-                  : 'border-transparent text-[#87857F] hover:bg-white/[0.04] hover:text-[#CECDC3] cursor-pointer'
+            onClick={() => setMode('chat')}
+            className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors cursor-pointer ${
+              mode === 'chat' ? 'bg-[#34332F] text-[#F2F0E5]' : 'text-[#87857F] hover:text-[#CECDC3]'
             }`}
           >
-            <ListChecks size={12} className="flex-shrink-0" /> {t('cop.plan')}
+            {t('cop.chat')}
           </button>
-          {/* Permission mode (Claude Code permission) */}
           <button
             type="button"
-            onClick={() => setPermission(p => (p === 'ask' ? 'auto' : 'ask'))}
-            title={t('cop.permissionTitle')}
-            className={`flex h-6 items-center gap-1.5 rounded-md border px-2 text-[11px] font-medium cursor-pointer transition-colors ${
-              permission === 'ask'
-                ? 'bg-white/[0.06] border-white/[0.10] text-[#F2F0E5]'
-                : 'border-transparent text-[#87857F] hover:bg-white/[0.04] hover:text-[#CECDC3]'
+            onClick={() => setMode('agent')}
+            className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors cursor-pointer ${
+              mode === 'agent' ? 'bg-[#34332F] text-[#F2F0E5]' : 'text-[#87857F] hover:text-[#CECDC3]'
             }`}
           >
-            <ShieldCheck size={12} className="flex-shrink-0" />
-            {permission === 'ask' ? t('cop.confirm') : t('cop.auto')}
-          </button>
-          {/* Summarize (Claude Code /compact) */}
-          <button
-            type="button"
-            onClick={compactConversation}
-            title={t('cop.summarizeTitle')}
-            className="flex h-6 items-center gap-1.5 rounded-md border border-transparent px-2 text-[11px] font-medium text-[#87857F] hover:bg-white/[0.04] hover:text-[#CECDC3] cursor-pointer transition-colors"
-          >
-            <Minimize2 size={12} className="flex-shrink-0" /> {t('cop.summarize')}
-          </button>
-          {/* Live camera vision (model-less measurements + AI interpretation) */}
-          <button
-            type="button"
-            onClick={() => setCameraOpen(v => !v)}
-            title={t('cop.cameraTitle')}
-            className={`flex h-6 items-center gap-1.5 rounded-md border px-2 text-[11px] font-medium cursor-pointer transition-colors ${
-              cameraOpen
-                ? 'bg-white/[0.06] border-white/[0.10] text-[#F2F0E5]'
-                : 'border-transparent text-[#87857F] hover:bg-white/[0.04] hover:text-[#CECDC3]'
-            }`}
-          >
-            <Camera size={12} className="flex-shrink-0" /> {t('cop.camera')}
+            {t('cop.agent')}
           </button>
         </div>
 
-        <div className="flex items-center gap-1.5 text-[#87857F] font-mono text-[11px]">
-          {/* Context indicator (Claude Code /context style) */}
-          {lastUsage && (
-            <div className="flex items-center gap-1" title={t('cop.usageTitle')}>
-              <span className="text-[8.5px] text-[#87857F]">{lastUsage.total_tokens ?? '—'}</span>
-              <div className="flex gap-[2px]">
-                {Array.from({ length: 10 }).map((_, i) => {
-                  const frac = Math.min(1, (lastUsage.total_tokens ?? 0) / 128000);
-                  const on = i < Math.ceil(frac * 10);
-                  return (
-                    <span
-                      key={i}
-                      className={`w-[3px] h-3 rounded-sm ${
-                        on
-                          ? frac > 0.8
-                            ? 'bg-rose-400'
-                            : frac > 0.5
-                              ? 'bg-amber-400'
-                              : 'bg-emerald-400'
-                          : 'bg-[#34332F]'
-                      }`}
-                    />
-                  );
-                })}
-              </div>
+        <div className="flex-1 min-w-0" />
+
+        {lastUsage && (
+          <div
+            className="flex items-center flex-shrink-0 cursor-default"
+            title={`${t('cop.usageTitle')} — ${lastUsage.total_tokens ?? '—'}`}
+          >
+            <div className="flex gap-[2px]">
+              {Array.from({ length: 8 }).map((_, i) => {
+                const frac = Math.min(1, (lastUsage.total_tokens ?? 0) / 128000);
+                const on = i < Math.ceil(frac * 8);
+                return (
+                  <span
+                    key={i}
+                    className={`w-[2px] h-3 rounded-full ${
+                      on
+                        ? frac > 0.8
+                          ? 'bg-rose-400'
+                          : frac > 0.5
+                            ? 'bg-amber-400'
+                            : 'bg-emerald-400'
+                        : 'bg-[#34332F]'
+                    }`}
+                  />
+                );
+              })}
             </div>
+          </div>
+        )}
+
+        <div className="flex items-center gap-0.5 flex-shrink-0">
+          <HeaderAction
+            icon={ClipboardList}
+            label={t('cop.plan')}
+            onClick={() => { if (mode === 'agent') setPlanMode(v => !v); }}
+            disabled={mode !== 'agent'}
+            active={planMode}
+            activeClassName="bg-[#D0A215]/15 text-[#D0A215]"
+          />
+          <div className="relative flex-shrink-0">
+            <HeaderAction
+              icon={currentPermission.icon}
+              label={t(currentPermission.shortKey)}
+              onClick={() => setShowPermMenu(v => !v)}
+              active={permActive}
+              activeClassName={permActiveClass}
+            />
+            {showPermMenu && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setShowPermMenu(false)} />
+                <div className="absolute right-0 top-full mt-1.5 w-[250px] bg-[#282726] border border-[#34332F] rounded-md shadow-2xl z-50 overflow-hidden p-1">
+                  {PERMISSION_MODES.map(opt => {
+                    const OptIcon = opt.icon;
+                    const selected = permission === opt.id;
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => { setPermission(opt.id); setShowPermMenu(false); }}
+                        className="w-full flex items-start gap-2 rounded px-2 py-1.5 text-left hover:bg-[#1C1B1A] transition-colors cursor-pointer"
+                      >
+                        <OptIcon size={14} strokeWidth={1.75} className={`mt-0.5 flex-shrink-0 ${selected ? 'text-[#3AA99F]' : 'text-[#87857F]'}`} />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[11px] font-medium text-[#F2F0E5]">{t(opt.labelKey)}</span>
+                            {selected && <Check size={11} className="text-[#3AA99F] flex-shrink-0" />}
+                          </div>
+                          <div className="text-[10px] leading-snug text-[#87857F]">{t(opt.descKey)}</div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </div>
+          <HeaderAction
+            icon={ScrollText}
+            label={t('cop.summarize')}
+            onClick={compactConversation}
+          />
+          {onToggleFloat && (
+            <HeaderAction
+              icon={PictureInPicture2}
+              label={floating ? t('float.dock') : t('float.undock')}
+              onClick={onToggleFloat}
+              active={floating}
+              activeClassName="bg-[#4385BE]/20 text-[#4385BE]"
+            />
           )}
-          <FileText size={11} className="text-[#87857F]" />
-          <span className="truncate max-w-[80px] text-[#CECDC3]">{activeFile}</span>
         </div>
       </div>
 
@@ -621,7 +802,7 @@ export function ThalamusCopilot({
             <div className="flex items-center gap-1 text-[11px] text-[#87857F] px-1 font-mono">
               {msg.sender === 'user' && <User size={9} className="text-[#4385BE]" />}
               <span className="text-[#A8A49E] font-medium">
-                {msg.sender === 'user' ? userName : t('chat.thalamus')}
+                {msg.sender === 'user' ? userName : t('cop.sender')}
               </span>
               <span>•</span>
               <span>{msg.timestamp}</span>
@@ -637,7 +818,31 @@ export function ThalamusCopilot({
             }`}>
               <MarkdownMessage content={msg.text} />
 
-              {msg.actionPayload && (
+              {msg.actionPayload && msg.actionPayload.type === 'RUN_TERMINAL' && (
+                <div className="mt-2 rounded border border-[#2a2a2c] bg-[#0E0E0E] p-2 flex items-center justify-between gap-2 overflow-hidden">
+                  <div className="flex items-center gap-1.5 min-w-0 font-mono text-[11px]">
+                    <Terminal size={12} className="text-[#3AA99F] flex-shrink-0" />
+                    <span className="text-[#CECDC3] truncate">{msg.actionPayload.command}</span>
+                  </div>
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    {executedActions[msg.id] ? (
+                      <span className="text-[#3AA99F] text-[11px] font-medium flex items-center gap-0.5 px-1.5 py-0.5 bg-[#3AA99F]/10 rounded">
+                        <Check size={9} /> {t('cop.ran')}
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => executeAgentAction(msg.id, msg.actionPayload!)}
+                        className="px-2 py-0.5 bg-[#205EA6] hover:bg-[#4385BE] text-white font-medium rounded text-[11px] flex items-center gap-1 cursor-pointer transition-colors shadow-sm"
+                      >
+                        <Terminal size={9} /> {t('cop.run')}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {msg.actionPayload && msg.actionPayload.type === 'APPLY_PATCH' && (
                 <div className="mt-2 rounded border border-[#2a2a2c] bg-[#1C1B1A] p-2 flex items-center justify-between gap-2 overflow-hidden">
                   <div className="flex items-center gap-1.5 min-w-0 font-mono text-[11px]">
                     <GitPullRequest size={12} className="text-[#3AA99F] flex-shrink-0" />
@@ -664,7 +869,7 @@ export function ThalamusCopilot({
                     <button
                       type="button"
                       onClick={() => setActiveModalMessage(msg)}
-                      className="px-2 py-0.5 bg-[#205EA6] hover:bg-[#4385BE] text-white font-medium rounded text-[11px] flex items-center gap-1 cursor-pointer transition-colors shadow-xs"
+                      className="px-2 py-0.5 bg-[#205EA6] hover:bg-[#4385BE] text-white font-medium rounded text-[11px] flex items-center gap-1 cursor-pointer transition-colors shadow-sm"
                     >
                       <Eye size={10} /> {t('cop.inspect')}
                     </button>
@@ -677,7 +882,7 @@ export function ThalamusCopilot({
                       <button
                         type="button"
                         onClick={() => executeAgentAction(msg.id, msg.actionPayload!)}
-                        className="px-2 py-0.5 bg-[#205EA6] hover:bg-[#4385BE] text-white font-medium rounded text-[11px] flex items-center gap-1 cursor-pointer transition-colors shadow-xs"
+                        className="px-2 py-0.5 bg-[#205EA6] hover:bg-[#4385BE] text-white font-medium rounded text-[11px] flex items-center gap-1 cursor-pointer transition-colors shadow-sm"
                       >
                         <GitPullRequest size={9} /> {t('cop.apply')}
                       </button>
@@ -692,24 +897,26 @@ export function ThalamusCopilot({
 
       {/* 3. INPUT AREA */}
       <div className="p-2 border-t border-[#34332F] bg-[#1C1B1A] flex flex-col gap-1 flex-shrink-0 z-10 relative">
-        <div className="flex items-center gap-1 px-0.5">
-          <span className="text-[11px] font-mono uppercase tracking-wider text-[#87857F]">{t('cop.image')}</span>
-          {(IMAGE_MODE_ORDER).map((m) => (
-            <button
-              key={m}
-              type="button"
-              onClick={() => setImageMode(m)}
-              title={t(IMAGE_HINT_KEY[m])}
-              className={`rounded border px-1.5 py-0.5 text-[11px] transition-colors cursor-pointer ${
-                imageMode === m
-                  ? 'border-[#dcb67a]/50 bg-[#dcb67a]/10 text-[#dcb67a]'
-                  : 'border-[#34332F] text-[#87857F] hover:text-[#CECDC3]'
-              }`}
-            >
-              {t(IMAGE_LABEL_KEY[m])}
-            </button>
-          ))}
-        </div>
+        {pendingImages.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1 px-0.5">
+            <span className="text-[11px] font-mono uppercase tracking-wider text-[#87857F]">{t('cop.image')}</span>
+            {(IMAGE_MODE_ORDER).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setImageMode(m)}
+                title={t(IMAGE_HINT_KEY[m])}
+                className={`rounded border px-1.5 py-0.5 text-[11px] transition-colors cursor-pointer ${
+                  imageMode === m
+                    ? 'border-[#dcb67a]/50 bg-[#dcb67a]/10 text-[#dcb67a]'
+                    : 'border-[#34332F] text-[#87857F] hover:text-[#CECDC3]'
+                }`}
+              >
+                {t(IMAGE_LABEL_KEY[m])}
+              </button>
+            ))}
+          </div>
+        )}
         {pendingImages.length > 0 && (
           <div className="flex flex-wrap gap-1.5 px-0.5">
             {pendingImages.map((img, idx) => (
@@ -782,21 +989,53 @@ export function ThalamusCopilot({
           </div>
         )}
         {showFileMentionMenu && (
-          <div className="absolute bottom-full left-2 mb-1.5 w-[200px] bg-[#282726] border border-[#34332F] rounded shadow-2xl p-1 z-50">
-            <div className="px-1.5 py-0.5 text-[11px] font-mono text-[#87857F] uppercase border-b border-[#34332F] mb-1">
-              {t('cop.attachFile')}
+          <div className="absolute bottom-full left-2 mb-1.5 w-[260px] bg-[#282726] border border-[#34332F] rounded-md shadow-2xl z-50 overflow-hidden flex flex-col">
+            <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-[#34332F]">
+              <Search size={12} className="text-[#87857F] flex-shrink-0" />
+              <input
+                ref={mentionInputRef}
+                value={mentionSearch}
+                onChange={(e) => setMentionSearch(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const first = filteredWorkspaceFiles[0];
+                    if (first) handleSelectFileMention(first);
+                  } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    setShowFileMentionMenu(false);
+                    textareaRef.current?.focus();
+                  }
+                }}
+                placeholder={t('cop.searchFiles')}
+                className="w-full bg-transparent text-[11px] text-[#F2F0E5] placeholder-[#87857F] outline-none"
+              />
             </div>
-            {workspaceFiles.map(file => (
-              <button
-                key={file}
-                type="button"
-                onClick={() => handleSelectFileMention(file)}
-                className="w-full flex items-center gap-1.5 px-1.5 py-1 rounded hover:bg-[#282726] text-[#CECDC3] hover:text-white font-mono text-[11px] text-left cursor-pointer transition-colors"
-              >
-                <FileText size={11} className="text-[#87857F]" />
-                <span className="truncate">{file}</span>
-              </button>
-            ))}
+            <div className="max-h-[220px] overflow-y-auto pretty-scrollbar p-1">
+              {filteredWorkspaceFiles.length === 0 ? (
+                <div className="px-2 py-3 text-center text-[11px] text-[#87857F]">{t('cop.noFiles')}</div>
+              ) : (
+                filteredWorkspaceFiles.slice(0, 100).map(file => (
+                  <button
+                    key={file}
+                    type="button"
+                    onClick={() => handleSelectFileMention(file)}
+                    className="w-full flex items-center gap-1.5 px-1.5 py-1 rounded hover:bg-[#1C1B1A] text-[#CECDC3] hover:text-white font-mono text-[11px] text-left cursor-pointer transition-colors"
+                  >
+                    <FileText size={11} className="text-[#87857F] flex-shrink-0" />
+                    <span className="truncate">{file}</span>
+                  </button>
+                ))
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={handleBrowseFiles}
+              className="flex items-center gap-1.5 px-2 py-1.5 border-t border-[#34332F] text-[11px] text-[#CECDC3] hover:bg-[#1C1B1A] hover:text-white transition-colors cursor-pointer"
+            >
+              <FolderOpen size={12} className="text-[#4385BE] flex-shrink-0" />
+              {t('cop.chooseFiles')}
+            </button>
           </div>
         )}
 
@@ -804,12 +1043,13 @@ export function ThalamusCopilot({
           {selectedFiles.length > 0 && (
             <div className="flex items-center gap-1 flex-wrap mb-1 pb-1 border-b border-[#282726]">
               {selectedFiles.map(file => (
-                <span key={file} className="flex items-center gap-1 bg-[#282726] border border-[#34332F] text-[#3AA99F] px-1.5 py-0.5 rounded text-[11px] font-mono">
-                  <FileText size={9} /> @{file}
-                  <button 
-                    type="button" 
+                <span key={file} className="flex items-center gap-1 max-w-[190px] bg-[#282726] border border-[#34332F] text-[#3AA99F] px-1.5 py-0.5 rounded text-[11px] font-mono">
+                  <FileText size={9} className="flex-shrink-0" />
+                  <span className="truncate">@{file}</span>
+                  <button
+                    type="button"
                     onClick={() => setSelectedFiles(selectedFiles.filter(f => f !== file))}
-                    className="hover:text-red-400 ml-0.5 cursor-pointer"
+                    className="hover:text-red-400 ml-0.5 cursor-pointer flex-shrink-0"
                   >
                     ×
                   </button>
@@ -823,49 +1063,41 @@ export function ThalamusCopilot({
             value={input}
             onChange={handleInputChange}
             onKeyDown={(e) => {
+              if (e.key === 'Escape' && showFileMentionMenu) {
+                setShowFileMentionMenu(false);
+                return;
+              }
               if (e.key === 'Enter' && !e.shiftKey && !showFileMentionMenu) {
                 e.preventDefault();
                 handleSend();
               }
             }}
             placeholder={mode === 'agent' ? t('cop.placeholderAgent') : t('cop.placeholderChat')}
-            className="w-full bg-transparent text-[#F2F0E5] placeholder-[#87857F] text-[11px] resize-none outline-none min-h-[36px] max-h-[80px] leading-relaxed pretty-scrollbar"
+            className="w-full bg-transparent text-[#F2F0E5] placeholder-[#87857F] text-[11px] resize-none overflow-hidden outline-none min-h-[36px] max-h-[120px] leading-relaxed pretty-scrollbar"
             rows={2}
           />
 
           <div className="flex items-center justify-between pt-1 border-t border-[#1C1B1A]">
-            <div className="flex items-center gap-1 text-[#87857F]">
-              <button 
-                type="button" 
-                title={t('cop.addFileRef')} 
+            <div className="flex items-center gap-0.5 text-[#87857F]">
+              <button
+                type="button"
+                title={t('cop.attachFile')}
                 onClick={() => {
                   setInput(prev => prev + '@');
                   setShowFileMentionMenu(true);
                   textareaRef.current?.focus();
                 }}
-                className="p-0.5 hover:bg-[#282726] rounded text-[#CECDC3] hover:text-white transition-colors cursor-pointer"
+                className="p-1 rounded hover:bg-[#282726] text-[#87857F] hover:text-[#CECDC3] transition-colors cursor-pointer"
               >
-                <AtSign size={12} className="text-[#3AA99F]" />
-              </button>
-              <button 
-                type="button" 
-                title={t('cop.attachFile')} 
-                onClick={() => {
-                  setInput(prev => prev + '@');
-                  setShowFileMentionMenu(true);
-                  textareaRef.current?.focus();
-                }}
-                className="p-0.5 hover:bg-[#282726] rounded text-[#CECDC3] hover:text-white transition-colors cursor-pointer"
-              >
-                <Paperclip size={12} className="text-[#4385BE]" />
+                <Paperclip size={13} />
               </button>
               <button
                 type="button"
                 title={t('cop.attachImage')}
                 onClick={() => imageInputRef.current?.click()}
-                className="p-0.5 hover:bg-[#282726] rounded text-[#CECDC3] hover:text-white transition-colors cursor-pointer"
+                className="p-1 rounded hover:bg-[#282726] text-[#87857F] hover:text-[#CECDC3] transition-colors cursor-pointer"
               >
-                <ImagePlus size={12} className="text-[#dcb67a]" />
+                <ImagePlus size={13} />
               </button>
               <input
                 ref={imageInputRef}
@@ -875,11 +1107,6 @@ export function ThalamusCopilot({
                 className="hidden"
                 onChange={handleImagePick}
               />
-              <span className="text-[11px] font-mono text-[#575654] px-0.5">|</span>
-              <span className="text-[11px] font-mono text-[#87857F] flex items-center gap-0.5">
-                <Sparkles size={10} className="text-[#4385BE]" /> 
-                {mode === 'agent' ? t('cop.agent') : t('cop.chat')}
-              </span>
             </div>
 
             <button 

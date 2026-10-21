@@ -78,12 +78,25 @@ pub struct AiChatRequest {
     pub messages: Value,
     #[serde(default)]
     pub code_blocks: Vec<CodeBlockIn>,
+    /// Sağlayıcıya özgü düşünme (reasoning) modu. EVREN/vLLM gibi sunucularda
+    /// modeller varsayılan olarak düşünür: cevap `reasoning` alanına gider,
+    /// düşünme token'ları çıktıya yazılır ve içerik erken kesilebilir. `"none"`
+    /// gönderildiğinde içerik temiz gelir (ölçüldü: 35 → 2 çıktı token'ı).
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
+    /// Kullanıcı "aynen / olduğu gibi / tam metin" istediğinde true gelir:
+    /// motor sıkıştırması TAMAMEN atlanır (metin birebir gider). Varsayılan
+    /// maliyet optimizasyonu yalnız açık bir koruma isteği yoksa uygulanır.
+    #[serde(default)]
+    pub preserve: bool,
 }
 
-fn provider_url(provider: &str, base_url: Option<&str>) -> Result<String, String> {
+pub(crate) fn provider_url(provider: &str, base_url: Option<&str>) -> Result<String, String> {
     match provider {
         "deepseek" => Ok("https://api.deepseek.com/v1/chat/completions".into()),
         "openai" => Ok("https://api.openai.com/v1/chat/completions".into()),
+        // EVREN (T.C. Savunma Sanayii): OpenAI uyumlu, veri Türkiye'de, ücretsiz dönem.
+        "evren" => Ok("https://evren-llmapi.ssyz.org.tr/v1/chat/completions".into()),
         _ => base_url
             .filter(|s| !s.trim().is_empty())
             .map(|s| format!("{}/chat/completions", s.trim_end_matches('/')))
@@ -95,7 +108,7 @@ fn provider_url(provider: &str, base_url: Option<&str>) -> Result<String, String
 /// adreslerini yerel sayar. Eski `url.contains("localhost")` kontrolü
 /// `https://evil.com/?x=localhost` gibi URL'leri yerel sanıp API anahtarı
 /// zorunluluğunu atlıyordu.
-fn is_local_endpoint(url: &str) -> bool {
+pub(crate) fn is_local_endpoint(url: &str) -> bool {
     let rest = url.split("://").nth(1).unwrap_or(url);
     let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
     // Host başlığında userinfo meşru değil; URL'de varsa anormal say, reddet.
@@ -201,6 +214,7 @@ fn whole_file_fallback(
     model: &str,
     messages: &[Value],
     blocks: &[(String, String, String)],
+    reasoning_effort: Option<&str>,
 ) -> Result<Option<Vec<Value>>, String> {
     let Some((_, name, body)) = blocks.first() else {
         return Ok(None);
@@ -211,10 +225,14 @@ fn whole_file_fallback(
     );
     let mut msgs: Vec<Value> = messages.to_vec();
     msgs.push(json!({"role": "user", "content": instruction}));
+    let mut body = json!({"model": model, "messages": msgs});
+    if let Some(effort) = reasoning_effort {
+        body["reasoning_effort"] = json!(effort);
+    }
     let resp = transport.post_json(
         url,
         &[("Authorization".to_string(), format!("Bearer {}", api_key))],
-        &json!({"model": model, "messages": msgs}),
+        &body,
     )?;
     let content = resp["choices"][0]["message"]["content"]
         .as_str()
@@ -242,7 +260,8 @@ pub fn run_tool_loop(
     code_blocks: &[(String, String, String)],
     root: &std::path::Path,
     max_rounds: usize,
-) -> Result<(String, usize, Value), String> {
+    reasoning_effort: Option<&str>,
+) -> Result<(String, String, usize, Value), String> {
     let tools_json = tools::specs();
     let ctx = tools::ToolCtx { root, code_blocks };
     let headers = vec![("Authorization".to_string(), format!("Bearer {}", api_key))];
@@ -254,7 +273,19 @@ pub fn run_tool_loop(
         if rounds > max_rounds {
             return Err(format!("tool loop limit exceeded ({} rounds)", max_rounds));
         }
-        let body = json!({"model": model, "messages": messages, "tools": tools_json});
+        // Düşünme modu açıkça kapatılabilir (EVREN/vLLM). Verilmezse alan
+        // gönderilmez; diğer sağlayıcılar bilinmeyen alandan etkilenmez.
+        let mut body = json!({
+            "model": model,
+            "messages": messages,
+            "tools": tools_json,
+            // Düşünme açıkken model çıktı bütçesini düşünmeye harcayabiliyor;
+            // küçük varsayılan bütçede yanıt `length` ile kesiliyordu (ölçüldü).
+            "max_tokens": 4096
+        });
+        if let Some(effort) = reasoning_effort {
+            body["reasoning_effort"] = json!(effort);
+        }
         let resp = transport.post_json(url, &headers, &body)?;
         if let Some(u) = resp.get("usage") {
             usage = u.clone(); // son yanıtın kullanımı
@@ -266,7 +297,15 @@ pub fn run_tool_loop(
         let tool_calls = msg["tool_calls"].as_array().cloned().unwrap_or_default();
         if tool_calls.is_empty() {
             let content = msg["content"].as_str().unwrap_or("").to_string();
-            return Ok((content, rounds, usage));
+            // Düşünme (reasoning) metni: sağlayıcıya göre `reasoning` ya da
+            // `reasoning_content` alanında gelir (EVREN/vLLM: `reasoning`).
+            // Arayüzde katlanabilir "Düşünme" bloğu olarak gösterilir.
+            let reasoning = msg["reasoning"]
+                .as_str()
+                .or_else(|| msg["reasoning_content"].as_str())
+                .unwrap_or("")
+                .to_string();
+            return Ok((content, reasoning, rounds, usage));
         }
         messages.push(msg);
         for tc in &tool_calls {
@@ -309,7 +348,7 @@ fn project_memory(root: &str) -> Option<String> {
 ///
 /// Provider'a giden `messages` içindeki system/user içerikleri motorun karar
 /// makinesinden geçer: JSON segmentli ve kazançlı veri lossless @T sıkıştırma
-/// alır; veto/karar motoru passthrough derse ham metin kalır. Asistan
+/// alır; karar motoru passthrough derse ham metin kalır. Asistan
 /// yanıtları (assistant) NATURAL kalmak şartıyla dokunulmaz.
 /// Dönen değer toplu `(original_tokens, compressed_tokens, compressed_count)`.
 fn compress_messages_invisibly(
@@ -353,10 +392,14 @@ fn compress_messages_invisibly(
     (original_total, compressed_total, compressed_count)
 }
 
-pub async fn ai_chat(
-    State(state): State<BackendState>,
-    axum::Json(req): axum::Json<AiChatRequest>,
-) -> Result<axum::Json<Value>, (axum::http::StatusCode, String)> {
+/// Doğrulama + prompt hazırlığı (proje belleği, görünmez sıkıştırma, kod
+/// şeması). Hem tek seferlik hem akış yolu aynı hazırlığı kullanır.
+type PreparedPrompt = (Vec<Value>, Vec<(String, String, String)>, (usize, usize, usize));
+
+fn prepare_prompt(
+    state: &BackendState,
+    req: &AiChatRequest,
+) -> Result<PreparedPrompt, (axum::http::StatusCode, String)> {
     let url = provider_url(&req.provider, req.base_url.as_deref())
         .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, e))?;
     // Local endpoint'ler (Ollama, LM Studio…) anahtarsız kullanılabilir;
@@ -368,7 +411,7 @@ pub async fn ai_chat(
             "api_key gerekli".into(),
         ));
     }
-    let messages = req.messages.as_array().cloned().unwrap_or_default();
+    let mut messages = req.messages.as_array().cloned().unwrap_or_default();
     if messages.is_empty() {
         return Err((
             axum::http::StatusCode::BAD_REQUEST,
@@ -381,12 +424,9 @@ pub async fn ai_chat(
         .map(|b| (b.id.clone(), b.name.clone(), b.body.clone()))
         .collect();
 
-    // Kod bağlamı + proje belleği sistem mesajları.
-    let messages_before_context = messages.clone();
-    let mut messages = messages;
-    if let Some(ctx) = build_code_context(&blocks) {
-        messages.insert(0, json!({"role": "system", "content": ctx}));
-    }
+    // ÖNEK CACHE: kod bağlamı her turda değişir. Onu başa koymak tüm öneki
+    // geçersiz kılar; bu yüzden son kullanıcı mesajının HEMEN ÖNÜNE eklenir.
+    // (Değişmeyen sistem + geçmiş öneki cache'te kalır.)
     if let Some(mem) = project_memory(
         &state
             .workspace_root
@@ -398,17 +438,362 @@ pub async fn ai_chat(
     }
 
     // P2: görünmez lossless sıkıştırma — provider'a giden istek boyunca.
-    let (engine_original, engine_compressed, engine_count) =
-        compress_messages_invisibly(&mut messages, &state.bpe);
+    // KULLANICI KORUMASI: "aynen/olduğu gibi/tam metin" istendiyse dokunma.
+    let engine = if req.preserve {
+        (0usize, 0usize, 0usize)
+    } else {
+        compress_messages_invisibly(&mut messages, &state.bpe)
+    };
     // Sıkıştırılmış veri varsa decoder talimatı tam bir sistem mesajı olarak
     // en başa girer (görünmez katmanın model tarafı sözleşmesi).
-    if engine_count > 0 {
+    if engine.2 > 0 {
         messages.insert(
             0,
             json!({"role": "system", "content": MINIMAL_DECODER_INSTRUCTION}),
         );
     }
+    if let Some(ctx) = build_code_context(&blocks) {
+        let pos = messages.len().saturating_sub(1);
+        messages.insert(pos, json!({"role": "system", "content": ctx}));
+    }
+    Ok((messages, blocks, engine))
+}
 
+// ── Canlı akış (SSE) ────────────────────────────────────────────────────────
+// Akışta tool döngüsü korunur: her tur ayrı akıtılır, araç çağrısı varsa
+// araçlar çalıştırılıp bir sonraki tur akıtılır. Metin parçaları geldikçe
+// `{"type":"delta"}` olayı olarak gönderilir.
+
+/// Akışa özel client: toplam süre 10 dk (sonsuz asılmayı önler), bağlantı
+/// kurulumu 20 sn. İptal, istemci bağlantıyı kapatınca kanalın kapanmasıyla olur.
+static STREAM_CLIENT: std::sync::OnceLock<reqwest::blocking::Client> = std::sync::OnceLock::new();
+
+fn stream_client() -> &'static reqwest::blocking::Client {
+    STREAM_CLIENT.get_or_init(|| {
+        reqwest::blocking::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(20))
+            .timeout(std::time::Duration::from_secs(600))
+            .build()
+            .expect("stream HTTP client")
+    })
+}
+
+fn emit_event(tx: &tokio::sync::mpsc::Sender<String>, value: Value) -> bool {
+    tx.blocking_send(value.to_string()).is_ok()
+}
+
+#[derive(Default)]
+struct StreamToolCall {
+    id: String,
+    name: String,
+    arguments: String,
+}
+
+/// Tek turu akıtır. Dönüş: (metin, düşünme, tool çağrıları, usage).
+fn stream_one_round(
+    tx: &tokio::sync::mpsc::Sender<String>,
+    url: &str,
+    api_key: &str,
+    model: &str,
+    messages: &[Value],
+    tools_json: &Value,
+    reasoning_effort: Option<&str>,
+) -> Result<(String, String, Vec<Value>, Value), String> {
+    let build_body = |include_usage: bool| -> Value {
+        let mut body = json!({
+            "model": model,
+            "messages": messages,
+            "tools": tools_json,
+            "max_tokens": 4096,
+            "stream": true,
+        });
+        if include_usage {
+            body["stream_options"] = json!({"include_usage": true});
+        }
+        if let Some(effort) = reasoning_effort {
+            body["reasoning_effort"] = json!(effort);
+        }
+        body
+    };
+    let send = |include_usage: bool| -> Result<reqwest::blocking::Response, String> {
+        let mut request = stream_client().post(url).json(&build_body(include_usage));
+        if !api_key.trim().is_empty() {
+            request = request.bearer_auth(api_key);
+        }
+        request.send().map_err(|e| e.to_string())
+    };
+    let mut resp = send(true)?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        // Bazı OpenAI-uyumlu sunucular `stream_options` alanını reddeder;
+        // bu durumda onsuz tekrar denenir (kullanım bilgisi gelmez, akış gelir).
+        if text.contains("stream_options") || text.contains("include_usage") {
+            resp = send(false)?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().unwrap_or_default();
+                return Err(format!("HTTP {}: {}", status, text));
+            }
+        } else {
+            return Err(format!("HTTP {}: {}", status, text));
+        }
+    }
+    let is_sse = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.contains("text/event-stream"))
+        .unwrap_or(false);
+    // Akış desteklemeyen sağlayıcı: gövde tek JSON gelir; tek parça olarak iletilir.
+    if !is_sse {
+        let value: Value = resp.json().map_err(|e| e.to_string())?;
+        let msg = value["choices"][0]["message"].clone();
+        let content = msg["content"].as_str().unwrap_or("").to_string();
+        let reasoning = msg["reasoning"]
+            .as_str()
+            .or_else(|| msg["reasoning_content"].as_str())
+            .unwrap_or("")
+            .to_string();
+        if !content.is_empty() && !emit_event(tx, json!({"type": "delta", "content": content})) {
+            return Ok((content, reasoning, Vec::new(), Value::Null));
+        }
+        if !reasoning.is_empty() {
+            let _ = emit_event(tx, json!({"type": "reasoning", "content": reasoning}));
+        }
+        return Ok((
+            content,
+            reasoning,
+            msg["tool_calls"].as_array().cloned().unwrap_or_default(),
+            value.get("usage").cloned().unwrap_or(Value::Null),
+        ));
+    }
+
+    let mut content = String::new();
+    let mut reasoning = String::new();
+    let mut tool_acc: std::collections::BTreeMap<usize, StreamToolCall> = Default::default();
+    let mut usage = Value::Null;
+    let reader = std::io::BufReader::new(resp);
+    for line in std::io::BufRead::lines(reader) {
+        let line = line.map_err(|e| e.to_string())?;
+        let Some(data) = line.strip_prefix("data:") else {
+            continue;
+        };
+        let data = data.trim();
+        if data.is_empty() {
+            continue;
+        }
+        if data == "[DONE]" {
+            break;
+        }
+        let Ok(value) = serde_json::from_str::<Value>(data) else {
+            continue;
+        };
+        if let Some(u) = value.get("usage") {
+            if !u.is_null() {
+                usage = u.clone();
+            }
+        }
+        let Some(choice) = value["choices"].get(0) else {
+            continue;
+        };
+        let delta = &choice["delta"];
+        if let Some(piece) = delta["content"].as_str() {
+            if !piece.is_empty() {
+                content.push_str(piece);
+                if !emit_event(tx, json!({"type": "delta", "content": piece})) {
+                    return Ok((content, reasoning, Vec::new(), usage));
+                }
+            }
+        }
+        if let Some(piece) = delta["reasoning"]
+            .as_str()
+            .or_else(|| delta["reasoning_content"].as_str())
+        {
+            if !piece.is_empty() {
+                reasoning.push_str(piece);
+                if !emit_event(tx, json!({"type": "reasoning", "content": piece})) {
+                    return Ok((content, reasoning, Vec::new(), usage));
+                }
+            }
+        }
+        if let Some(calls) = delta["tool_calls"].as_array() {
+            for call in calls {
+                let idx = call["index"].as_u64().unwrap_or(0) as usize;
+                let entry = tool_acc.entry(idx).or_default();
+                if let Some(id) = call["id"].as_str() {
+                    if !id.is_empty() {
+                        entry.id = id.to_string();
+                    }
+                }
+                if let Some(name) = call["function"]["name"].as_str() {
+                    if !name.is_empty() && !entry.name.ends_with(name) {
+                        entry.name.push_str(name);
+                    }
+                }
+                if let Some(args) = call["function"]["arguments"].as_str() {
+                    entry.arguments.push_str(args);
+                }
+            }
+        }
+    }
+    let tool_calls: Vec<Value> = tool_acc
+        .into_values()
+        .map(|call| {
+            json!({
+                "id": call.id,
+                "type": "function",
+                "function": {"name": call.name, "arguments": call.arguments},
+            })
+        })
+        .collect();
+    Ok((content, reasoning, tool_calls, usage))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn stream_tool_loop(
+    tx: &tokio::sync::mpsc::Sender<String>,
+    url: &str,
+    api_key: &str,
+    model: &str,
+    mut messages: Vec<Value>,
+    code_blocks: &[(String, String, String)],
+    root: &std::path::Path,
+    max_rounds: usize,
+    reasoning_effort: Option<&str>,
+) {
+    let tools_json = tools::specs();
+    let ctx = tools::ToolCtx {
+        root,
+        code_blocks,
+    };
+    let mut rounds = 0usize;
+    let mut usage = Value::Null;
+    loop {
+        rounds += 1;
+        if rounds > max_rounds {
+            let _ = emit_event(
+                tx,
+                json!({"type": "error", "message": format!("tool loop limit exceeded ({} rounds)", max_rounds)}),
+            );
+            return;
+        }
+        match stream_one_round(
+            tx,
+            url,
+            api_key,
+            model,
+            &messages,
+            &tools_json,
+            reasoning_effort,
+        ) {
+            Ok((content, _reasoning, tool_calls, round_usage)) => {
+                if !round_usage.is_null() {
+                    usage = round_usage;
+                }
+                if tool_calls.is_empty() {
+                    let _ = emit_event(tx, json!({"type": "done", "rounds": rounds, "usage": usage}));
+                    return;
+                }
+                messages.push(json!({
+                    "role": "assistant",
+                    "content": if content.is_empty() { Value::Null } else { Value::String(content) },
+                    "tool_calls": tool_calls.clone(),
+                }));
+                for tc in &tool_calls {
+                    let name = tc["function"]["name"].as_str().unwrap_or("").to_string();
+                    let args_raw = tc["function"]["arguments"].as_str().unwrap_or("{}");
+                    let args: Value = serde_json::from_str(args_raw).unwrap_or(json!({}));
+                    let result = tools::execute(&name, &args, &ctx);
+                    messages.push(json!({
+                        "role": "tool",
+                        "tool_call_id": tc["id"].as_str().unwrap_or(""),
+                        "content": result,
+                    }));
+                }
+            }
+            Err(e) => {
+                let _ = emit_event(tx, json!({"type": "error", "message": e}));
+                return;
+            }
+        }
+    }
+}
+
+/// `/api/ai/chat/stream`: aynı istek gövdesi, SSE yanıtı.
+/// Olaylar: `meta` (motor), `delta`, `reasoning`, `done`, `error`.
+pub async fn ai_chat_stream(
+    State(state): State<BackendState>,
+    axum::Json(req): axum::Json<AiChatRequest>,
+) -> Result<axum::response::Response, (axum::http::StatusCode, String)> {
+    use axum::response::IntoResponse;
+    let url = provider_url(&req.provider, req.base_url.as_deref())
+        .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, e))?;
+    let (messages, blocks, engine) = prepare_prompt(&state, &req)?;
+    let url_for_task = url.clone();
+    let api_key_for_task = req.api_key.clone();
+    let model_for_task = req.model.clone();
+    let effort_for_task = req.reasoning_effort.clone();
+    let root_for_task = state
+        .workspace_root
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+
+    let (tx, rx) = tokio::sync::mpsc::channel::<String>(64);
+    let _ = tx.try_send(
+        json!({
+            "type": "meta",
+            "engine": {
+                "compressed_messages": engine.2,
+                "original_tokens": engine.0,
+                "compressed_tokens": engine.1,
+            }
+        })
+        .to_string(),
+    );
+    tokio::task::spawn_blocking(move || {
+        stream_tool_loop(
+            &tx,
+            &url_for_task,
+            &api_key_for_task,
+            &model_for_task,
+            messages,
+            &blocks,
+            std::path::Path::new(&root_for_task),
+            8,
+            effort_for_task.as_deref(),
+        );
+    });
+
+    let stream = futures_util::stream::unfold(rx, |mut rx| async move {
+        rx.recv()
+            .await
+            .map(|item| {
+                (
+                    Ok::<_, std::convert::Infallible>(
+                        axum::response::sse::Event::default().data(item),
+                    ),
+                    rx,
+                )
+            })
+    });
+    Ok(axum::response::sse::Sse::new(stream)
+        .keep_alive(axum::response::sse::KeepAlive::default())
+        .into_response())
+}
+
+pub async fn ai_chat(
+    State(state): State<BackendState>,
+    axum::Json(req): axum::Json<AiChatRequest>,
+) -> Result<axum::Json<Value>, (axum::http::StatusCode, String)> {
+    let url = provider_url(&req.provider, req.base_url.as_deref())
+        .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, e))?;
+    let messages_before_context = req.messages.as_array().cloned().unwrap_or_default();
+    let (messages, blocks, engine) = prepare_prompt(&state, &req)?;
+    let (engine_original, engine_compressed, engine_count) = engine;
+
+    let effort_for_task = req.reasoning_effort.clone();
     let blocks_for_task = blocks.clone();
     let url_for_task = url.clone();
     let api_key_for_task = req.api_key.clone();
@@ -429,6 +814,7 @@ pub async fn ai_chat(
             &blocks_for_task,
             std::path::Path::new(&root_for_task),
             8,
+            effort_for_task.as_deref(),
         )
     })
     .await
@@ -445,6 +831,7 @@ pub async fn ai_chat(
         let fallback_url = url.clone();
         let fallback_key = req.api_key.clone();
         let fallback_model = req.model.clone();
+        let fallback_effort = req.reasoning_effort.clone();
         match tokio::task::spawn_blocking(move || {
             let transport = HttpTransport;
             whole_file_fallback(
@@ -454,6 +841,7 @@ pub async fn ai_chat(
                 &fallback_model,
                 &fallback_messages,
                 &blocks,
+                fallback_effort.as_deref(),
             )
         })
         .await
@@ -467,8 +855,9 @@ pub async fn ai_chat(
 
     Ok(axum::Json(json!({
         "content": result.0,
-        "rounds": result.1,
-        "usage": result.2,
+        "reasoning": result.1,
+        "rounds": result.2,
+        "usage": result.3,
         "edits": edits,
         // Görünmez katmanın bilançosu — ön yüz sıradan akışta göstermez.
         "engine": {
@@ -578,7 +967,7 @@ mod tests {
         )];
         let messages = vec![json!({"role":"user","content":"login kontrol et"})];
 
-        let (content, rounds, _usage) = run_tool_loop(
+        let (content, _reasoning, rounds, _usage) = run_tool_loop(
             &transport,
             "http://x",
             "key",
@@ -587,6 +976,7 @@ mod tests {
             &blocks,
             std::path::Path::new("."),
             4,
+            None,
         )
         .unwrap();
 
@@ -616,7 +1006,7 @@ mod tests {
             "login".to_string(),
             "def login(): pass".to_string(),
         )];
-        let (content, _, _usage) = run_tool_loop(
+        let (content, _reasoning, _, _usage) = run_tool_loop(
             &transport,
             "http://x",
             "k",
@@ -625,6 +1015,7 @@ mod tests {
             &blocks,
             std::path::Path::new("."),
             4,
+            None,
         )
         .unwrap();
         assert_eq!(content, "bulamadım");
@@ -695,6 +1086,7 @@ mod tests {
             "m",
             &[json!({"role":"user","content":"f'yi 2 döndür"})],
             &blocks,
+            None,
         )
         .unwrap()
         .unwrap();

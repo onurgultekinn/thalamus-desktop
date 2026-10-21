@@ -16,9 +16,10 @@ import {
   X
 } from 'lucide-react';
 import type { ChatItem, User } from '../types';
-import { getWorkspaceName, getWorkspaceRoot, listRecentProjects, forgetProject } from '../lib/workspace';
+import { getWorkspaceName, getWorkspaceRoot, listRecentProjects, forgetProject, pickFolder } from '../lib/workspace';
 import { visiblePlanLabel } from '../lib/plan';
 import { useT } from '../lib/i18n';
+import { useToast } from './Toast';
 
 interface SidebarProps {
   currentView: 'chat' | 'diff' | 'project';
@@ -58,11 +59,20 @@ export function Sidebar({
   projectsVersion
 }: SidebarProps) {
   const t = useT();
+  const { showToast } = useToast();
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [isNewBtnHovered, setIsNewBtnHovered] = useState(false);
   const [projects, setProjects] = useState(() => listRecentProjects());
   const [sessionMenu, setSessionMenu] = useState<'closed' | 'split' | 'project'>('closed');
-  const [projectPath, setProjectPath] = useState('');
+  // "Open project" opens the OS-native folder picker directly (no typed path).
+  const handleChooseFolder = async () => {
+    try {
+      const selected = await pickFolder(t('sidebar.chooseFolder'));
+      if (selected) { setSessionMenu('closed'); onOpenProject?.(selected); }
+    } catch (e) {
+      showToast(t('sidebar.chooseFolder'), String(e), 'error');
+    }
+  };
   // Destructive actions are two-step: first click arms, second confirms.
   const [pendingDelete, setPendingDelete] = useState<{ kind: 'chat' | 'project'; id: string } | null>(null);
   const profileMenuRef = useRef<HTMLDivElement>(null);
@@ -203,13 +213,11 @@ export function Sidebar({
               </button>
               <button
                 type="button"
-                onClick={() => setSessionMenu(m => (m === 'project' ? 'split' : 'project'))}
+                onClick={handleChooseFolder}
                 title={t('sidebar.openProject')}
-                className={`flex-1 min-w-0 flex items-center justify-center gap-1.5 rounded-md border cursor-pointer transition-colors ${
-                  sessionMenu === 'project'
-                    ? 'border-[#575654] bg-[#575654] text-[#F2F0E5]'
-                    : 'border-[#353f4f] bg-[#282f3d] text-[#A8A49E] hover:border-[#575654] hover:bg-[#575654] hover:text-[#F2F0E5]'
-                } ${isOpen ? 'text-[11.5px] font-medium' : ''}`}
+                className={`flex-1 min-w-0 flex items-center justify-center gap-1.5 rounded-md border border-[#353f4f] bg-[#282f3d] text-[#A8A49E] hover:border-[#575654] hover:bg-[#575654] hover:text-[#F2F0E5] cursor-pointer transition-colors ${
+                  isOpen ? 'text-[11.5px] font-medium' : ''
+                }`}
               >
                 <FolderOpen size={13} className="flex-shrink-0" />
                 {isOpen && <span className="truncate">{t('sidebar.project')}</span>}
@@ -217,44 +225,7 @@ export function Sidebar({
             </div>
           </div>
 
-          {/* project path prompt */}
-          {sessionMenu === 'project' && isOpen && (
-            <div className="mt-1.5 w-full overflow-hidden rounded-md border border-[#282726] bg-[#1C1B1A] p-2">
-              <label className="block px-0.5 pb-1.5 text-[11px] font-mono uppercase tracking-wider text-[#87857F]">
-                {t('sidebar.projectPath')}
-              </label>
-              <div className="flex items-center gap-1.5">
-                <input
-                  type="text"
-                  autoFocus
-                  value={projectPath}
-                  onChange={(e) => setProjectPath(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      const p = projectPath.trim();
-                      if (p) { setProjectPath(''); setSessionMenu('closed'); onOpenProject?.(p); }
-                    }
-                  }}
-                  placeholder="C:\\dev\\my-project"
-                  spellCheck={false}
-                  className="min-w-0 flex-1 rounded-md border border-white/[0.08] bg-white/[0.03] px-2 py-1.5 font-mono text-[11.5px] text-[#F2F0E5] placeholder-white/20 focus:border-[#575654] focus:outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    const p = projectPath.trim();
-                    if (p) { setProjectPath(''); setSessionMenu('closed'); onOpenProject?.(p); }
-                  }}
-                  className="flex-shrink-0 rounded-md border border-[#353f4f] bg-[#282f3d] px-2.5 py-1.5 text-[11.5px] font-medium text-[#CECDC3] hover:border-[#575654] hover:bg-[#575654] hover:text-[#F2F0E5] cursor-pointer transition-colors"
-                >
-                  {t('common.open')}
-                </button>
-              </div>
-              <p className="px-0.5 pt-1.5 text-[11px] leading-snug text-[#87857F]">
-                {t('sidebar.tipRecent')}
-              </p>
-            </div>
-          )}
+          {/* open project → OS-native folder picker (direct; recents listed below) */}
         </div>
 
         <div className="flex flex-col w-full flex-1 min-h-0 overflow-y-auto overflow-x-hidden pretty-scrollbar">

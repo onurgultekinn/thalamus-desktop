@@ -11,6 +11,7 @@
 // "Kodu yazı gibi yazan" kullanıcı için güvenli davranış: sınıflandırılamayan
 // her şey metindir ve dokunulmaz.
 
+use crate::engine::plain_table::{self, PlainKind};
 use crate::engine::sanitize_json_string;
 use serde_json::Value;
 
@@ -24,7 +25,14 @@ pub enum Segment<'a> {
     /// `json` ayrıştırılmış Value'nun kanonik serileştirmesi — sıkıştırma ve
     /// kayıpsızlık doğrulaması bu JSON üzerinden yürür, reddedilirse `raw` kalır.
     Data { raw: &'a str, json: String },
-    /// Düz metin — veto analizi burada yapılır, kelimesi kelimesine taşınır.
+    /// Kayıpsız düz-tablo adayı (XML/SQL). `compressed` üretimde önceden
+    /// üretilmiş ve doğrulanmıştır; karar motoru yalnız kabul/ret verir.
+    Structured {
+        raw: &'a str,
+        compressed: String,
+        kind: PlainKind,
+    },
+    /// Düz metin (talimat/prose) — asla dönüştürülmez, kelimesi kelimesine taşınır.
     Text(&'a str),
 }
 
@@ -52,6 +60,38 @@ impl PromptSegmenter {
             Self::scan_gap(input, cursor, input.len(), &mut out);
         }
         out
+    }
+
+    /// BEKÇİ (kayıpsızlık değişmezi): segmentlerin girdiyi BİREBİR ve sırayla
+    /// kapladığını doğrular — boşluk ya da örtüşme varsa `false`.
+    ///
+    /// Neden gerekli: birleştirme aşaması segmentleri sırayla yazdığı için,
+    /// kapsanmayan tek bir karakter (ör. bir satır sonu) sessizce kaybolur.
+    /// Gerçek kod dosyalarında (içinde `{...}` geçen `use` satırları, boş
+    /// satırlar) segmente edilemeyen bölgeler bu boşluğu üretiyordu: motor
+    /// metni bozup "sıkıştırılmadı" diyebiliyordu. Bu bekçi, garanti
+    /// verilemeyen durumda sıkıştırmayı tamamen iptal etmeye izin verir.
+    pub fn tiles_exactly(segments: &[Segment<'_>], input: &str) -> bool {
+        let base = input.as_ptr() as usize;
+        let mut expect = 0usize;
+        for seg in segments {
+            let slice = match seg {
+                Segment::Verbatim(t) | Segment::Text(t) | Segment::Json(t) => *t,
+                Segment::Data { raw, .. } | Segment::Structured { raw, .. } => *raw,
+            };
+            if slice.is_empty() {
+                continue;
+            }
+            let start = match (slice.as_ptr() as usize).checked_sub(base) {
+                Some(v) if v <= input.len() => v,
+                _ => return false, // girdinin dışında bir dilim → tiling bozuk
+            };
+            if start != expect {
+                return false;
+            }
+            expect = start + slice.len();
+        }
+        expect == input.len()
     }
 
     /// Fence bölgelerini (başlangıç, bitiş, tür) toplar.
@@ -149,15 +189,34 @@ impl PromptSegmenter {
         // Greedy yapısal run tespiti
         let mut i = 0;
         let mut chunk_start = 0;
+        // Son tüketilen bloğun bitişi: kuyruk (satır sonları) buradan başlar.
+        let mut consumed_end = start;
         while i < lines.len() {
             let (s, e) = lines[i];
             if input[s..e].trim().is_empty() {
                 i += 1;
                 continue;
             }
-            if let Some((take, ingested)) = Self::try_structured_run(input, &lines[i..]) {
+            // SIRA ÖNEMLİ: düz-tablo tespiti ÖNCE. INI/TOML satırları
+            // (key = value) logfmt ingest'ine de uyar; önce Data'ya düşerse
+            // düz-tablo adaptörü hiç çalışmaz.
+            if let Some((take, compressed, kind)) =
+                Self::try_plain_block(input, &lines[i..])
+            {
                 Self::emit_chunk(input, lines[chunk_start].0, s, out);
                 let raw_end = lines[i + take - 1].1;
+                consumed_end = raw_end;
+                out.push(Segment::Structured {
+                    raw: &input[s..raw_end],
+                    compressed,
+                    kind,
+                });
+                i += take;
+                chunk_start = i;
+            } else if let Some((take, ingested)) = Self::try_structured_run(input, &lines[i..]) {
+                Self::emit_chunk(input, lines[chunk_start].0, s, out);
+                let raw_end = lines[i + take - 1].1;
+                consumed_end = raw_end;
                 out.push(Segment::Data {
                     raw: &input[s..raw_end],
                     json: ingested.value.to_string(),
@@ -168,8 +227,19 @@ impl PromptSegmenter {
                 i += 1;
             }
         }
+        let tail_start = if chunk_start > 0 {
+            // Önceki satırın bitişi, aradaki satır sonunu da kapsar.
+            lines[chunk_start - 1].1
+        } else {
+            start
+        };
         if chunk_start < lines.len() {
-            Self::emit_chunk(input, lines[chunk_start].0, end, out);
+            Self::emit_chunk(input, tail_start, end, out);
+        } else if consumed_end < end {
+            // SON BLOK SONRASI (satir sonlari): yapisal run tum satirlari
+            // yuttugunda bu kuyruk segmensiz kalıyordu → tiling bozuluyor ve
+            // kayipsizlik bekcisi TUM sikistirmayi iptal ediyordu.
+            out.push(Segment::Text(&input[consumed_end..end]));
         }
     }
 
@@ -191,6 +261,130 @@ impl PromptSegmenter {
             }
         }
         best
+    }
+
+    /// XML belgesi veya çok satırlı INSERT bloğu: yalnız `plain_table::compress`
+    /// kayıpsız bir temsil ürettiğinde kabul edilir. Aksi halde None → metin
+    /// olarak kalır. Bu kontrol, yapısal satır-run'ından ÖNCE çalışır.
+    fn try_plain_block(
+        input: &str,
+        lines: &[(usize, usize)],
+    ) -> Option<(usize, String, PlainKind)> {
+        let first = input[lines[0].0..lines[0].1].trim();
+        let upper = first.to_ascii_uppercase();
+
+        let take = if upper.starts_with("INSERT INTO ") && upper.contains(" VALUES") {
+            let mut n = 1usize;
+            let mut terminated = false;
+            while n < lines.len() {
+                n += 1;
+                if input[lines[n - 1].0..lines[n - 1].1].trim_end().ends_with(';') {
+                    terminated = true;
+                    break;
+                }
+            }
+            if !terminated || n < 5 {
+                return None;
+            }
+            n
+        } else if first.starts_with("<?xml") || (first.starts_with('<') && !first.starts_with("</")) {
+            // Açılış etiketini (ve varsa <?xml satırını) bul, kapanışını ara.
+            let mut root_line = 0usize;
+            if first.starts_with("<?xml") {
+                root_line = 1;
+                while root_line < lines.len()
+                    && input[lines[root_line].0..lines[root_line].1].trim().is_empty()
+                {
+                    root_line += 1;
+                }
+            }
+            let root = input
+                .get(lines.get(root_line)?.0..lines.get(root_line)?.1)?
+                .trim();
+            if !root.starts_with('<') || root.starts_with("</") || root.starts_with("<?") {
+                return None;
+            }
+            let tag: String = root[1..]
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '-' || *c == ':')
+                .collect();
+            if tag.is_empty() {
+                return None;
+            }
+            let close = format!("</{}>", tag);
+            let mut n = root_line + 1;
+            let mut found = None;
+            while n < lines.len() {
+                if input[lines[n].0..lines[n].1].trim() == close {
+                    found = Some(n + 1);
+                    break;
+                }
+                n += 1;
+            }
+            let n = found?;
+            if n < 4 {
+                return None;
+            }
+            n
+        } else if (first.starts_with('[') && first.ends_with(']'))
+            || (first.starts_with("[[") && first.ends_with("]]"))
+        {
+            // INI/TOML: bölüm başlıkları + key=value satırları.
+            let mut n = 1usize;
+            let mut last_good = 1usize;
+            while n < lines.len() {
+                let t = input[lines[n].0..lines[n].1].trim();
+                if t.is_empty() {
+                    n += 1;
+                    continue;
+                }
+                let is_section = t.starts_with('[') && t.ends_with(']');
+                let is_kv = t.contains('=') && !t.starts_with('[');
+                if !(is_section || is_kv) {
+                    break;
+                }
+                n += 1;
+                last_good = n;
+            }
+            if last_good < 4 {
+                return None;
+            }
+            last_good
+        } else if first.starts_with("- ") {
+            // YAML düz liste: "- key: value" + daha girintili devam satırları.
+            let base_indent = {
+                let raw = &input[lines[0].0..lines[0].1];
+                raw.len() - raw.trim_start().len()
+            };
+            let mut n = 1usize;
+            let mut last_good = 1usize;
+            while n < lines.len() {
+                let raw = &input[lines[n].0..lines[n].1];
+                let t = raw.trim();
+                if t.is_empty() {
+                    n += 1;
+                    continue;
+                }
+                let ind = raw.len() - raw.trim_start().len();
+                if ind < base_indent {
+                    break;
+                }
+                if !(t.starts_with("- ") || t.contains(": ")) {
+                    break;
+                }                n += 1;
+                last_good = n;
+            }
+            if last_good < 4 {
+                return None;
+            }
+            last_good
+        } else {
+            return None;
+        };
+
+        let span = &input[lines[0].0..lines[take - 1].1];
+        let (compressed, kind) = plain_table::compress(span)?;
+        Some((take, compressed, kind))
     }
 
     /// Yapısal run dışındaki metinde: inline kod aralıklarını ayır,
@@ -405,4 +599,5 @@ mod tests {
         assert!(matches!(segs[1], Segment::Json(_)));
         assert!(matches!(segs[2], Segment::Text(t) if t.contains("hoşça kal")));
     }
+
 }

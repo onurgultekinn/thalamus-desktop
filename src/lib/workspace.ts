@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { open } from '@tauri-apps/plugin-dialog';
 import { t } from './i18n';
 
 export interface WorkspaceInfo {
@@ -143,6 +144,29 @@ export interface OpenProjectResult {
 
 function inTauriDesktop(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+}
+
+/**
+ * Opens the OS-native folder picker (desktop only) so the user selects a
+ * project folder instead of typing a path. Returns the chosen absolute path,
+ * or null when cancelled or when no native picker is available (browser preview).
+ */
+export async function pickFolder(title?: string): Promise<string | null> {
+  if (!inTauriDesktop()) return null;
+  const selected = await open({ directory: true, multiple: false, title });
+  return typeof selected === 'string' ? selected : null;
+}
+
+/**
+ * Opens the OS-native file picker (desktop only) so the user can attach one or
+ * more files by path. Returns absolute paths ([] on cancel / browser preview).
+ */
+export async function pickFiles(title?: string): Promise<string[]> {
+  if (!inTauriDesktop()) return [];
+  const selected = await open({ directory: false, multiple: true, title });
+  if (Array.isArray(selected)) return selected;
+  if (typeof selected === 'string') return [selected];
+  return [];
 }
 
 /**

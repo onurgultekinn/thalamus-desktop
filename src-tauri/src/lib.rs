@@ -2,19 +2,27 @@ use serde::Serialize;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use tauri::{Emitter, State};
 use tiktoken_rs::cl100k_base;
 
+mod agent;
 mod backend;
-mod engine;
+// Sıkıştırma motoru, laboratuvar harness'ı (`examples/lab.rs`) tarafından
+// doğrudan ölçülsün diye public. Üretim yolu değişmez; yalnız görünürlük.
+pub mod engine;
 mod secrets;
 
 pub use engine::{CompressionMetrics, JsonCompressor};
 
 /// Aktif terminal oturumu: PTY master + writer + alt süreç.
 pub struct TerminalSession {
+    /// Bu oturumu üreten `start_terminal` çağrısının kimliği. Eski bir React
+    /// mount'unun `close_terminal` çağrısı yeni oturumu öldürmesin diye
+    /// kapanış yalnızca kimlik eşleşirse yapılır.
+    pub id: u64,
     pub master: Box<dyn portable_pty::MasterPty + Send>,
     pub writer: Box<dyn std::io::Write + Send>,
     pub child: Box<dyn portable_pty::Child + Send + Sync>,
@@ -23,6 +31,8 @@ pub struct TerminalSession {
 pub struct AppState {
     /// Aktif PTY terminal oturumu; yeni terminal başlatılırken eskisi öldürülür.
     pub terminal: Arc<Mutex<Option<TerminalSession>>>,
+    /// Terminal oturum sayacı (her start_terminal'da artar).
+    pub terminal_gen: AtomicU64,
     pub bpe: Arc<tiktoken_rs::CoreBPE>,
     /// Tüm dosya işlemlerinin güvenli tabanı (ayarlanabilir workspace root).
     pub workspace_root: Arc<RwLock<String>>,
@@ -34,6 +44,8 @@ pub struct AppState {
 pub struct InitContext {
     pub current_dir: String,
     pub file_count: usize,
+    /// Frontend'in kendi oturumunu tanıması için (close_terminal'a geri verilir).
+    pub session_id: u64,
 }
 
 #[derive(Serialize)]
@@ -730,12 +742,17 @@ fn start_terminal(
         .map_err(|e| format!("Could not take PTY writer: {}", e))?;
 
     // Es/kuşak sızıntısını önlemek için önceki terminal oturumunu kapat.
+    // Her oturum benzersiz bir kimlik alır: React StrictMode'un geliştirme
+    // modundaki çift mount'unda eski effect'in `close_terminal` çağrısı
+    // gecikmeli ulaşıp yeni oturumu öldürmesin (kimlik eşleşmezse no-op).
+    let session_id = state.terminal_gen.fetch_add(1, Ordering::SeqCst) + 1;
     {
         let mut slot = state.terminal.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(mut prev) = slot.take() {
             kill_child_tree(&mut prev.child);
         }
         *slot = Some(TerminalSession {
+            id: session_id,
             master: pair.master,
             writer,
             child,
@@ -767,6 +784,7 @@ fn start_terminal(
     Ok(InitContext {
         current_dir: display_path(&base),
         file_count,
+        session_id,
     })
 }
 
@@ -801,14 +819,19 @@ fn resize_terminal(rows: u16, cols: u16, state: State<'_, AppState>) -> Result<(
 }
 
 #[tauri::command]
-fn close_terminal(state: State<'_, AppState>) -> Result<(), String> {
-    if let Some(mut session) = state
-        .terminal
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .take()
-    {
-        kill_child_tree(&mut session.child);
+fn close_terminal(session_id: Option<u64>, state: State<'_, AppState>) -> Result<(), String> {
+    let mut slot = state.terminal.lock().unwrap_or_else(|e| e.into_inner());
+    // Kimlik verilmişse yalnızca o oturumu kapat. Eski bir effect'in gecikmeli
+    // kapanışı, arada açılmış yeni oturumu öldürmemeli.
+    let matches = match (session_id, slot.as_ref()) {
+        (Some(id), Some(current)) => current.id == id,
+        (Some(_), None) => false,
+        (None, _) => true,
+    };
+    if matches {
+        if let Some(mut session) = slot.take() {
+            kill_child_tree(&mut session.child);
+        }
     }
     Ok(())
 }
@@ -882,8 +905,12 @@ pub fn run() {
                 .level(log::LevelFilter::Info)
                 .build(),
         )
+        // Native folder picker ("open project" flow). Frontend calls it via
+        // @tauri-apps/plugin-dialog's open({ directory: true }).
+        .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
             terminal: Arc::new(Mutex::new(None)),
+            terminal_gen: AtomicU64::new(0),
             bpe,
             workspace_root,
             backend_status,
@@ -919,8 +946,14 @@ pub fn run() {
             secret_get,
             secret_delete,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, event| {
+            // Model motorları (llama.cpp/python/ollama) yetim kalmasın.
+            if let tauri::RunEvent::Exit = event {
+                backend::serve::shutdown_all();
+            }
+        });
 }
 
 #[cfg(test)]

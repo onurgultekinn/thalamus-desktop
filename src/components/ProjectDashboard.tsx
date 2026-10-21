@@ -8,6 +8,7 @@ import {
   FolderPlus, 
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   X,
   Play,
   AlertTriangle,
@@ -16,7 +17,10 @@ import {
   Save,
   Trash2,
   Pencil,
-  Search as SearchIcon
+  Search as SearchIcon,
+  PictureInPicture2,
+  Building2,
+  Eye
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { SyntaxHighlighter, vscDarkPlus } from '../lib/codeHighlight';
@@ -24,9 +28,12 @@ import { explainError } from '../lib/errors';
 import { API_BASE } from '../services/ThalamusClient';
 import { RealTerminal } from './RealTerminal';
 import { ThalamusCopilot } from './ThalamusCopilot';
+import { AgentCompany } from './AgentCompany';
 import { useToast } from './Toast';
 import { fetchWorkspaceInfo, getWorkspaceName, getWorkspaceRoot, saveWorkspaceRoot } from '../lib/workspace';
+import { useFloatingPanel, useAutoMinWidth, FloatResizeHandle, FLOATING_CHROME } from './floating';
 import { useT } from '../lib/i18n';
+import type { PreviewItem } from './FilePreviewDrawer';
 
 export interface FileNode {
   id: string;
@@ -93,6 +100,8 @@ const filterTree = (nodes: FileNode[], q: string): FileNode[] => {
 interface ProjectDashboardProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
+  /** Dosyayı mini önizleme/düzenleyici çekmecesinde açar (yol bilgisiyle). */
+  onOpenPreview?: (item: PreviewItem) => void;
 }
 
 interface PendingMove {
@@ -102,12 +111,12 @@ interface PendingMove {
   targetFolderName: string;
 }
 
-export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardProps) {
+export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview }: ProjectDashboardProps) {
   const { showToast } = useToast();
 
   /** Ayarlarla canlı senkron: localStorage config'ini okur. */
   const readAppearance = () => {
-    let fz = '13px', tab = 4, lines = true;
+    let fz = '13px', tab = 4;
     try {
       const configStr = localStorage.getItem('thalamus_config');
       if (configStr) {
@@ -115,24 +124,21 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
         if (config.appearance) {
           if (config.appearance.fontSize) fz = config.appearance.fontSize;
           if (config.appearance.tabSize) tab = config.appearance.tabSize;
-          if (config.appearance.showLineNumbers !== undefined) lines = config.appearance.showLineNumbers;
         }
       }
     } catch {}
-    return { fontSize: fz, tabSize: tab, showLineNumbers: lines };
+    return { fontSize: fz, tabSize: tab };
   };
 
   // Editör görünüm ayarları state'tedir; Settings kaydettiğinde
   // 'thalamus_config_changed' olayıyla 20 sn / remount beklemeden uygulanır.
   const [fontSize, setFontSize] = useState<string>(() => readAppearance().fontSize);
   const [tabSize, setTabSize] = useState<number>(() => readAppearance().tabSize);
-  const [showLineNumbers, setShowLineNumbers] = useState<boolean>(() => readAppearance().showLineNumbers);
   useEffect(() => {
     const sync = () => {
       const a = readAppearance();
       setFontSize(a.fontSize);
       setTabSize(a.tabSize);
-      setShowLineNumbers(a.showLineNumbers);
     };
     window.addEventListener('thalamus_config_changed', sync);
     return () => window.removeEventListener('thalamus_config_changed', sync);
@@ -177,6 +183,10 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
   // V1: diske yazilan son icerigin anlik goruntusu. fileContents bundan
   // farkliysa dosya "dirty"dir (kaydedilmemis degisiklik var).
   const [savedContents, setSavedContents] = useState<Record<string, string>>({});
+  // Dosyanın DİSKTEKİ satır sonu biçimi. Tarayıcı textarea değeri CRLF'i LF'e
+  // normalize ettiği için kaydederken geri uygulanmazsa .bat/.ps1 gibi dosyalar
+  // bozulur. Kaydetmede bu biçim yeniden uygulanır.
+  const fileEolRef = useRef<Record<string, string>>({});
   const t = useT();
   const [workspaceName, setWorkspaceName] = useState<string>(() => getWorkspaceName());
   const lineNumbersRef = useRef<HTMLDivElement>(null);
@@ -351,7 +361,28 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
   const [isTerminalOpen, setIsTerminalOpen] = useState<boolean>(true);
   const [isCopilotOpen, setIsCopilotOpen] = useState<boolean>(true);
 
-  // 🎯 MIN / MAX WIDTH LIMITS
+  // Merkez pano modu: 'code' = editör+terminal, 'agents' = Ajan Ağı.
+  // Mod değişince editör/terminal UNMOUNT edilmez (PTY ve tampon yaşasın).
+  const [paneMode, setPaneMode] = useState<'code' | 'agents'>(() => {
+    try {
+      const v = localStorage.getItem('tlm_pane_mode');
+      return v === 'agents' || v === 'company' ? 'agents' : 'code';
+    } catch { return 'code'; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('tlm_pane_mode', paneMode); } catch { /* noop */ }
+  }, [paneMode]);
+
+  // In-app floating windows (draggable, freely resizable, remembered). Content
+  // is never CSS-scaled: it stays native (crisp) and reflows to the window,
+  // with a minimum size so it stays readable/usable.
+  const termFloat = useFloatingPanel('terminal', { def: { x: 140, y: 140, w: 660, h: 200 }, min: { w: 240, h: 110 } });
+  const nucleusFloat = useFloatingPanel('nucleus', { def: { x: 300, y: 110, w: 470, h: 580 }, min: { w: 340, h: 280 } });
+  // Her panelin başlığı kırpılmadan sığabileceği genişliği ölç → altına inilemez.
+  useAutoMinWidth(termFloat.headerRef, termFloat.setMinWidth);
+  useAutoMinWidth(nucleusFloat.headerRef, nucleusFloat.setMinWidth);
+
+  // Min / max panel width limits
   const MIN_COPILOT_WIDTH = 340;
   const MAX_COPILOT_WIDTH = 470;
   const DEFAULT_COPILOT_WIDTH = 470;
@@ -374,7 +405,7 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
   // The pressed node + press origin; a drag only begins after a movement threshold.
   const pointerRef = useRef<{ node: FileNode; startX: number; startY: number } | null>(null);
 
-  // 🎯 SMOOTH RESIZE MECHANISM
+  // Smooth panel resize
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isResizingCopilot) return;
@@ -439,7 +470,26 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
   const currentCode = activeNode ? (fileContents[activeTab] ?? '') : '';
   const codeLines = React.useMemo(() => currentCode.split('\n'), [currentCode]);
   const editorLanguage = editorLanguageFor(activeTab);
-  const highlightEnabled = currentCode.length <= 100000;
+  // Prism tüm dosyayı her tuşta yeniden renklendiriyor; ölçülen gecikme:
+  // 600 satır ~376 ms, 1500 satır ~855 ms, 2500 satır ~1,4 sn. Bu yüzden
+  // büyük dosyalarda renklendirme tamamen kapanır; orta boyda yazarken düz
+  // metin gösterilir, 450 ms boşluktan sonra renkler geri gelir.
+  const HIGHLIGHT_MAX_CHARS = 30000;
+  const highlightAllowed = currentCode.length <= HIGHLIGHT_MAX_CHARS;
+  const [highlightIdle, setHighlightIdle] = React.useState(true);
+  const highlightTimer = React.useRef<number | null>(null);
+  const noteTyping = React.useCallback(() => {
+    setHighlightIdle(false);
+    if (highlightTimer.current) window.clearTimeout(highlightTimer.current);
+    highlightTimer.current = window.setTimeout(() => setHighlightIdle(true), 450);
+  }, []);
+  React.useEffect(() => {
+    setHighlightIdle(true);
+    return () => {
+      if (highlightTimer.current) window.clearTimeout(highlightTimer.current);
+    };
+  }, [activeTab]);
+  const highlightEnabled = highlightAllowed && highlightIdle;
   // Cok satirli dosyada satir numarasi sutunu da binlerce DOM dugumu uretir.
   const MAX_GUTTER_LINES = 2000;
   const gutterLines = codeLines.length <= MAX_GUTTER_LINES ? codeLines : null;
@@ -447,6 +497,20 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
   // Deferring it keeps typing responsive: the textarea updates immediately and
   // the colors catch up on the next idle render.
   const deferredCode = React.useDeferredValue(currentCode);
+
+  // Renklendirme katmanı yeniden çizildiğinde (düz metin ↔ renkli geçişi veya
+  // içerik değişimi) scroll konumu sıfırlanabilir; textarea'nın konumunu geri
+  // uygula. Aksi halde alt satırlarda içerik "kaybolmuş" gibi görünür.
+  React.useLayoutEffect(() => {
+    const ta = editorTextareaRef.current;
+    if (!ta) return;
+    if (lineNumbersRef.current) lineNumbersRef.current.scrollTop = ta.scrollTop;
+    const pre = editorHighlightRef.current;
+    if (pre) {
+      pre.scrollTop = ta.scrollTop;
+      pre.scrollLeft = ta.scrollLeft;
+    }
+  }, [highlightEnabled, activeTab]);
 
   const handleCreateItem = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -472,6 +536,7 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
         if (!openTabs.includes(finalId)) {
           setOpenTabs(prev => [...prev, finalId]);
         }
+        setPaneMode('code');
         setActiveTab(finalId);
       }
     } catch (err) {
@@ -761,10 +826,14 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
       handleToggleFolder(node.id);
       return;
     }
+    // Ajan panosundayken explorer'dan dosya açılırsa editör gizli kalıyordu
+    // (kullanıcı "dosya açılmıyor / düzenleyemiyorum" görüyordu). Kod panosuna geç.
+    setPaneMode('code');
     // Read from disk if content is not loaded yet (lazy loading)
     if (fileContents[node.id] === undefined) {
       try {
         const code = await invoke<string>('thalamus_read_file', { path: node.id });
+        fileEolRef.current[node.id] = code.includes('\r\n') ? '\r\n' : '\n';
         storeFileContent(node.id, code);
       } catch (err) {
         console.error('Could not read file:', err);
@@ -786,6 +855,7 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
       invoke<string>('thalamus_read_file', { path: node.id })
         .then(code => {
           if (code === savedAtClick) return;
+          fileEolRef.current[node.id] = code.includes('\r\n') ? '\r\n' : '\n';
           setFileContents(prev => {
             const cur = prev[node.id];
             if (cur !== bufferAtClick) return prev; // kullanci yazdi — dokunma
@@ -800,6 +870,38 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
     }
     setActiveTab(node.id);
   };
+
+  const handlePreviewNode = async (node: FileNode) => {
+    if (node.isFolder || !onOpenPreview) return;
+    try {
+      let body = fileContents[node.id];
+      if (body === undefined) {
+        body = await invoke<string>('thalamus_read_file', { path: node.id });
+        fileEolRef.current[node.id] = body.includes('\r\n') ? '\r\n' : '\n';
+        storeFileContent(node.id, body);
+      }
+      onOpenPreview({ name: node.name, kind: 'text', body, path: node.id });
+    } catch (err) {
+      const x = explainError(err, 'File read');
+      showToast(
+        x.title,
+        t('ide.openFailedMsg', { file: node.id, explanation: x.explanation }),
+        'error',
+        undefined,
+        `[${x.code}] ${x.detail ?? node.id}`
+      );
+    }
+  };
+
+  /** Önizleme çekmecesinde düzenlenebilecek (metin) dosya adları. */
+  const isPreviewText = (name: string) => (
+    /\.(txt|md|markdown|json|jsonc|ya?ml|toml|ini|cfg|conf|env|log|csv|tsv|xml|html?|css|scss|less|jsx?|tsx?|mjs|cjs|py|rb|go|rs|java|kt|kts|c|cc|cpp|h|hpp|cs|php|swift|sh|bash|zsh|ps1|psm1|bat|cmd|sql|gql|graphql|vue|svelte|astro|lock|properties|gradle|r|jl|lua|pl|dart|ex|exs|erl|hs|scala|clj|asm|tex|bib)$/i.test(name)
+    || !/\.[A-Za-z0-9]+$/.test(name)
+  );
+
+  /** Diske yazılacak metni dosyanın özgün satır sonu biçimine çevirir. */
+  const withOriginalEol = (file: string, code: string) =>
+    fileEolRef.current[file] === '\r\n' ? code.replace(/\r?\n/g, '\r\n') : code.replace(/\r\n/g, '\n');
 
   const handleRunActiveFile = async () => {
     if (!activeTab || !activeNode) return;
@@ -826,7 +928,7 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
     const fileCode = fileContents[activeTab];
     if (fileCode !== undefined) {
       try {
-        await invoke('thalamus_write_file', { path: activeTab, content: fileCode });
+        await invoke('thalamus_write_file', { path: activeTab, content: withOriginalEol(activeTab, fileCode) });
         setSavedContents(prev => ({ ...prev, [activeTab]: fileCode }));
       } catch (e) {
         console.error("Could not save file to disk:", e);
@@ -851,7 +953,7 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
     const fileCode = fileContents[activeTab];
     if (fileCode !== undefined) {
       try {
-        await invoke('thalamus_write_file', { path: activeTab, content: fileCode });
+        await invoke('thalamus_write_file', { path: activeTab, content: withOriginalEol(activeTab, fileCode) });
         setSavedContents(prev => ({ ...prev, [activeTab]: fileCode }));
         showToast(t('ide.fileSaved'), t('ide.fileSavedMsg', { file: activeTab }), 'success');
       } catch (e) {
@@ -1048,6 +1150,15 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
             >
               <FolderPlus size={11} className="mr-1.5 inline text-[#dcb67a]" /> {t('ide.newFolderHere')}
             </button>
+            {!ctxMenu.node.isFolder && onOpenPreview && isPreviewText(ctxMenu.node.name) && (
+              <button
+                type="button"
+                onClick={() => { const target = ctxMenu.node; setCtxMenu(null); void handlePreviewNode(target); }}
+                className="w-full text-left px-2.5 py-1.5 text-[11.5px] font-sans text-[#CECDC3] hover:bg-[#34332F] hover:text-white cursor-pointer transition-colors"
+              >
+                <Eye size={11} className="mr-1.5 inline text-[#dcb67a]" /> {t('ide.preview')}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => { setCtxMenu(null); void handleRenameEntry(ctxMenu.node); }}
@@ -1211,6 +1322,30 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
       {/* SECTION 2: EDITOR AND TERMINAL — M8: dar pencerede editör 0px'e
           ezilmesin; alt sinir sabit (pencere küçülünce taşma tercih edilir). */}
       <div className="flex-1 flex flex-col min-w-[280px] bg-[#282726]">
+        {/* Pano seçici: Kod editörü ↔ Ajan Ağı (Projeler bölümünün ajan sistemi). */}
+        <div className="h-8 bg-[#1C1B1A] border-b border-[#34332F] flex items-center gap-1 px-2 flex-shrink-0">
+          <button
+            type="button"
+            onClick={() => setPaneMode('code')}
+            className={`px-2.5 py-1 rounded text-[11px] font-medium cursor-pointer transition-colors ${
+              paneMode === 'code' ? 'bg-[#4385BE]/15 text-[#4385BE]' : 'text-[#87857F] hover:text-[#CECDC3]'
+            }`}
+          >
+            {t('agents.paneCode')}
+          </button>
+          <button
+            type="button"
+            onClick={() => setPaneMode('agents')}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-medium cursor-pointer transition-colors ${
+              paneMode === 'agents' ? 'bg-[#3AA99F]/15 text-[#3AA99F]' : 'text-[#87857F] hover:text-[#CECDC3]'
+            }`}
+          >
+            <Building2 size={12} />
+            Agents
+          </button>
+        </div>
+
+        <div className={`flex flex-col flex-1 min-h-0 ${paneMode !== 'code' ? 'hidden' : ''}`}>
         <div className="h-9 bg-[#282726] border-b border-[#34332F] flex items-center px-1 overflow-x-auto gap-0.5 flex-shrink-0">
           {openTabs.map(fileName => {
             const isActive = activeTab === fileName;
@@ -1280,7 +1415,6 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
             </div>
           ) : (
             <>
-            {showLineNumbers && (
             <div 
               ref={lineNumbersRef}
               style={{ fontSize }}
@@ -1297,14 +1431,13 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
                 </span>
               )}
             </div>
-            )}
           <div className="relative flex-1 min-w-0">
             {/* Colored layer — the visible text; the textarea on top is transparent. */}
             <pre
               ref={editorHighlightRef}
               aria-hidden="true"
               className="absolute inset-0 m-0 overflow-hidden whitespace-pre font-mono pointer-events-none select-none"
-              style={{ fontSize, lineHeight: 1.6, paddingLeft: '1rem', tabSize }}
+              style={{ fontSize, lineHeight: 1.6, padding: '0 0 0 1rem', boxSizing: 'border-box', tabSize }}
             >
               {highlightEnabled ? (
                 <SyntaxHighlighter
@@ -1324,10 +1457,10 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
               ref={editorTextareaRef}
               onScroll={handleTextareaScroll}
               value={currentCode}
-              onChange={(e) => handleApplyCode(activeTab, e.target.value)}
+              onChange={(e) => { noteTyping(); handleApplyCode(activeTab, e.target.value); }}
               onKeyDown={handleEditorKeyDown}
               wrap="off"
-              style={{ fontSize, lineHeight: 1.6, paddingLeft: '1rem', tabSize, caretColor: 'rgb(var(--tlm-fg))', color: 'transparent' }}
+              style={{ fontSize, lineHeight: 1.6, padding: '0 0 0 1rem', boxSizing: 'border-box', tabSize, caretColor: 'rgb(var(--tlm-fg))', color: 'transparent' }}
               className="absolute inset-0 bg-transparent font-mono outline-none border-none resize-none whitespace-pre overflow-auto pretty-scrollbar selection:bg-[#4385BE]/30"
               spellCheck={false}
             />
@@ -1337,20 +1470,44 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
         </div>
 
         {/* TERMINAL */}
-        <div className={`border-t border-[#34332F] bg-[#1C1B1A] flex flex-col flex-shrink-0 ${
-          isTerminalOpen ? 'h-[200px] min-h-[200px]' : 'h-7'
-        }`}>
-          <div className="h-7 px-3 flex items-center justify-between text-[11px] font-mono border-b border-[#34332F] bg-[#282726] flex-shrink-0">
+        <div
+          ref={termFloat.frameRef}
+          style={termFloat.style}
+          className={`relative bg-[#1C1B1A] ${
+            termFloat.floating
+              ? FLOATING_CHROME
+              : `flex flex-col flex-shrink-0 border-t border-[#34332F] transition-[height] duration-150 ease-out ${isTerminalOpen ? 'h-[200px] min-h-[200px]' : 'h-7'}`
+          }`}
+        >
+          {/* İçerik native boyutta (keskin) kalır; pencereye göre akar/kaydırılır. */}
+          <div style={termFloat.contentStyle}>
+          {/* Sidebar'daki gibi kenara oturan yuvarlak aç/kapa düğmesi:
+              açıkken aşağı (kapan), kapalıyken yukarı (aç). Yüzerken gizlenir. */}
+          {!termFloat.floating && (
             <button
               type="button"
-              className="flex items-center gap-2 cursor-pointer bg-transparent border-none outline-none focus:outline-none focus:ring-1 focus:ring-[#4385BE]/40 rounded px-1 text-left"
+              onClick={() => setIsTerminalOpen(v => !v)}
+              className="absolute -top-2.5 left-1/2 -translate-x-1/2 w-5 h-5 bg-obsidian-panel border border-obsidian-border rounded-full flex items-center justify-center text-obsidian-muted hover:border-obsidian-muted/40 hover:text-obsidian-text cursor-pointer z-50 transition-colors duration-150"
+              title={isTerminalOpen ? t('ide.collapseTerminal') : t('ide.expandTerminal')}
+            >
+              {isTerminalOpen ? <ChevronDown size={11} /> : <ChevronUp size={11} />}
+            </button>
+          )}
+          <div
+            ref={termFloat.headerRef}
+            onPointerDown={termFloat.floating ? termFloat.onDragStart : undefined}
+            className={`h-7 px-3 flex items-center justify-between gap-2 overflow-hidden whitespace-nowrap text-[11px] font-mono border-b border-[#34332F] bg-[#282726] flex-shrink-0 ${termFloat.floating ? 'cursor-move' : ''}`}
+          >
+            <button
+              type="button"
+              className="flex items-center gap-2 flex-shrink-0 cursor-pointer bg-transparent border-none outline-none focus:outline-none focus:ring-1 focus:ring-[#4385BE]/40 rounded px-1 text-left"
               onClick={() => setIsTerminalOpen(!isTerminalOpen)}
             >
-              <TerminalIcon size={13} className="text-[#4385BE]" />
-              <span className="font-semibold text-[#CECDC3]">{t('ide.terminal')}</span>
+              <TerminalIcon size={13} className="text-[#4385BE] flex-shrink-0" />
+              <span className="font-semibold text-[#CECDC3] flex-shrink-0 whitespace-nowrap">{t('ide.terminal')}</span>
             </button>
             
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-shrink-0 whitespace-nowrap">
               <button 
                 type="button" 
                 onClick={handleSaveActiveFile}
@@ -1363,8 +1520,19 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
                 type="button" 
                 onClick={handleRunActiveFile}
                 className="flex items-center gap-1 px-2 py-0.5 bg-[#205EA6] hover:bg-[#4385BE] text-white rounded text-[11px] font-sans font-medium cursor-pointer"
+                title="Run Active Code"
               >
                 <Play size={10} /> Run Active Code
+              </button>
+              <button
+                type="button"
+                onClick={termFloat.toggle}
+                className={`flex h-6 w-6 items-center justify-center rounded transition-colors cursor-pointer flex-shrink-0 ${
+                  termFloat.floating ? 'bg-[#4385BE]/15 text-[#4385BE]' : 'text-[#87857F] hover:bg-[#34332F] hover:text-[#CECDC3]'
+                }`}
+                title={termFloat.floating ? t('float.dock') : t('float.undock')}
+              >
+                <PictureInPicture2 size={12} />
               </button>
             </div>
           </div>
@@ -1373,21 +1541,36 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
               close_terminal cagirisıyla calisan prosesi OLDURUYORDU.
               hidden ile PTY + xterm tamponu yasiya kalir; acilinda
               ResizeObserver yeniden fit eder. */}
-          <div className={`flex-1 w-full bg-[#1C1B1A] overflow-hidden ${isTerminalOpen ? 'h-[173px]' : 'hidden'}`}>
+          <div className={`flex-1 min-h-0 w-full bg-[#1C1B1A] overflow-hidden ${
+            termFloat.floating ? '' : isTerminalOpen ? 'h-[173px]' : 'hidden'
+          }`}>
             <RealTerminal />
           </div>
+          </div>
+
+          {termFloat.floating && <FloatResizeHandle onPointerDown={termFloat.onResizeStart} />}
         </div>
+        </div>{/* /kod panosu (ajan modunda gizli; unmount DEĞİL) */}
+
+        {/* Ajan panosu — yalnız ajan modunda DOM'a girer. */}
+        {paneMode === 'agents' && (
+          <div className="flex-1 min-h-0 flex">
+            <AgentCompany />
+          </div>
+        )}
       </div>
 
-      {/* 🎯 SECTION 3: COPILOT PANEL (MINIMAL CLOSED STATE & FULLY FIXED DRAGGING) */}
+      {/* Nucleus panel (collapsible, resizable, floatable) */}
 <div 
-  style={{ width: isCopilotOpen ? `${copilotWidth}px` : '36px' }}
-  className={`bg-[#100F0F] border-l border-[#282726] flex flex-col flex-shrink-0 relative select-none ${
-    isResizingCopilot ? '' : 'transition-[width] duration-150 ease-out'
+  ref={nucleusFloat.frameRef}
+  style={nucleusFloat.floating ? nucleusFloat.style : { width: isCopilotOpen ? `${copilotWidth}px` : '36px' }}
+  className={`bg-[#100F0F] ${nucleusFloat.floating
+    ? `relative ${FLOATING_CHROME}`
+    : `flex flex-col flex-shrink-0 relative select-none border-l border-[#282726] ${isResizingCopilot ? '' : 'transition-[width] duration-150 ease-out'}`
   }`}
 >
-  {/* Resizer Handle */}
-  {isCopilotOpen && (
+  {/* Resizer Handle (docked only) */}
+  {!nucleusFloat.floating && isCopilotOpen && (
     <div
       onMouseDown={() => setIsResizingCopilot(true)}
       onDoubleClick={() => setCopilotWidth(DEFAULT_COPILOT_WIDTH)}
@@ -1398,35 +1581,33 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
     </div>
   )}
 
-  {/* 🎯 Aligned circular toggle button */}
-  <button
-    type="button"
-    onClick={() => setIsCopilotOpen(!isCopilotOpen)}
-    className="absolute top-1/2 -translate-y-1/2 -left-3 w-6 h-6 bg-[#282726] border border-[#34332F] hover:border-[#4385BE] rounded-full flex items-center justify-center text-[#CECDC3] hover:text-white shadow-xl cursor-pointer z-30 transition-all hover:scale-110"
-    title={isCopilotOpen ? "Collapse Panel" : "Expand Panel"}
-  >
-    {isCopilotOpen ? (
-      <ChevronRight size={13} />
-    ) : (
-      <ChevronLeft size={13} />
-    )}
-  </button>
+  {/* Circular collapse/expand toggle (docked only) */}
+  {!nucleusFloat.floating && (
+    <button
+      type="button"
+      onClick={() => setIsCopilotOpen(!isCopilotOpen)}
+      className="absolute top-1/2 -translate-y-1/2 -left-2.5 w-5 h-5 bg-obsidian-panel border border-obsidian-border rounded-full flex items-center justify-center text-obsidian-muted hover:border-obsidian-muted/40 hover:text-obsidian-text cursor-pointer z-50 transition-colors duration-150"
+      title={isCopilotOpen ? t('ide.collapsePanel') : t('ide.expandPanel')}
+    >
+      {isCopilotOpen ? (
+        <ChevronRight size={11} />
+      ) : (
+        <ChevronLeft size={11} />
+      )}
+    </button>
+  )}
 
-  {/* Panel header or sleek minimal closed state */}
-  {isCopilotOpen ? (
-    <div className="h-8 border-b border-[#282726] px-2.5 flex items-center justify-between font-mono text-[11px] text-[#CECDC3] flex-shrink-0 bg-[#1C1B1A]">
-      <div className="flex items-center gap-1 font-bold text-[#3AA99F] pl-1">
-        <span>Thalamus</span>
-      </div>
-    </div>
-  ) : (
-    /* 🎯 CLEAN CLOSED STATE: a single icon centered on the strip */
+  {/* İçerik native boyutta (keskin) kalır; pencereye göre akar/kaydırılır. */}
+  <div style={nucleusFloat.contentStyle}>
+
+  {/* Collapsed rail (open-state header lives in ThalamusCopilot) */}
+  {!nucleusFloat.floating && !isCopilotOpen && (
     <div className="h-full w-full flex flex-col items-center pt-2.5 bg-[#1C1B1A]">
       <button
         type="button"
         onClick={() => setIsCopilotOpen(true)}
         className="p-1 hover:bg-[#282726] rounded text-[#4385BE] hover:text-white transition-colors cursor-pointer"
-        title={t('ide.openCopilot')}
+        title={t('ide.openNucleus')}
       >
         <MessageSquare size={15} />
       </button>
@@ -1434,10 +1615,12 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
   )}
 
   {/* Panel content — M2-tarzı: katlama unmount DEĞİL; sohbet + undo +
-      pending editler katlayıp açarken yaşar kalır. */}
+      pending editler katlayıp açarken yaşar kalır; yüzerken de aynı düğüm. */}
   <div 
     className="flex-1 flex flex-col min-h-0"
-    style={{ display: isCopilotOpen ? 'flex' : 'none', visibility: isCopilotOpen ? 'visible' : 'hidden' }}
+    style={nucleusFloat.floating
+      ? { display: 'flex' }
+      : { display: isCopilotOpen ? 'flex' : 'none', visibility: isCopilotOpen ? 'visible' : 'hidden' }}
   >
     <ThalamusCopilot 
       activeFile={activeTab}
@@ -1445,8 +1628,15 @@ export function ProjectDashboard({ activeTab, setActiveTab }: ProjectDashboardPr
                 workspaceFiles={workspaceFiles}
       onApplyCode={handleApplyCode}
       onOpenTerminal={() => setIsTerminalOpen(true)}
+      floating={nucleusFloat.floating}
+      onToggleFloat={nucleusFloat.toggle}
+      onHeaderPointerDown={nucleusFloat.onDragStart}
+      headerRef={nucleusFloat.headerRef}
     />
   </div>
+  </div>
+
+  {nucleusFloat.floating && <FloatResizeHandle onPointerDown={nucleusFloat.onResizeStart} />}
 </div>
 
     </div>

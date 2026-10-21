@@ -23,8 +23,12 @@ use std::time::SystemTime;
 use tiktoken_rs::CoreBPE;
 use tower_http::cors::{AllowHeaders, AllowOrigin, CorsLayer};
 
+pub mod agent;
 pub mod ai;
+pub mod engines;
+pub mod local_models;
 pub mod repo;
+pub mod serve;
 pub mod tools;
 
 const DEFAULT_PORT: u16 = 8277;
@@ -36,6 +40,8 @@ pub struct BackendState {
     pub workspace_root: Arc<RwLock<String>>,
     /// Dosya içerik cache'i (mtime'a göre) — değişmeyen dosyalar yeniden okunmaz.
     pub repo_cache: Arc<Mutex<HashMap<String, (SystemTime, String)>>>,
+    /// Ajan Ağı koşuları — sunucu-otoriteli durum (arayüz yoklar).
+    pub agent_runs: crate::agent::SharedRuns,
 }
 
 #[derive(serde::Deserialize)]
@@ -128,7 +134,17 @@ fn router(state: BackendState) -> Router {
         .route("/api/health", get(health))
         .route("/api/compress", post(compress))
         .route("/api/ai/chat", post(ai::ai_chat))
+        .route("/api/ai/chat/stream", post(ai::ai_chat_stream))
+        .route("/api/ai/models", post(local_models::local_models))
+        .route(
+            "/api/ai/serve",
+            post(serve::serve_model).get(serve::list_serving),
+        )
+        .route("/api/ai/serve/stop", post(serve::stop_model))
         .route("/api/repo/map", post(repo::repo_map))
+        .route("/api/agent/run", post(agent::agent_run))
+        .route("/api/agent/state", get(agent::agent_state))
+        .route("/api/agent/cancel", post(agent::agent_cancel))
         .with_state(state)
         .layer(cors)
         // En dış katman: CORS preflight'ı bile Host denetiminden geçer.
@@ -152,6 +168,7 @@ pub fn serve(bpe: Arc<CoreBPE>, workspace_root: Arc<RwLock<String>>) -> BackendS
         bpe: bpe.clone(),
         workspace_root: workspace_root.clone(),
         repo_cache: Arc::new(std::sync::Mutex::new(HashMap::new())),
+        agent_runs: Arc::new(Mutex::new(HashMap::new())),
     });
 
     let status: BackendStatus = Arc::new(Mutex::new(None));
@@ -202,6 +219,7 @@ mod tests {
                     .to_string(),
             )),
             repo_cache: Arc::new(Mutex::new(HashMap::new())),
+            agent_runs: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 

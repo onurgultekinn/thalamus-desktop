@@ -10,6 +10,13 @@ Desktop.ini
 # Denetim geçici ekran görüntüleri
 _denetim_shot.png
 
+# Yerel denetim / yedek artefaktları
+_audit/
+_backups/
+_preview_test.*
+_term_real.txt
+_test_create.txt
+
 # @file-viewer offline asset kopyaları (üretilir)
 public/file-viewer/
 

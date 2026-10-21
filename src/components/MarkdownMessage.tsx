@@ -6,6 +6,12 @@ import { useT } from '../lib/i18n';
 
 interface MarkdownMessageProps {
   content: string;
+  /**
+   * Akış hâlinde: kapanmamış kod bloğu renklendirilmez, düz monospace çizilir.
+   * Blok kapanınca normal renklendirme devreye girer — her karede Prism
+   * çalıştırmak akışı yavaşlatırdı.
+   */
+  streaming?: boolean;
 }
 
 /**
@@ -74,7 +80,7 @@ const buildHighlighted = (lang: string, code: string) => (
   </SyntaxHighlighter>
 );
 
-const CodeBlock: React.FC<{ lang: string; code: string }> = React.memo(({ lang, code }) => {
+const CodeBlock: React.FC<{ lang: string; code: string; plain?: boolean }> = React.memo(({ lang, code, plain }) => {
   const t = useT();
   const key = cacheKey(lang, code);
   const [node, setNode] = React.useState<React.ReactNode>(
@@ -88,7 +94,7 @@ const CodeBlock: React.FC<{ lang: string; code: string }> = React.memo(({ lang, 
   const skeletonHeight = `${(lines * 1.28 + 1.5).toFixed(2)}rem`;
 
   React.useEffect(() => {
-    if (!lang) return;
+    if (!lang || plain) return;
     if (cacheGet(key)) { setNode(cacheGet(key) ?? null); return; }
     const el = boxRef.current;
     if (!el) return;
@@ -132,11 +138,17 @@ const CodeBlock: React.FC<{ lang: string; code: string }> = React.memo(({ lang, 
         window.cancelIdleCallback(idleId);
       }
     };
-  }, [key, lang, code]);
+  }, [key, lang, code, plain]);
 
   return (
     <div ref={boxRef} className="relative" style={{ background: 'rgb(var(--tlm-bg))' }}>
-      {!lang ? (
+      {plain ? (
+        /* Akış sırasında: renk yok, ama çerçeve/satır yüksekliği sabit; blok
+           kapanınca renklenmiş hâli aynı ölçülerde gelir (zıplama olmaz). */
+        <pre className="m-0 whitespace-pre-wrap py-2.5 pl-10 pr-3 font-mono text-[0.8rem] leading-[1.6] text-zinc-200">
+          {code}
+        </pre>
+      ) : !lang ? (
         /* Dil etiketsiz ``` blokları inline pikap stiline düşmemeli; düz
            monospace blok olarak kalır (satır sonu korunur). */
         <div className="whitespace-pre-wrap px-3 py-2.5 font-mono text-[0.8rem] leading-[1.6] text-zinc-200">
@@ -158,7 +170,7 @@ const CodeBlock: React.FC<{ lang: string; code: string }> = React.memo(({ lang, 
  * messages (and their Prism highlight passes) don't re-run — a big difference
  * per keystroke in long chats.
  */
-export const MarkdownMessage: React.FC<MarkdownMessageProps> = React.memo(({ content }) => {
+export const MarkdownMessage: React.FC<MarkdownMessageProps> = React.memo(({ content, streaming }) => {
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
   const { showToast } = useToast();
   const t = useT();
@@ -202,7 +214,7 @@ export const MarkdownMessage: React.FC<MarkdownMessageProps> = React.memo(({ con
 
       {/* Renklendirme CodeBlock icinde: yalnizca ekrana giren bloklar islenir,
           sonuc onbellege alinir; beklerken iskelet gosterilir (bkz. dosya basi). */}
-      <CodeBlock lang={lang} code={codeString} />
+      <CodeBlock lang={lang} code={codeString} plain={streaming} />
     </div>
   );
 

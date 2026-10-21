@@ -1,13 +1,13 @@
 // Sıkıştırma hattı — tamamen kayıpsız:
 //
 //   prompt → katmanlı segmentasyon (fence/inline kod → JSON → metin)
-//          → metin segmentlerinde veto niyeti analizi
 //          → JSON segmentlerinde kayıpsız @T sıkıştırma + maliyet ölçümü
 //          → net-tasarruf kararı (decoder maliyeti toplamda bir kez)
 //          → orijinal sırayla birleştirme.
 //
 // Kod bloklarına (fenced/inline) ve metne asla dokunulmaz; segment sırası
 // girdi sırasını birebir korur. Sıkıştırılamayan her şey ham kalır.
+use crate::engine::certification;
 use crate::engine::jscompress::JsonCompressor;
 use crate::engine::sanitize_json_string;
 use crate::engine::segments::{PromptSegmenter, Segment};
@@ -30,7 +30,7 @@ pub struct CompressionMetrics {
     pub savings_percentage: f64,
     pub execution_time_ms: f64,
     /// D2: normal yolda her sıkıştırma segment-düzeyi lossless doğrulamasından
-    /// geçer; `veto_override: true` ise doğrulamayı atlar ve yapı zorla
+    /// geçer; `veto_override: true` (hata ayıklama) doğrulamayı atlar ve yapıyı zorlar.
     /// değişebilir. Bu bayrak UI'nın "verified lossless" rozetini yalnızca
     /// GERÇEKTEN doğrulanmış çıktıda yakması içindir — yalan rozet yok.
     pub lossless_verified: bool,
@@ -50,7 +50,6 @@ pub struct CandidateCost {
     pub raw_tokens: usize,
     pub optimized_tokens: usize,
     pub lossless: bool,
-    pub vetoed: bool,
 }
 
 pub struct DecisionEngine;
@@ -63,7 +62,7 @@ impl DecisionEngine {
         let mut total_gross_savings: usize = 0;
 
         for (idx, c) in candidates.iter().enumerate() {
-            if c.vetoed || !c.lossless {
+            if !c.lossless {
                 continue;
             }
             if c.raw_tokens > c.optimized_tokens {
@@ -80,134 +79,6 @@ impl DecisionEngine {
         }
 
         decisions
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Veto (anahtar kelime tabanlı) — koruma niyeti taşıyan metinleri yakalar
-// ---------------------------------------------------------------------------
-#[derive(Debug, PartialEq, Clone, Copy)]
-pub enum VetoScope {
-    Global,
-    LocalToNext,
-    None,
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub struct IntentAnalysis {
-    pub scope: VetoScope,
-    pub confidence: f32,
-    pub is_vetoed: bool,
-}
-
-/// "Bunu sıkıştırma / aynen koru / parse et" niyeti → veto (sıkıştırmayı engelle).
-const PRESERVE_PHRASES: &[&str] = &[
-    // İngilizce
-    "do not compress",
-    "dont compress",
-    "no compression",
-    "do not minify",
-    "dont minify",
-    "no minification",
-    "keep it as is",
-    "keep as is",
-    "keep the original",
-    "keep original",
-    "original format",
-    "raw json",
-    "raw format",
-    "verbatim",
-    "untouched",
-    "don't change",
-    "do not change",
-    "don't modify",
-    "fix the json",
-    "fix this json",
-    // Parse kodu isteği
-    "write code to parse",
-    "write a parser",
-    "write a script to parse",
-    "write a function to parse",
-    "write a program to parse",
-    "parse this json",
-    "parse the following json",
-    "parse the json",
-    "parse the data",
-    // Türkçe
-    "bozma",
-    "bozmayın",
-    "dokunma",
-    "dokunmayın",
-    "değiştirme",
-    "değiştirmeyin",
-    "sıkıştırma yapma",
-    "sıkıştırma",
-    "yapma sıkıştır",
-    "olduğu gibi",
-    "aynen koru",
-    "aynen bırak",
-    "koru",
-    "koruyarak",
-    "küçültme",
-    "minimize etme",
-    "parse et",
-    "parse eden kod",
-    "parse eden",
-    "kod yaz",
-];
-
-const LOCAL_KEYWORDS: &[&str] = &[
-    "bu json",
-    "bu veriyi",
-    "aşağıdaki json",
-    "aşağıdaki veri",
-    "şu json",
-    "this json",
-    "this data",
-    "the following json",
-    "following data",
-];
-
-const GLOBAL_KEYWORDS: &[&str] = &[
-    "tüm json",
-    "tüm veriler",
-    "bütün json",
-    "hepsi",
-    "tamamını",
-    "her json",
-    "all json",
-    "all data",
-    "every json",
-    "everything",
-];
-
-fn judge_intent(text: &str) -> IntentAnalysis {
-    let lower = text.to_lowercase();
-    let is_vetoed = PRESERVE_PHRASES.iter().any(|&kw| lower.contains(kw));
-
-    let scope = if is_vetoed {
-        determine_scope(text)
-    } else {
-        VetoScope::None
-    };
-
-    IntentAnalysis {
-        scope,
-        confidence: if is_vetoed { 0.9 } else { 0.0 },
-        is_vetoed,
-    }
-}
-
-pub fn determine_scope(text: &str) -> VetoScope {
-    let lower = text.to_lowercase();
-
-    let has_local = LOCAL_KEYWORDS.iter().any(|&kw| lower.contains(kw));
-    let has_global = GLOBAL_KEYWORDS.iter().any(|&kw| lower.contains(kw));
-
-    if has_local && !has_global {
-        VetoScope::LocalToNext
-    } else {
-        VetoScope::Global
     }
 }
 
@@ -231,40 +102,69 @@ fn is_lossless(raw: &str, compressed: &str) -> bool {
 pub fn process(raw_prompt: &str, bpe: &CoreBPE, veto_override: bool) -> String {
     let segments = PromptSegmenter::segment(raw_prompt);
 
+    // KAYIPSIZLIK BEKÇİSİ: segmentler girdiyi birebir kaplamıyorsa (boşluk ya da
+    // örtüşme) birleştirme sessizce karakter kaybedebilir. Gerçek kod
+    // dosyalarında gözlendi (lab/docs/TRIALS.md, TRIALS-003). Böyle bir durumda
+    // sıkıştırma tamamen iptal edilir ve ham metin döner: kayıpsızlık kazançtan
+    // önce gelir.
+    if !PromptSegmenter::tiles_exactly(&segments, raw_prompt) {
+        return raw_prompt.to_string();
+    }
+
     struct Candidate<'a> {
         raw: &'a str,
         compressed: Option<String>,
         cost: CandidateCost,
+        /// Düz-tablo (XML/SQL) adayı: kendi decoder talimatı yoktur, karar
+        /// motorundaki JSON decoder maliyetine tabi değildir.
+        structured: bool,
     }
 
-    // AŞAMA 1 — ANALİZ: metin segmentlerinde veto niyeti, JSON adayları.
+    // AŞAMA 1 — ANALİZ: yalnız JSON/yapısal adaylar. Metin ve talimat dokunulmaz.
     let mut candidates: Vec<Candidate> = Vec::new();
-    let mut has_global_veto = false;
-    let mut pending_local_veto = false;
 
     for seg in &segments {
         match seg {
-            Segment::Text(t) => {
-                let trimmed = t.trim();
-                if trimmed.is_empty() {
-                    continue;
-                }
-                let analysis = judge_intent(trimmed);
-                if analysis.is_vetoed {
-                    match analysis.scope {
-                        VetoScope::Global => has_global_veto = true,
-                        VetoScope::LocalToNext => pending_local_veto = true,
-                        VetoScope::None => {}
-                    }
-                }
-            }
+            // Metin (talimat/prose) hiçbir zaman sıkıştırılmaz ve niyet
+            // tahmini yapılmaz. Koruma kararı yalnız çağıranın `preserve`
+            // ayarından gelir (D-040).
+            Segment::Text(_) => {}
             Segment::Verbatim(_) => {
-                // Fenced/inline kod: asla dokunulmaz, veto zincirini de etkilemez.
+                // Fenced/inline kod: asla dokunulmaz.
+            }
+            Segment::Structured {
+                raw,
+                compressed,
+                kind,
+            } => {
+                // Segmenter yalnız kayıpsız doğrulanmış temsilleri üretir.
+                let raw_tokens = count_tokens(bpe, raw);
+                let candidate_tokens = count_tokens(bpe, compressed);
+                // SERTİFİKASYON EŞİĞİ: anlama kapısından geçmemiş veya bu
+                // aday için kazanç eşiğin altındaysa ham kalır (D-031).
+                let savings_pct = if raw_tokens == 0 {
+                    0.0
+                } else {
+                    100.0 * (raw_tokens.saturating_sub(candidate_tokens) as f64)
+                        / (raw_tokens as f64)
+                };
+                let certified = certification::plain_table_ok(*kind, savings_pct);
+                candidates.push(Candidate {
+                    raw,
+                    compressed: if certified {
+                        Some(compressed.clone())
+                    } else {
+                        None
+                    },
+                    cost: CandidateCost {
+                        raw_tokens,
+                        optimized_tokens: if certified { candidate_tokens } else { raw_tokens },
+                        lossless: true,
+                    },
+                    structured: true,
+                });
             }
             Segment::Json(raw) | Segment::Data { raw, json: _ } => {
-                let is_vetoed = !veto_override && (has_global_veto || pending_local_veto);
-                pending_local_veto = false; // local veto tüketildi
-
                 let raw_tokens = count_tokens(bpe, raw);
                 let mut cand = Candidate {
                     raw,
@@ -273,26 +173,24 @@ pub fn process(raw_prompt: &str, bpe: &CoreBPE, veto_override: bool) -> String {
                         raw_tokens,
                         optimized_tokens: raw_tokens,
                         lossless: false,
-                        vetoed: is_vetoed,
                     },
+                    structured: false,
                 };
 
-                if !is_vetoed {
-                    let is_giant = raw.len() >= GIANT_PAYLOAD_THRESHOLD;
-                    // Json segmentinde ham metin zaten JSON'dur; Data segmentinde
-                    // ingest edilmiş kanonik JSON üzerinde çalışılır.
-                    let source_json = match seg {
-                        Segment::Json(raw) => raw,
-                        Segment::Data { json, .. } => json.as_str(),
-                        _ => unreachable!(),
-                    };
-                    if let Ok(compressed) = JsonCompressor::compress(source_json, is_giant) {
-                        // compress() zaten kayıpsızlığı doğrular; reddederse ham kalır.
-                        if veto_override || is_lossless(source_json, &compressed) {
-                            cand.cost.optimized_tokens = count_tokens(bpe, &compressed);
-                            cand.cost.lossless = true;
-                            cand.compressed = Some(compressed);
-                        }
+                let is_giant = raw.len() >= GIANT_PAYLOAD_THRESHOLD;
+                // Json segmentinde ham metin zaten JSON'dur; Data segmentinde
+                // ingest edilmiş kanonik JSON üzerinde çalışılır.
+                let source_json = match seg {
+                    Segment::Json(raw) => raw,
+                    Segment::Data { json, .. } => json.as_str(),
+                    _ => unreachable!(),
+                };
+                if let Ok(compressed) = JsonCompressor::compress(source_json, is_giant) {
+                    // compress() zaten kayıpsızlığı doğrular; reddederse ham kalır.
+                    if veto_override || is_lossless(source_json, &compressed) {
+                        cand.cost.optimized_tokens = count_tokens(bpe, &compressed);
+                        cand.cost.lossless = true;
+                        cand.compressed = Some(compressed);
                     }
                 }
                 candidates.push(cand);
@@ -304,20 +202,42 @@ pub fn process(raw_prompt: &str, bpe: &CoreBPE, veto_override: bool) -> String {
         return raw_prompt.to_string();
     }
 
-    // AŞAMA 2 — KARAR: decoder maliyeti toplamda bir kez hesaba katılır.
+    // AŞAMA 2 — KARAR: JSON decoder maliyeti toplamda bir kez hesaba katılır.
+    // Düz-tablo adayları decoder talimatı gerektirmez (şema kendi içinde).
     let decoder_tokens = count_tokens(bpe, MINIMAL_DECODER_INSTRUCTION);
-    let costs: Vec<CandidateCost> = candidates.iter().map(|c| c.cost).collect();
-    let decisions = if veto_override {
-        vec![Decision::Accept; candidates.len()]
+    let json_idx: Vec<usize> = candidates
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| !c.structured)
+        .map(|(i, _)| i)
+        .collect();
+    let json_costs: Vec<CandidateCost> = json_idx.iter().map(|&i| candidates[i].cost).collect();
+    let mut decisions = vec![Decision::Reject; candidates.len()];
+    if veto_override {
+        decisions = vec![Decision::Accept; candidates.len()];
     } else {
-        DecisionEngine::evaluate(&costs, decoder_tokens)
-    };
-    let accepted_any = decisions.contains(&Decision::Accept);
+        let json_decisions = DecisionEngine::evaluate(&json_costs, decoder_tokens);
+        for (k, &i) in json_idx.iter().enumerate() {
+            decisions[i] = json_decisions[k];
+        }
+        for (i, c) in candidates.iter().enumerate() {
+            if c.structured {
+                decisions[i] = if c.compressed.is_some() {
+                    Decision::Accept
+                } else {
+                    Decision::Reject
+                };
+            }
+        }
+    }
+    let accepted_json_any = json_idx
+        .iter()
+        .any(|&i| decisions[i] == Decision::Accept);
 
     // AŞAMA 3 — BİRLEŞTİRME: orijinal sıra, decoder talimatı en fazla bir kez.
     let mut output =
         String::with_capacity(raw_prompt.len() + MINIMAL_DECODER_INSTRUCTION.len() + 2);
-    if accepted_any {
+    if accepted_json_any {
         output.push_str(MINIMAL_DECODER_INSTRUCTION);
         output.push('\n');
     }
@@ -326,7 +246,7 @@ pub fn process(raw_prompt: &str, bpe: &CoreBPE, veto_override: bool) -> String {
     for seg in &segments {
         match seg {
             Segment::Text(t) | Segment::Verbatim(t) => output.push_str(t),
-            Segment::Json(_) | Segment::Data { .. } => {
+            Segment::Json(_) | Segment::Data { .. } | Segment::Structured { .. } => {
                 let cand = &candidates[json_idx];
                 let decision = decisions[json_idx];
                 json_idx += 1;
@@ -378,4 +298,114 @@ pub fn process_with_metrics(
         // doğrulamayı atlarcasına yapıyı zorlar → dürüstçe `false`.
         lossless_verified: !veto_override,
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn bpe() -> CoreBPE {
+        tiktoken_rs::cl100k_base().unwrap()
+    }
+
+    fn xml_doc() -> String {
+        let mut s = String::from("<services>
+");
+        for i in 0..10 {
+            s.push_str(&format!(
+                "  <item id=\"{}\" enabled=\"true\">
+    <name>svc-{:02}</name>
+    <port>{}</port>
+  </item>
+",
+                i,
+                i,
+                8000 + i
+            ));
+        }
+        s.push_str("</services>
+");
+        s
+    }
+
+    #[test]
+    fn structured_xml_is_compressed_losslessly() {
+        let doc = xml_doc();
+        let out = process(&doc, &bpe(), false);
+        assert!(out.contains("#xml <item>"), "tablo bekleniyordu: {}", out);
+        assert!(out.len() < doc.len());
+        assert_eq!(
+            crate::engine::plain_table::decompress(&out).expect("geri çözüm"),
+            doc
+        );
+        // Düz-tablo kendi şemasını taşır; JSON decoder satırı eklenmemeli.
+        assert!(!out.starts_with("Decode @T"));
+    }
+
+    #[test]
+    fn fenced_xml_is_never_touched() {
+        let doc = format!("```xml
+{}```", xml_doc());
+        assert_eq!(process(&doc, &bpe(), false), doc);
+    }
+
+
+    #[test]
+    fn thin_savings_is_rejected_by_certification_gate() {
+        // Değerler etiketlerden uzun: tablo kazancı %25 eşiğinin altında kalır.
+        let mut doc = String::from("<r>
+");
+        for i in 0..4 {
+            doc.push_str(&format!(
+                "  <i id=\"{}\">
+    <v>deger-{}-{}</v>
+  </i>
+",
+                i,
+                i,
+                "x".repeat(120)
+            ));
+        }
+        doc.push_str("</r>
+");
+        let out = process(&doc, &bpe(), false);
+        assert!(out.contains("<i id=\"0\">"), "esik alti ham kalmali: {}", out);
+        assert!(!out.contains("#xml <i>"));
+    }
+    #[test]
+    fn ini_toml_yaml_are_compressed_losslessly() {
+        let n = '\n';
+        let mut ini = String::new();
+        let mut toml = String::new();
+        for i in 0..16 {
+            ini.push_str(&format!(
+                "[p{:02}]{n}host = db-{:02}{n}port = 5432{n}sslmode = require{n}{n}",
+                i, i
+            ));
+            toml.push_str(&format!(
+                "[[dep.{}]]{n}name = \"c{r:02}\"{n}version = \"1.4\"{n}optional = false{n}{n}",
+                i,
+                r = i
+            ));
+        }
+        let mut yaml = String::from("workers:");
+        yaml.push(n);
+        for i in 0..8 {
+            yaml.push_str(&format!("  - id: {}{n}    name: w-{:03}{n}    active: true{n}", i, i));
+        }
+        for (doc, marker) in [
+            (ini, "#ini section "),
+            (toml, "#toml [["),
+            (yaml, "#yaml list "),
+        ] {
+            let out = process(&doc, &bpe(), false);
+            assert!(out.contains(marker), "donusum bekleniyordu: {out}");
+            assert!(out.len() < doc.len());
+            assert_eq!(
+                crate::engine::plain_table::decompress(&out).expect("geri cozum"),
+                doc
+            );
+        }
+    }
+
 }

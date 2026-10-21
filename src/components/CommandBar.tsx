@@ -1,9 +1,29 @@
 import { type FormEvent, useState, useRef, useEffect } from 'react';
-import { Paperclip, ArrowUp, FileCode, X, UploadCloud, ChevronUp, Square } from 'lucide-react';
-import { MODELS } from '../constants';
+import {
+  Paperclip, ArrowUp, FileCode, X, UploadCloud, ChevronUp, Square,
+  RefreshCw, Check, Sparkles,
+} from 'lucide-react';
 import { prepareImageFile, DEFAULT_IMAGE_MODE, type AttachedImage, type ImageMode } from '../lib/imageAttach';
 import { useT } from '../lib/i18n';
+import { API_PROVIDERS, activeProviderStorageKey } from '../lib/providers';
+import { modelChoices } from '../lib/models';
+import { classifyTask } from '../lib/modelRouter';
+import { getStoredKey } from '../lib/secrets';
+import {
+  buildLocalModelEntries,
+  getCachedLocalScan,
+  listServing,
+  LOCAL_MODELS_EVENT,
+  localEndpointsFresh,
+  providerForBase,
+  scanLocalModels,
+  stopLocalModel,
+  type LocalScan,
+  type ModelFile,
+} from '../lib/localModels';
 import type { PreviewItem } from './FilePreviewDrawer';
+import { LocalModelList } from './LocalModelList';
+import { useToast } from './Toast';
 
 // Attachments must never dump raw bytes into the prompt. Images become a compact
 // on-device measurement summary; binary files are noted but omitted; oversized
@@ -42,10 +62,18 @@ interface CommandBarProps {
   /** T2: istek sürerken gönder düğmesi Durdur'a döner ve fetch'i iptal eder. */
   onStop?: () => void;
   setInput: (value: string) => void;
-  setTargetModel: (model: string) => void;
-  targetModel: string;
+  /** Şu an kullanılan model id'si (sağlayıcı çözümlemesinden gelir). */
+  currentModel: string;
+  /** Sağlayıcı grubundaki bir modeli ANINDA seçer (sağlayıcı + model yazılır). */
+  onSelectProviderModel: (providerId: string, modelId: string) => void;
   /** Gerçekte yanıtlayacak sağlayıcı · model (App çözer); boşsa anahtar yok. */
   activeModelLabel?: string;
+  /** Etkin sağlayıcı; yerel model vurgusu için. */
+  activeProviderId: string;
+  /** Çalışan bir yerel uç noktayı etkin sağlayıcı yapar. */
+  onUseLocalEndpoint: (provider: string, baseUrl: string, model: string) => void;
+  /** Diskteki modeli başlatır ve etkin sağlayıcı yapar. */
+  onActivateLocalFile: (file: ModelFile) => Promise<void>;
   images: AttachedImage[];
   setImages: React.Dispatch<React.SetStateAction<AttachedImage[]>>;
   /** Çipe tıklanınca önizlemeyi chat düzeninde (App) açar. */
@@ -60,16 +88,29 @@ export function CommandBar({
   onSend,
   onStop,
   setInput,
-  setTargetModel,
-  targetModel,
+  currentModel,
+  onSelectProviderModel,
   activeModelLabel,
+  activeProviderId,
+  onUseLocalEndpoint,
+  onActivateLocalFile,
   images,
   setImages,
   onOpenPreview,
   onClosePreview
 }: CommandBarProps) {
   const t = useT();
+  const { showToast } = useToast();
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
+  const [cloudGroups, setCloudGroups] = useState<
+    { id: string; name: string; models: { id: string; label: string }[] }[]
+  >([]);
+  const [activeTab, setActiveTab] = useState<string>('');
+  const [localScan, setLocalScan] = useState<LocalScan | null>(() => getCachedLocalScan());
+  const [servers, setServers] = useState<Awaited<ReturnType<typeof listServing>>>([]);
+  const [scanning, setScanning] = useState(false);
+  const [scanFailed, setScanFailed] = useState(false);
+  const [busyModel, setBusyModel] = useState<string | null>(null);
   const [isFileMenuOpen, setIsFileMenuOpen] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -172,7 +213,125 @@ export function CommandBar({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const modelsData = MODELS.map((m) => ({ id: m.id, name: m.name, company: m.company }));
+  useEffect(() => {
+    const refresh = () => {
+      setLocalScan(getCachedLocalScan());
+      void listServing().then(setServers);
+    };
+    window.addEventListener(LOCAL_MODELS_EVENT, refresh);
+    return () => window.removeEventListener(LOCAL_MODELS_EVENT, refresh);
+  }, []);
+
+  const localFiles = localScan?.files ?? [];
+  const localEndpoints = localScan?.endpoints ?? [];
+  const localEntries = buildLocalModelEntries({
+    endpoints: localEndpoints,
+    files: localFiles,
+    servers,
+    activeProvider: activeProviderId,
+    currentModel,
+  });
+
+  const refreshServers = async () => {
+    setServers(await listServing());
+  };
+
+  const runLocalScan = async () => {
+    if (scanning) return;
+    setScanning(true);
+    setScanFailed(false);
+    try {
+      setLocalScan(await scanLocalModels());
+      setServers(await listServing());
+    } catch {
+      setScanFailed(true);
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  const loadCloudGroups = async () => {
+    try {
+      const list = API_PROVIDERS.filter((p) => p.available !== false && p.family !== 'local');
+      const withKeys = await Promise.all(
+        list.map(async (p) => ({ p, key: (await getStoredKey(p.id)).trim() })),
+      );
+      const groups = withKeys
+        .filter((x) => x.key)
+        .map(({ p }) => ({ id: p.id, name: p.name, models: modelChoices(p.id) }))
+        .filter((g) => g.models.length > 0);
+      setCloudGroups(groups);
+      // Sekme her zaman EN SON SEÇİLEN sağlayıcıyla açılır: durum (async)
+      // çözülmeden önce bile doğru sekme görünsün diye kalıcı değer okunur.
+      let lastId = activeProviderId;
+      try {
+        lastId = localStorage.getItem(activeProviderStorageKey) || activeProviderId;
+      } catch { /* noop */ }
+      const activeProvider = API_PROVIDERS.find((p) => p.id === lastId);
+      const preferred =
+        activeProvider?.family === 'local'
+          ? 'local'
+          : groups.some((g) => g.id === lastId)
+            ? lastId
+            : groups[0]?.id || 'local';
+      setActiveTab(preferred);
+    } catch {
+      setCloudGroups([]);
+      setActiveTab('local');
+    }
+  };
+
+  const openModelMenu = () => {
+    const next = !isModelMenuOpen;
+    setIsModelMenuOpen(next);
+    setIsFileMenuOpen(false);
+    if (next) {
+      setLocalScan(getCachedLocalScan());
+      setScanFailed(false);
+      void refreshServers();
+      void loadCloudGroups();
+      if (!localEndpointsFresh()) void runLocalScan();
+    }
+  };
+
+  const selectCloudModel = (providerId: string, modelId: string) => {
+    onSelectProviderModel(providerId, modelId);
+    setIsModelMenuOpen(false);
+  };
+
+  const activeCloud = cloudGroups.find((g) => g.id === activeTab) || null;
+
+  const selectEndpoint = (provider: string, baseUrl: string, model: string) => {
+    onUseLocalEndpoint(provider, baseUrl, model);
+    setIsModelMenuOpen(false);
+  };
+
+  const activateFile = async (file: ModelFile) => {
+    const running = servers.find((s) => s.id === file.id || s.model === file.model);
+    const served = running?.base_url || file.servedBy[0];
+    if (served) {
+      selectEndpoint(running ? 'managed' : providerForBase(served), served, file.model);
+      return;
+    }
+    if (!file.servable || busyModel) return;
+    setBusyModel(file.id);
+    try {
+      await onActivateLocalFile(file);
+      await refreshServers();
+      showToast(t('settings.localStarted'), file.label, 'success');
+      setIsModelMenuOpen(false);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      showToast(t('settings.localStartFailed'), msg.slice(0, 300), 'error');
+    } finally {
+      setBusyModel(null);
+    }
+  };
+
+  const stopServer = async (id: string) => {
+    await stopLocalModel(id);
+    await refreshServers();
+  };
 
   const removeFile = (index: number) => {
     setUploadedFiles(prev => {
@@ -207,30 +366,177 @@ export function CommandBar({
     }
   };
 
+  // ÖNERİLEN MODEL — router'ın UI yüzü. Gömülü model adı yok: derin model
+  // Ayarlar'da sağlayıcı başına girilir. Auto yalnız ÖNERİR; kullanıcı tek
+  // tıkla geçer. Hızlı/Derin modu doğrudan uygulanır (App).
+  const routerEnabled = (() => {
+    try { return localStorage.getItem('tlm_router_enabled') === 'true'; } catch { return false; }
+  })();
+  const routerMode = (() => {
+    try {
+      const v = localStorage.getItem('tlm_router_mode');
+      return v === 'fast' || v === 'deep' ? v : 'auto';
+    } catch { return 'auto'; }
+  })();
+  const deepModel = (() => {
+    try { return (localStorage.getItem('tlm_deep_model_' + activeProviderId) || '').trim(); } catch { return ''; }
+  })();
+  const structuredExts = new Set(['json','jsonl','csv','tsv','xml','yaml','yml','toml','ini','sql','ndjson','log']);
+  const codeExts = new Set(['ts','tsx','js','jsx','py','rs','go','java','kt','c','h','cpp','hpp','cs','rb','php','swift','css','scss','html','vue','svelte','sh']);
+  let hasStructuredData = false;
+  let hasCodeFiles = false;
+  for (const f of uploadedFiles) {
+    if (f.kind !== 'text') continue;
+    const ext = (f.name.split('.').pop() || '').toLowerCase();
+    if (structuredExts.has(ext)) hasStructuredData = true;
+    else if (codeExts.has(ext)) hasCodeFiles = true;
+    else {
+      const body = (f.body || '').trimStart();
+      if (body.startsWith('{') || body.startsWith('[')) hasStructuredData = true;
+    }
+  }
+  const task = classifyTask(hasStructuredData, hasCodeFiles);
+  const recommendedModel =
+    routerEnabled && deepModel && ((routerMode === 'auto' && task === 'data_analysis') || routerMode === 'deep')
+      ? deepModel
+      : null;
+  const recommendedProviderName =
+    API_PROVIDERS.find((x) => x.id === activeProviderId)?.name || activeProviderId;
+  const recommendedLabel = recommendedModel
+    ? (modelChoices(activeProviderId).find((m) => m.id === recommendedModel)?.label || recommendedModel)
+    : '';
+  const recommendedReason =
+    routerMode === 'deep' ? t('composer.recReasonMode') : t('composer.recReasonData');
+
   return (
     <div className="w-full max-w-[760px] mx-auto flex flex-col relative" ref={popoverRef}>
       
-      {/* Model Popover */}
+      {/* Model popover — sağlayıcı sekmeleri, altında o sağlayıcının modelleri. */}
       {isModelMenuOpen && (
-        <div className="absolute bottom-full right-0 mb-2 bg-obsidian-panel border border-obsidian-border rounded-lg w-[220px] z-50 shadow-2xl p-1.5 flex flex-col gap-0.5 animate-in fade-in slide-in-from-bottom-2 duration-150">
-          {modelsData.map((model) => (
+        <div className="absolute bottom-full right-0 mb-2 z-50 flex w-[420px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border border-obsidian-border bg-obsidian-panel shadow-2xl animate-in fade-in slide-in-from-bottom-2 duration-150">
+          <div className="flex items-center gap-1 overflow-x-auto border-b border-obsidian-border/60 p-1.5">
             <button
-              key={model.id}
               type="button"
-              onClick={() => {
-                setTargetModel(model.name);
-                setIsModelMenuOpen(false);
-              }}
-              className={`w-full flex items-center justify-between p-2 rounded text-left cursor-pointer transition-colors ${
-                targetModel === model.name 
-                  ? 'bg-obsidian-button border border-obsidian-border/50 text-obsidian-text' 
-                  : 'text-obsidian-muted hover:bg-obsidian-button/40 hover:text-obsidian-text'
+              onClick={() => setActiveTab('recommended')}
+              className={`flex flex-shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors cursor-pointer ${
+                activeTab === 'recommended'
+                  ? 'bg-[#3AA99F]/15 text-[#9FD9D0] ring-1 ring-[#3AA99F]/35'
+                  : 'text-obsidian-muted hover:text-obsidian-text'
               }`}
             >
-              <span className="text-[11px] font-medium">{model.name}</span>
-              <span className="text-[11px] opacity-60 font-mono">{model.company}</span>
+              <Sparkles size={11} />
+              {t('composer.tabRecommended')}
             </button>
-          ))}
+            {cloudGroups.map((group) => (
+              <button
+                key={group.id}
+                type="button"
+                onClick={() => setActiveTab(group.id)}
+                className={`flex-shrink-0 whitespace-nowrap rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors cursor-pointer ${
+                  activeTab === group.id
+                    ? 'bg-obsidian-button text-obsidian-text'
+                    : 'text-obsidian-muted hover:text-obsidian-text'
+                }`}
+              >
+                {group.name}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => setActiveTab('local')}
+              className={`flex-shrink-0 whitespace-nowrap rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors cursor-pointer ${
+                activeTab === 'local'
+                  ? 'bg-obsidian-button text-obsidian-text'
+                  : 'text-obsidian-muted hover:text-obsidian-text'
+              }`}
+            >
+              {t('composer.tabLocal')}
+            </button>
+            {!activeCloud && (
+              <button
+                type="button"
+                onClick={() => void runLocalScan()}
+                disabled={scanning}
+                title={t('settings.localScan')}
+                className="ml-auto flex-shrink-0 cursor-pointer rounded-md p-1 text-[#87857F] transition-colors hover:bg-white/[0.06] hover:text-[#CECDC3] disabled:opacity-50"
+              >
+                <RefreshCw size={11} className={scanning ? 'animate-spin' : ''} />
+              </button>
+            )}
+          </div>
+
+          {activeTab === 'recommended' ? (
+            <div className="p-2.5">
+              {recommendedModel ? (
+                <div className="rounded-lg border border-[#3AA99F]/30 bg-gradient-to-br from-[#3AA99F]/10 to-[#4385BE]/10 p-3">
+                  <div className="flex items-center gap-2">
+                    <Sparkles size={13} className="text-[#9FD9D0]" />
+                    <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold text-[#F2F0E5]">
+                      {recommendedLabel}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-[11px] leading-relaxed text-[#A8A49E]">
+                    {recommendedProviderName} · {recommendedReason}
+                  </p>
+                  <button
+                    type="button"
+                    disabled={recommendedModel === currentModel}
+                    onClick={() => selectCloudModel(activeProviderId, recommendedModel)}
+                    className="mt-2.5 w-full rounded-md bg-[#3AA99F]/20 px-2.5 py-1.5 text-[11.5px] font-medium text-[#BFE3DD] transition-colors hover:bg-[#3AA99F]/30 disabled:cursor-default disabled:opacity-60 cursor-pointer"
+                  >
+                    {recommendedModel === currentModel ? t('composer.recCurrent') : t('composer.recSwitch')}
+                  </button>
+                </div>
+              ) : (
+                <p className="px-1 py-2 text-[11px] leading-relaxed text-[#87857F]">
+                  {t('composer.recSetup')}
+                </p>
+              )}
+            </div>
+          ) : activeCloud ? (
+            <div className="flex max-h-[320px] flex-col gap-0.5 overflow-y-auto p-1.5">
+              {activeCloud.models.map((model) => {
+                const selected = activeProviderId === activeCloud.id && currentModel === model.id;
+                return (
+                  <button
+                    key={model.id}
+                    type="button"
+                    onClick={() => selectCloudModel(activeCloud.id, model.id)}
+                    title={model.id}
+                    className={`flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors cursor-pointer ${
+                      selected ? 'bg-white/[0.05]' : 'hover:bg-white/[0.03]'
+                    }`}
+                  >
+                    <span
+                      className={`min-w-0 flex-1 truncate text-[12px] font-medium ${
+                        selected ? 'text-[#F2F0E5]' : 'text-[#CECDC3]'
+                      }`}
+                    >
+                      {model.label}
+                    </span>
+                    {selected && <Check size={12} className="flex-shrink-0 text-[#3AA99F]" />}
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="flex min-h-0 flex-col p-1.5">
+              <LocalModelList
+                entries={localEntries}
+                scanning={scanning}
+                scanFailed={scanFailed}
+                busyKey={busyModel ? `file:${busyModel}` : null}
+                onUse={(entry) => selectEndpoint(entry.provider, entry.baseUrl, entry.model)}
+                onStart={(entry) => {
+                  const file = localFiles.find((f) => `file:${f.id}` === entry.key);
+                  if (file) void activateFile(file);
+                }}
+                onStop={(id) => void stopServer(id)}
+                onScan={() => void runLocalScan()}
+                className="max-h-[min(54vh,380px)] overflow-y-auto"
+              />
+            </div>
+          )}
         </div>
       )}
 
@@ -357,11 +663,23 @@ export function CommandBar({
           </div>
 
           <div className="flex items-center gap-2">
-            {/* D1/D8: bu secici bir MALIYET TAHMIN referansidir; metin sohbeti
-                AKTIF SAGLAYICININ modelini cagirir (faturalandirilir). Eski ipucu
-                "hic model API cagrilmaz" diyordu — YANLISTI (kullanici yerel/
-                ucretsiz sanip faturalandirilabiliyordu). Gercek model adi
-                App'ten 'activeModelLabel' olarak gelir. */}
+            {recommendedModel && recommendedModel !== currentModel && (
+              <button
+                type="button"
+                onClick={() => selectCloudModel(activeProviderId, recommendedModel)}
+                title={recommendedReason}
+                className="flex items-center gap-1 rounded-md border border-[#3AA99F]/35 bg-[#3AA99F]/10 px-2 py-1 text-[10.5px] font-medium text-[#9FD9D0] transition-colors hover:bg-[#3AA99F]/20 cursor-pointer"
+              >
+                <Sparkles size={10} />
+                <span className="truncate max-w-[130px]">
+                  {t('composer.recChip', { model: recommendedLabel })}
+                </span>
+              </button>
+            )}
+
+            {/* D1/D8 güncel: seçici artık GERÇEK modeli belirler — ilk açılışta
+                seçim sağlayıcı başına hatırlanır ve sohbet/ajan çağrıları bu
+                modelle yapılır. Etiket, sağlayıcı çözümlemesinden gelir. */}
             <button
               type="button"
               title={
@@ -369,17 +687,17 @@ export function CommandBar({
                   ? t('composer.modelTooltipWith', { model: activeModelLabel })
                   : t('composer.modelTooltipWithout')
               }
-              onClick={() => {
-                setIsModelMenuOpen(!isModelMenuOpen);
-                setIsFileMenuOpen(false);
-              }}
+              onClick={openModelMenu}
               className="flex items-center gap-1.5 bg-obsidian-button/40 border border-obsidian-border px-2.5 py-1 rounded-md text-obsidian-text text-[11px] cursor-pointer hover:bg-obsidian-button transition-colors font-medium"
             >
               {/* Saglayici anahtari yoksa bu GORUNUR uyari olur: kullanici
                   yazip gonderdikten sonra "no provider" hatasi almadan once
                   neyin eksik oldugunu bilir (eskiden yalniz tooltip'te idi). */}
               {activeModelLabel ? (
-                <span>≈ {targetModel}</span>
+                // GERÇEKTE çağrılan model id'si gösterilir (uydurma etiket yok).
+                <span className="truncate max-w-[170px]">
+                  {currentModel || activeModelLabel.split(' · ').pop()}
+                </span>
               ) : (
                 <span className="flex items-center gap-1 text-[#dcb67a]">
                   <span className="w-1.5 h-1.5 rounded-full bg-[#dcb67a]" />

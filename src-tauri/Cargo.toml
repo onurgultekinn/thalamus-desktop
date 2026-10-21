@@ -21,6 +21,9 @@ serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
 tauri = { version = "2.11.3", features = [] }
 tauri-plugin-log = "2"
+# Native folder/file picker for the "open project" flow (src/components/Sidebar.tsx).
+# Minor version MUST match @tauri-apps/plugin-dialog in package.json (Tauri CLI enforces it).
+tauri-plugin-dialog = "~2.7.3"
 
 # Thalamus local compression engine (pure Rust — no external crate/model)
 tiktoken-rs = "0.5"
@@ -31,7 +34,9 @@ tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "net"] }
 tower-http = { version = "0.6", features = ["cors"] }
 
 # AI provider calls (Rust side — no CORS, the key never reaches the webview)
-reqwest = { version = "0.12", default-features = false, features = ["json", "blocking", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "blocking", "stream", "rustls-tls"] }
+# SSE akışını axum yanıtına bağlamak için (stream::unfold)
+futures-util = "0.3"
 
 # Real PTY terminal (ConPTY on Windows) — ANSI + interactive programs
 portable-pty = "0.8"
@@ -46,6 +51,8 @@ windows-sys = { version = "0.61", features = ["Win32_Security_Credentials", "Win
 [dev-dependencies]
 # For the HTTP router integration tests (CORS origin checks).
 tower = { version = "0.5", features = ["util"] }
+# Compression lab harness (`examples/lab.rs`): corpus manifest doğrulaması (sha256).
+sha2 = "0.10"
 
 # Dev builds are unoptimized by default, which makes the local tokenizer and
 # compression engine feel sluggish. Optimize dependencies even in dev, while

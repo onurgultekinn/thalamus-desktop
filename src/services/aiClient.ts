@@ -15,6 +15,8 @@ import {
   baseStorageKey,
   type ApiProvider,
 } from '../lib/providers';
+import { getProviderModel, supportsReasoningEffort } from '../lib/models';
+import { readShowReasoning } from '../lib/reasoning';
 import { getStoredKey } from '../lib/secrets';
 
 export interface AiEditResult {
@@ -26,6 +28,8 @@ export interface AiEditResult {
 
 export interface AiChatResponse {
   content: string;
+  /** Destekleyen sağlayıcılarda modelin düşünme metni. */
+  reasoning?: string;
   rounds?: number;
   edits?: AiEditResult[];
   usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
@@ -43,6 +47,27 @@ export interface ActiveProvider {
   key: string;
   baseUrl: string;
   model: string;
+  /** Düşünme kapatılırken gönderilecek değer (ör. EVREN/vLLM için "none"). */
+  reasoningEffort?: string;
+  /** Sağlayıcı düşünme üretiyor mu (arayüzde rozet/ipucu için). */
+  supportsReasoning?: boolean;
+}
+
+/**
+ * Düşünme tercihi: kullanıcı "göster" seçtiyse `reasoning_effort` GÖNDERİLMEZ
+ * (model düşünür ve metni arayüzde görünür). "Kapat" seçtiyse sağlayıcının
+ * beklediği değer (ör. "none") gönderilir — düşünme token'ları faturalanmaz.
+ */
+function reasoningPreference(
+  disableValue: string | undefined,
+  providerId?: string,
+  modelId?: string
+): string | undefined {
+  if (!disableValue) return undefined;
+  // Bazı modeller `reasoning_effort` parametresini reddeder (EVREN/gemma-4-31b
+  // → HTTP 400). Sağlayıcı düzeyinde "none" göndermek yerine modeli de sor.
+  if (providerId && modelId && !supportsReasoningEffort(providerId, modelId)) return undefined;
+  return readShowReasoning() ? undefined : disableValue;
 }
 
 /**
@@ -63,12 +88,15 @@ export async function getActiveProvider(): Promise<ActiveProvider | null> {
     const picked = API_PROVIDERS.find((p) => p.id === preferred);
     if (picked && picked.family === 'local') {
       const customBase = localStorage.getItem(baseStorageKey(picked.id)) || undefined;
+      const model = getProviderModel(picked.id);
       return {
         id: picked.id,
         name: picked.name,
         key: (await getStoredKey(picked.id)).trim(),
         baseUrl: providerEndpoint(picked, customBase || picked.defaultBaseUrl),
-        model: picked.defaultModel || '',
+        model,
+        reasoningEffort: reasoningPreference(picked.reasoningEffort, picked.id, model),
+        supportsReasoning: !!picked.reasoningEffort,
       };
     }
   }
@@ -91,12 +119,15 @@ export async function getActiveProvider(): Promise<ActiveProvider | null> {
     // Local endpoints are valid without a key; cloud providers are not.
     if (p.family !== 'local' && !key) continue;
     const customBase = localStorage.getItem(baseStorageKey(p.id)) || undefined;
+    const model = getProviderModel(p.id);
     return {
       id: p.id,
       name: p.name,
       key,
       baseUrl: providerEndpoint(p, customBase || p.defaultBaseUrl),
-      model: p.defaultModel || '',
+      model,
+      reasoningEffort: reasoningPreference(p.reasoningEffort, p.id, model),
+      supportsReasoning: !!p.reasoningEffort,
     };
   }
   return null;
@@ -139,11 +170,146 @@ export function userMessage(text: string, images: AiImageInput[] = []): AiMessag
 }
 
 /** AI chat through the local Rust proxy. */
+export interface AiChatOptions {
+  /** Kullanıcı birebir/orijinal metin istedi → motor sıkıştırmasını kapat. */
+  preserve?: boolean;
+  /** Model yönlendirici bu istek için farklı model seçtiyse. */
+  model?: string;
+}
+
+export interface AiChatStreamHandlers {
+  /** Her metin parçası geldiğinde çağrılır (sırayla eklenir). */
+  onDelta: (text: string) => void;
+  /** Düşünme (reasoning) parçası (destekleyen sağlayıcılarda). */
+  onReasoning?: (text: string) => void;
+  /** İlk olay: motorun sıkıştırma bilançosu (görünmez katman). */
+  onMeta?: (meta: {
+    engine?: { compressed_messages?: number; original_tokens?: number; compressed_tokens?: number };
+  }) => void;
+}
+
+/**
+ * Akışlı sohbet: `/api/ai/chat/stream` (SSE). Sağlayıcı akışı desteklemiyorsa
+ * backend tek JSON döndürür; bu durumda içerik tek parça olarak `onDelta`'ya
+ * verilir — çağıran taraf için davranış aynıdır.
+ */
+export async function aiChatStream(
+  messages: AiMessage[],
+  codeBlocks: CodeBlock[] = [],
+  provider: ActiveProvider | null | undefined,
+  signal: AbortSignal | undefined,
+  opts: AiChatOptions,
+  handlers: AiChatStreamHandlers
+): Promise<AiChatResponse> {
+  const p = provider ?? (await getActiveProvider());
+  if (!p) throw new Error('API_KEY_MISSING');
+
+  // Uzun cevaplar 180 sn'yi aşabilir; akışta üst sınır 10 dk.
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort(new Error('TIMEOUT_600S'));
+  }, 600_000);
+  const relayAbort = () => controller.abort();
+  signal?.addEventListener('abort', relayAbort, { once: true });
+
+  try {
+    const res = await fetch(`${API_BASE}/api/ai/chat/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        provider: p.id,
+        api_key: p.key,
+        model: opts.model || p.model,
+        base_url: p.baseUrl || undefined,
+        messages,
+        code_blocks: codeBlocks,
+        reasoning_effort: p.reasoningEffort || undefined,
+        preserve: opts.preserve || undefined,
+      }),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      throw new Error(`HTTP ${res.status} ${detail}`.trim());
+    }
+
+    const contentType = res.headers.get('content-type') || '';
+    // Akış yok (eski backend ya da akışsız sağlayıcı): tek parçalık yanıt.
+    if (!res.body || !contentType.includes('text/event-stream')) {
+      const data = (await res.json()) as AiChatResponse;
+      if (data.content) handlers.onDelta(data.content);
+      if (data.reasoning) handlers.onReasoning?.(data.reasoning);
+      return data;
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let content = '';
+    let reasoning = '';
+    let usage: AiChatResponse['usage'];
+    let rounds: number | undefined;
+
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let lineEnd: number;
+      while ((lineEnd = buffer.indexOf('\n')) >= 0) {
+        let line = buffer.slice(0, lineEnd);
+        buffer = buffer.slice(lineEnd + 1);
+        if (line.endsWith('\r')) line = line.slice(0, -1);
+        if (!line.startsWith('data:')) continue;
+        const payload = line.slice(5).trim();
+        if (!payload) continue;
+        let event: {
+          type?: string;
+          content?: string;
+          message?: string;
+          usage?: AiChatResponse['usage'];
+          rounds?: number;
+          engine?: { compressed_messages?: number; original_tokens?: number; compressed_tokens?: number };
+        };
+        try {
+          event = JSON.parse(payload);
+        } catch {
+          continue;
+        }
+        if (event.type === 'delta' && event.content) {
+          content += event.content;
+          handlers.onDelta(event.content);
+        } else if (event.type === 'reasoning' && event.content) {
+          reasoning += event.content;
+          handlers.onReasoning?.(event.content);
+        } else if (event.type === 'meta') {
+          handlers.onMeta?.({ engine: event.engine });
+        } else if (event.type === 'done') {
+          usage = event.usage;
+          rounds = event.rounds;
+        } else if (event.type === 'error') {
+          throw new Error(event.message || 'stream error');
+        }
+      }
+    }
+    return { content, reasoning: reasoning || undefined, usage, rounds };
+  } catch (err) {
+    // Kendi süre aşımımız: çağıran taraf "durduruldu" değil "süre doldu" desin.
+    if (timedOut) throw new Error('TIMEOUT_600S');
+    throw err;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', relayAbort);
+  }
+}
+
 export async function aiChat(
   messages: AiMessage[],
   codeBlocks: CodeBlock[] = [],
   provider?: ActiveProvider | null,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  opts: AiChatOptions = {}
 ): Promise<AiChatResponse> {
   const p = provider ?? (await getActiveProvider());
   if (!p) throw new Error('API_KEY_MISSING');
@@ -162,10 +328,14 @@ export async function aiChat(
       body: JSON.stringify({
         provider: p.id,
         api_key: p.key,
-        model: p.model,
+        model: opts.model || p.model,
         base_url: p.baseUrl || undefined,
         messages,
         code_blocks: codeBlocks,
+        // Sağlayıcı düşünme modunu kapatmayı gerektiriyorsa (ör. EVREN/vLLM)
+        // bu alan gönderilir; yoksa yanıtlar kesilir (ölçüldü).
+        reasoning_effort: p.reasoningEffort || undefined,
+        preserve: opts.preserve || undefined,
       }),
       signal: controller.signal,
     });

@@ -1,10 +1,12 @@
 // Thalamus yerel sıkıştırma motoru.
 // ONNX/model bağımlılığı yoktur; saf Rust + serde_json + tiktoken-rs.
+pub mod certification;
 pub mod code_shrink;
 pub mod edits;
 pub mod ingest;
 pub mod jscompress;
 pub mod pipeline;
+pub mod plain_table;
 pub mod repo_map;
 pub mod schema;
 pub mod segments;
@@ -59,9 +61,8 @@ pub fn sanitize_json_string(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::pipeline::{
-        determine_scope, CandidateCost, Decision, DecisionEngine, VetoScope,
-    };
+    use crate::engine::segments::PromptSegmenter;
+    use crate::engine::pipeline::{CandidateCost, Decision, DecisionEngine};
 
     fn bpe() -> tiktoken_rs::CoreBPE {
         tiktoken_rs::cl100k_base().unwrap()
@@ -107,15 +108,7 @@ mod tests {
     }
 
     #[test]
-    fn veto_keyword_blocks_compression_and_preserves_raw() {
-        let prompt = r#"bu json'u bozma: {"a":1,"b":2}"#;
-        let metrics = process_with_metrics(prompt, &bpe(), false);
-        assert!(!metrics.is_compressed);
-        assert_eq!(metrics.processed_prompt, prompt);
-    }
-
-    #[test]
-    fn veto_override_forces_structure_change() {
+    fn force_override_accepts_small_payload() {
         let prompt = r#"bu json'u bozma: {"a":1,"b":2}"#;
         let forced = process_with_metrics(prompt, &bpe(), true);
         assert_ne!(forced.processed_prompt, prompt);
@@ -127,18 +120,11 @@ mod tests {
     }
 
     #[test]
-    fn determine_scope_local_vs_global() {
-        assert_eq!(determine_scope("bu json'u bozma"), VetoScope::LocalToNext);
-        assert_eq!(determine_scope("tüm json'ları bozma"), VetoScope::Global);
-    }
-
-    #[test]
     fn decision_engine_accepts_when_saving_worth_decoder() {
         let candidates = [CandidateCost {
             raw_tokens: 100,
             optimized_tokens: 50,
             lossless: true,
-            vetoed: false,
         }];
         let decisions = DecisionEngine::evaluate(&candidates, 10);
         assert_eq!(decisions[0], Decision::Accept);
@@ -350,6 +336,63 @@ mod tests {
     // -----------------------------------------------------------------------
     // Ingest katmanı: JSON dışı yapısal metin de kayıpsız sıkışmalı.
     // -----------------------------------------------------------------------
+
+    // -----------------------------------------------------------------------
+    // Kayıpsızlık bekçisi (TRIALS-003 regresyonu)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn real_code_with_braces_is_never_mangled() {
+        // Gerçek kodda (`use x::{A, B};` + boş satırlar) segmentleyici boşluk
+        // bırakıp satır sonlarını düşürüyordu: motor metni bozup "sıkıştırılmadı"
+        // diyebiliyordu. Bekçi, tiling kopuksa sıkıştırmayı iptal eder.
+        let code = "use serde_json::{Map, Value};
+use std::collections::HashMap;
+
+                    pub struct JsonCompressor;
+
+impl JsonCompressor {
+                        pub const D: char = '\t';
+
+    fn a(&self) {
+        if x {
+                                continue;
+        }
+    }
+}
+";
+        let m = process_with_metrics(code, &bpe(), false);
+        assert_eq!(m.processed_prompt, code, "kod birebir korunmalı");
+        assert!(!m.is_compressed, "bozuk çıktı 'sıkıştırıldı' sayılmamalı");
+    }
+
+    #[test]
+    fn segments_tile_exactly_on_representative_inputs() {
+        let samples = [
+            "düz metin",
+            "a
+
+b",
+            "```json
+{\"a\":1}
+```",
+            "use x::{A, B};
+
+fn f() {}
+",
+            "{\"a\":1,\"b\":2}",
+            "x = {\"a\": 1}
+son",
+        ];
+        for s in samples {
+            let segs = PromptSegmenter::segment(s);
+            assert!(
+                PromptSegmenter::tiles_exactly(&segs, s),
+                "tiling değişmezi koptu: {:?}",
+                s
+            );
+        }
+    }
 
     #[test]
     fn logfmt_block_is_compressed_losslessly() {

@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Copy, Check, AlertTriangle } from 'lucide-react';
 import { SyntaxHighlighter, vscDarkPlus } from '../lib/codeHighlight';
-import { MODELS } from '../constants';
 import { useT } from '../lib/i18n';
 
 export interface DiffCodeData {
@@ -21,9 +20,9 @@ interface DiffViewProps {
   diffData?: DiffCodeData;
   /** Analysis title shown in the top path bar (e.g. active chat name) */
   title?: string;
-  /** D1/D8: maliyet TAHMIN referansi — text chat calls no model API */
+  /** Gerçekte kullanılan model id'si (sağlayıcı çözümlemesinden gelir). */
   modelName?: string;
-  /** ≈ USD per token for that model (rough input price) */
+  /** ≈ USD per token; bilinmiyorsa undefined → tahmin gösterilmez. */
   pricePerToken?: number;
 }
 
@@ -206,9 +205,11 @@ export const DiffView: React.FC<DiffViewProps> = ({ onCloseDiff, diffData, title
       ? Number((((origBytes - minifiedBytes) / origBytes) * 100).toFixed(1))
       : null;
 
-  // Cost impact: real token counts × the user's selected model price (live pricing when available)
-  const activeModelName = modelName || MODELS[0].name;
-  const activePrice = pricePerToken ?? MODELS[0].pricePerToken;
+  // Cost impact: real token counts × the active model's price. The price is
+  // only an estimate; when the model id is unknown no number is invented.
+  const activeModelName = modelName || '—';
+  const priceKnown = typeof pricePerToken === 'number' && Number.isFinite(pricePerToken);
+  const activePrice = priceKnown ? pricePerToken : 0;
   const costBefore = origTokens * activePrice;
   const costAfter = optTokens * activePrice;
   const monthlySavedUsd = savedTokens * activePrice * 1000;
@@ -322,14 +323,17 @@ export const DiffView: React.FC<DiffViewProps> = ({ onCloseDiff, diffData, title
             )}
           </div>
 
-          {/* 2 · COST / CALL on the user's selected model */}
+          {/* 2 · COST / CALL on the active model */}
           <div className="flex min-w-0 flex-col gap-1.5 bg-[#1C1B1A] p-4">
             <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#575654]">{t('diff.costPerCall')}</span>
             <span className="truncate font-mono text-[28px] font-bold leading-none text-[#F2F0E5]">
-              {hasData ? fmtUsd(costAfter) : '—'}
+              {hasData && priceKnown ? fmtUsd(costAfter) : '—'}
             </span>
             <span className="truncate font-mono text-[11px] text-[#A8A49E]">{activeModelName}</span>
-            {hasData && isSaved && (
+            {hasData && !priceKnown && (
+              <span className="truncate font-mono text-[11px] text-[#575654]">{t('diff.priceUnknown')}</span>
+            )}
+            {hasData && priceKnown && isSaved && (
               <span className="truncate font-mono text-[11px] text-[#575654]">{t('diff.wasUncompressed', { v: fmtUsd(costBefore) })}</span>
             )}
           </div>
@@ -337,11 +341,11 @@ export const DiffView: React.FC<DiffViewProps> = ({ onCloseDiff, diffData, title
           {/* 3 · PROJECTED SAVINGS AT VOLUME */}
           <div className="flex min-w-0 flex-col gap-1.5 bg-[#1C1B1A] p-4">
             <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#575654]">{t('diff.saved1k')}</span>
-            <span className={`truncate font-mono text-[28px] font-bold leading-none ${isSaved ? 'text-[#3AA99F]' : 'text-[#575654]'}`}>
-              {isSaved ? `-${fmtUsd(monthlySavedUsd)}` : '—'}
+            <span className={`truncate font-mono text-[28px] font-bold leading-none ${isSaved && priceKnown ? 'text-[#3AA99F]' : 'text-[#575654]'}`}>
+              {isSaved && priceKnown ? `-${fmtUsd(monthlySavedUsd)}` : '—'}
             </span>
             <span className="truncate font-mono text-[11px] text-[#A8A49E]">{t('diff.per1k')}</span>
-            {isSaved && (
+            {isSaved && priceKnown && (
               <span className="truncate font-mono text-[11px] text-[#575654]">{t('diff.vsWithout', { v: fmtUsd(costBefore * 1000) })}</span>
             )}
           </div>

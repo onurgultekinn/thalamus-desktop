@@ -34,7 +34,7 @@ class AppErrorBoundary extends React.Component<{ children: React.ReactNode }, { 
             alignItems: 'center',
             justifyContent: 'center',
             gap: 12,
-            background: 'rgb(var(--tlm-ink))',
+            background: 'rgb(var(--tlm-bg))',
             color: 'rgb(var(--tlm-fg))',
             fontFamily: 'Segoe UI Variable, system-ui, sans-serif',
             padding: 24,

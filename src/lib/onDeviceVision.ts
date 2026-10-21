@@ -1,61 +1,23 @@
 /**
- * On-device vision (MediaPipe Tasks Vision): an object detector running
- * locally on WASM. Zero model-API calls, zero upload.
+ * On-device vision (MediaPipe Tasks Vision) — object detection on WASM.
+ * Zero model-API calls, zero upload.
  *
- * Everything is lazy — the module, the wasm and the model load on first use,
- * so the startup bundle is untouched. The asset ships with the app under
- * public/mediapipe/, so in desktop mode nothing is fetched from the network.
+ * Used by image attachments: if recognizable everyday objects are found, the
+ * image is a real-world photo and the cheap detail tier is safe. When nothing
+ * is found, the measurement heuristic decides. A failed detector must never
+ * break attachments — the caller transparently falls back.
  *
- * The detector's role: when it finds objects (COCO classes — person, laptop,
- * keyboard, phone…), the image is a real-world photo and the cheap tier is
- * safe. When it finds nothing, the image may still be a document/UI/diagram,
- * so the measurement-based heuristic decides. A failed detector must never
- * break attachments — callers transparently fall back to the heuristic.
+ * The live-camera parts (frame loop, scene classifier, ImageNet labels) were
+ * extracted to the separate camera project: thalamus_camera_ai/legacy/.
  */
 
 type Detector = import('@mediapipe/tasks-vision').ObjectDetector;
+type Fileset = Awaited<ReturnType<typeof import('@mediapipe/tasks-vision')['FilesetResolver']['forVisionTasks']>>;
 
 const WASM_PATH = '/mediapipe/wasm';
 /** Version query keeps dev-server/proxy caches from serving stale bytes. */
-const MODEL_V = 'v2';
+const MODEL_V = 'v3';
 const DETECTOR_PATH = `/mediapipe/models/object_detector.tflite?${MODEL_V}`;
-
-let detectorPromise: Promise<Detector> | null = null;
-let detectorBroken = false;
-let lastError = '';
-
-/** Last detector error, for debugging in the UI or console. */
-export function lastVisionError(): string {
-  return lastError;
-}
-
-export function onDeviceVisionAvailable(): boolean {
-  return !detectorBroken;
-}
-
-async function getDetector(): Promise<Detector> {
-  if (!detectorPromise) {
-    detectorPromise = (async () => {
-      const tasks = await import('@mediapipe/tasks-vision');
-      const fileset = await tasks.FilesetResolver.forVisionTasks(WASM_PATH);
-      // Fetch + validate ourselves so a stale/cached or wrong response is
-      // reported clearly instead of a cryptic wasm error.
-      const res = await fetch(DETECTOR_PATH, { cache: 'no-store' });
-      if (!res.ok) throw new Error(`model HTTP ${res.status}`);
-      const bytes = new Uint8Array(await res.arrayBuffer());
-      const magic = String.fromCharCode(bytes[4], bytes[5], bytes[6], bytes[7]);
-      if (magic !== 'TFL3') {
-        throw new Error(`model file is not valid TFLite (magic "${magic || 'empty'}", ${bytes.length}B)`);
-      }
-      return tasks.ObjectDetector.createFromOptions(fileset, {
-        baseOptions: { modelAssetBuffer: bytes },
-        maxResults: 5,
-        scoreThreshold: 0.4,
-      });
-    })();
-  }
-  return detectorPromise;
-}
 
 export interface OnDeviceBox {
   label: string;
@@ -70,6 +32,91 @@ export interface OnDeviceAnalysis {
   /** True when recognizable real-world objects were found → likely a photo. */
   isPhoto: boolean;
   boxes: OnDeviceBox[];
+}
+
+let filesetPromise: Promise<Fileset> | null = null;
+let detector: Detector | null = null;
+let detectorPromise: Promise<Detector | null> | null = null;
+let detectorBroken = false;
+let lastError = '';
+
+/** Last detector error, for debugging in the UI or console. */
+export function lastVisionError(): string {
+  return lastError;
+}
+
+function noteError(tag: string, err: unknown) {
+  const msg = String((err as Error)?.message || err);
+  lastError = `${tag}: ${msg}`;
+  (window as unknown as { __visionError?: string }).__visionError = lastError;
+}
+
+function getFileset(): Promise<Fileset> {
+  if (!filesetPromise) {
+    filesetPromise = (async () => {
+      const tasks = await import('@mediapipe/tasks-vision');
+      return tasks.FilesetResolver.forVisionTasks(WASM_PATH);
+    })().catch((err) => {
+      // Allow a later retry after a transient failure.
+      filesetPromise = null;
+      throw err;
+    });
+  }
+  return filesetPromise;
+}
+
+/** Fetches the model and verifies the TFLite magic so a stale/HTML response is reported clearly. */
+async function loadModelBytes(path: string): Promise<Uint8Array> {
+  const res = await fetch(path, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`model HTTP ${res.status}`);
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  const magic = String.fromCharCode(bytes[4], bytes[5], bytes[6], bytes[7]);
+  if (magic !== 'TFL3') {
+    throw new Error(`model file is not valid TFLite (magic "${magic || 'empty'}", ${bytes.length}B)`);
+  }
+  return bytes;
+}
+
+async function createDetector(): Promise<Detector | null> {
+  if (detector) return detector;
+  if (detectorBroken) return null;
+  if (detectorPromise) return detectorPromise;
+  detectorPromise = (async () => {
+    try {
+      const [tasks, fileset, bytes] = await Promise.all([
+        import('@mediapipe/tasks-vision'),
+        getFileset(),
+        loadModelBytes(DETECTOR_PATH),
+      ]);
+      const d = await tasks.ObjectDetector.createFromOptions(fileset, {
+        baseOptions: { modelAssetBuffer: bytes },
+        maxResults: 8,
+        scoreThreshold: 0.35,
+      });
+      detector = d;
+      return d;
+    } catch (err) {
+      detectorBroken = true;
+      detectorPromise = null;
+      noteError('detector', err);
+      return null;
+    }
+  })();
+  return detectorPromise;
+}
+
+function toBoxes(raw: import('@mediapipe/tasks-vision').Detection[]): OnDeviceBox[] {
+  return raw
+    .filter((d) => d.boundingBox && d.categories[0])
+    .map((d) => ({
+      label: d.categories[0]!.categoryName || `#${d.categories[0]!.index}`,
+      score: d.categories[0]!.score,
+      x: d.boundingBox!.originX,
+      y: d.boundingBox!.originY,
+      w: d.boundingBox!.width,
+      h: d.boundingBox!.height,
+    }))
+    .sort((a, b) => b.score - a.score);
 }
 
 /** Rejects after `ms`, leaving the underlying promise running (warm-up). */
@@ -94,35 +141,26 @@ function withTimeout<T>(promise: Promise<T>, ms: number, tag: string): Promise<T
 export async function analyzeOnDevice(canvas: HTMLCanvasElement): Promise<OnDeviceAnalysis | null> {
   if (detectorBroken) return null;
 
-  let detector: Detector;
+  let det: Detector | null;
   try {
-    detector = await withTimeout(getDetector(), 6000, 'detector init');
+    det = await withTimeout(createDetector(), 6000, 'detector init');
   } catch (err) {
     const msg = String((err as Error)?.message || err);
-    lastError = 'detector init: ' + msg;
-    (window as unknown as { __visionError?: string }).__visionError = lastError;
-    if (!msg.includes('timed out')) {
-      // A real error (not just a slow first init) → stop retrying.
-      detectorBroken = true;
-      detectorPromise = null;
-    }
+    if (!msg.includes('timed out')) noteError('detector init', err);
     return null;
   }
+  if (!det) return null;
 
-  const det = detector.detect(canvas);
-  const boxes: OnDeviceBox[] = det.detections
-    .filter((d) => d.boundingBox && d.categories[0]?.categoryName)
-    .map((d) => ({
-      label: d.categories[0]!.categoryName as string,
-      score: d.categories[0]!.score,
-      x: d.boundingBox!.originX,
-      y: d.boundingBox!.originY,
-      w: d.boundingBox!.width,
-      h: d.boundingBox!.height,
-    }))
-    .sort((a, b) => b.score - a.score);
-
-  // Confident everyday-object detections → almost certainly a photo.
-  const strong = boxes.filter((b) => b.score >= 0.5);
-  return { isPhoto: strong.length > 0, boxes };
+  try {
+    const result = det.detect(canvas);
+    const boxes = toBoxes(result.detections);
+    // Confident everyday-object detections → almost certainly a photo.
+    const strong = boxes.filter((b) => b.score >= 0.5);
+    return { isPhoto: strong.length > 0, boxes };
+  } catch (err) {
+    detectorBroken = true;
+    detector = null;
+    noteError('detector', err);
+    return null;
+  }
 }

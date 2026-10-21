@@ -35,6 +35,13 @@ export interface ApiProvider {
   color: string;
   /** false = listed but not selectable until the backend supports it. */
   available?: boolean;
+  /**
+   * Sağlayıcıya özgü istek seçeneği: düşünme (reasoning) modu. EVREN/vLLM
+   * modelleri varsayılan olarak düşünür; cevap `reasoning` alanına gider ve
+   * düşünme token'ları çıktıya yazılır (ölçüldü: basit istemde 35 çıktı
+   * token'ı → `none` ile 2). `none` gönderilmezse yanıtlar kısalıp kesilebilir.
+   */
+  reasoningEffort?: string;
 }
 
 export const API_PROVIDERS: ApiProvider[] = [
@@ -45,6 +52,12 @@ export const API_PROVIDERS: ApiProvider[] = [
   { id: 'xai',        name: 'xAI Grok',      family: 'openai', keyPlaceholder: 'xai-...',           apiEndpoint: 'https://api.x.ai/v1',                      defaultModel: 'grok-2-latest',          docsUrl: 'https://console.x.ai/',                    color: '#A8A49E' },
   { id: 'mistral',    name: 'Mistral',       family: 'openai', keyPlaceholder: '...',               apiEndpoint: 'https://api.mistral.ai/v1',                defaultModel: 'mistral-small-latest',   docsUrl: 'https://console.mistral.ai/api-keys',      color: '#f7a93b' },
   { id: 'groq',       name: 'Groq',          family: 'openai', keyPlaceholder: 'gsk_...',           apiEndpoint: 'https://api.groq.com/openai/v1',           defaultModel: 'llama-3.3-70b-versatile',docsUrl: 'https://console.groq.com/keys',            color: '#f55036' },
+  // EVREN (T.C. Savunma Sanayii Başkanlığı): OpenAI uyumlu, veri Türkiye'deki
+  // GPU kümesinde işlenir, 01.11.2026'ya kadar ücretsiz. Anahtar e-Devlet'ten.
+  // Modeller: deepseek-v4.1-flash (1M bağlam) · glm-5.3 · qwen3.8-flash-next ·
+  // gemma-4-31b. DİKKAT: modeller reasoning modunda gelir ve düşünme token'ları
+  // çıktıya yazılır; kod işleri için `deepseek-v4.1-flash` en verimlisi (ölçüldü).
+  { id: 'evren',      name: 'EVREN (Savunma Sanayii)', family: 'openai', keyPlaceholder: 'evren_llm_...', apiEndpoint: 'https://evren-llmapi.ssyz.org.tr/v1', defaultModel: 'deepseek-v4.1-flash', docsUrl: 'https://evren.ssyz.org.tr/', color: '#e30a17', reasoningEffort: 'none' },
   { id: 'openrouter', name: 'OpenRouter',    family: 'openai', keyPlaceholder: 'sk-or-...',         apiEndpoint: 'https://openrouter.ai/api/v1',             defaultModel: 'openai/gpt-4o-mini',     docsUrl: 'https://openrouter.ai/settings/keys',      color: '#8b5cf6' },
   { id: 'together',   name: 'Together AI',   family: 'openai', keyPlaceholder: '...',               apiEndpoint: 'https://api.together.xyz/v1',              defaultModel: 'meta-llama/Llama-3.3-70B-Instruct-Turbo', docsUrl: 'https://api.together.ai/settings/api-keys', color: '#ea580c' },
   { id: 'fireworks',  name: 'Fireworks AI',  family: 'openai', keyPlaceholder: '...',               apiEndpoint: 'https://api.fireworks.ai/inference/v1',    defaultModel: 'accounts/fireworks/models/llama-v3p3-70b-instruct', docsUrl: 'https://fireworks.ai/account/api-keys', color: '#f97316' },
@@ -59,6 +72,8 @@ export const API_PROVIDERS: ApiProvider[] = [
   { id: 'anthropic',  name: 'Claude (Anthropic)', family: 'anthropic', keyPlaceholder: 'sk-ant-...', docsUrl: 'https://console.anthropic.com/settings/keys', color: '#d97757', available: false },
 
   // ── Local / self-hosted (no key, user-settable endpoint) ───────────
+  // Uygulamanın kendi başlattığı sunucular (llama.cpp / Python şimi) buraya yazılır.
+  { id: 'managed',   name: 'Local (managed)', family: 'local', keyPlaceholder: 'optional', defaultBaseUrl: 'http://127.0.0.1:11500/v1', needsBaseUrl: true, defaultModel: '', color: '#3AA99F' },
   { id: 'ollama',    name: 'Ollama',       family: 'local', keyPlaceholder: 'optional', defaultBaseUrl: 'http://localhost:11434/v1', needsBaseUrl: true, defaultModel: 'llama3.1', color: '#D0A215' },
   { id: 'lmstudio',  name: 'LM Studio',    family: 'local', keyPlaceholder: 'optional', defaultBaseUrl: 'http://localhost:1234/v1', needsBaseUrl: true, defaultModel: 'local-model', color: '#a78bfa' },
   { id: 'custom',    name: 'Custom (OpenAI-compatible)', family: 'local', keyPlaceholder: 'optional', defaultBaseUrl: 'http://localhost:8000/v1', needsBaseUrl: true, color: '#A8A49E' },
