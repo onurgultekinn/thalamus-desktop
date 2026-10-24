@@ -243,20 +243,12 @@ fn build_code_context(blocks: &[(String, String, String)]) -> Option<String> {
         return None;
     }
     let mut out = String::from(
-        "Code context is provided as a SCHEMA (signatures + line ranges + call relationships).\n\
-         - Short bodies are given FULLY in the schema; call the get_code_body tool for long bodies.\n\
-         - \"çağırır:\" notu o tanımın hangi fonksiyonları kullandığını gösterir — bir hatayı araştırıyorsan\n\
-         veya değişikliğin etkisini bilmiyorsan İLGİLİ TÜM fonksiyonları fetch et (fetch ucuzdur, eksik bağlam pahalıdır).\n\
-         - Değişikliklerini şu formatta döndür (her blok için):\n\
-         ```\n\
-         <dosya adı>\n\
-         <<<<<<< SEARCH\n\
-         (değiştirilecek satırların BİREBİR kopyası)\n\
-         =======\n\
-         (yeni satırlar)\n\
-         >>>>>>> REPLACE\n\
-         ```\n\
-         SEARCH must match the current code exactly; you may provide multiple blocks.\n\nŞEMA:\n",
+        "Code context: SCHEMA only (signatures + line ranges; short bodies given fully).\n\
+         - get_code_body tool fetches a long body (cheap — do it before judging or editing).\n\
+         - \"çağırır:\" lists functions that definition calls; fetch all relevant ones first.\n\
+         - PREFER the edit_file tool for changes (multiple calls ok); write_file for new files.\n\
+         - SEARCH/REPLACE blocks in your reply also work (SEARCH must match exactly):\n\
+         ```\n<file>\n<<<<<<< SEARCH\n<exact existing lines>\n=======\n<new lines>\n>>>>>>> REPLACE\n```\n\nŞEMA:\n",
     );
     for (id, name, body) in blocks {
         let _ = id;
@@ -273,6 +265,34 @@ fn build_code_context(blocks: &[(String, String, String)]) -> Option<String> {
         }
     }
     Some(out)
+}
+
+/// edit_file/write_file kayıtlarını frontend `edits` raporuna çevirir.
+/// Kayıtlar dosya başına KÜMÜLATİF olduğu için yalnız her dosyanın son
+/// kaydı yayılır; kronolojik sıra korunur (araç edit'leri önce).
+fn recorded_edits_json(records: &[tools::RecordedEdit]) -> Vec<Value> {
+    // İlk görülme sırasını koru; her dosya için SON kaydı al (kümülatif).
+    let mut order: Vec<&str> = Vec::new();
+    let mut last: std::collections::HashMap<&str, &tools::RecordedEdit> = Default::default();
+    for rec in records {
+        if !order.contains(&rec.file.as_str()) {
+            order.push(&rec.file);
+        }
+        last.insert(rec.file.as_str(), rec);
+    }
+    order
+        .into_iter()
+        .filter_map(|f| {
+            last.get(f).map(|rec| {
+                json!({
+                    "file": rec.file,
+                    "applied": true,
+                    "message": rec.message,
+                    "new_body": rec.new_body,
+                })
+            })
+        })
+        .collect()
 }
 
 /// Model yanıtındaki SEARCH/REPLACE bloklarını gövdelere uygular ve
@@ -360,8 +380,85 @@ fn whole_file_fallback(
     }))
 }
 
+/// Eski turların araç sonuçlarını kırpma eşiği (karakter). Güncel turun
+/// sonuçları tam kalır; eskiler için model gerektiğinde aracı yeniden
+/// çağırabilir — bağlam pencerisi her turda şişmez.
+const TOOL_RESULT_TRIM: usize = 2_000;
+
+/// Tool loop'ta güncel turdan önceki `tool` mesajlarını kırpır. Her tur tüm
+/// konuşma sağlayıcıya yeniden gönderildiği için, kırpılmamış eski read_file/
+/// grep çıktıları prompt token'ını turlarla üstel büyütüyordu.
+fn trim_old_tool_results(messages: &mut [Value], fresh_count: usize) {
+    let tool_idx: Vec<usize> = messages
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| m.get("role").and_then(|r| r.as_str()) == Some("tool"))
+        .map(|(i, _)| i)
+        .collect();
+    if tool_idx.len() <= fresh_count {
+        return;
+    }
+    for &i in &tool_idx[..tool_idx.len() - fresh_count] {
+        let Some(content) = messages[i].get("content").and_then(|c| c.as_str()) else {
+            continue;
+        };
+        if content.chars().count() <= TOOL_RESULT_TRIM {
+            continue;
+        }
+        let head: String = content.chars().take(TOOL_RESULT_TRIM).collect();
+        let trimmed = format!(
+            "{}\n…[earlier tool output trimmed to save context; call the tool again if you need the rest]",
+            head
+        );
+        if let Some(obj) = messages[i].as_object_mut() {
+            obj.insert("content".to_string(), Value::String(trimmed));
+        }
+    }
+}
+
+/// Tek turda biriken araç sonuçlarının karakter bütçesi (tools::TOOL_RESULT_BUDGET).
+/// Aşıldığında tur hata ile durur: model tek seferde düzinelerce dosya okuyup
+/// kullanıcıyı büyük faturaya boğmadan döngü kesilir.
+fn round_budget_error(fresh_chars: usize) -> Option<String> {
+    if fresh_chars > tools::TOOL_RESULT_BUDGET {
+        Some(format!(
+            "tool result budget exceeded in one round ({} chars > {}); make fewer or smaller tool calls (read_file offset/limit)",
+            fresh_chars,
+            tools::TOOL_RESULT_BUDGET
+        ))
+    } else {
+        None
+    }
+}
+
+/// Sağlayıcı hatası tekrarlanmaya değer mi? Yalnızca yanıt GÖNDERİLMEDEN
+/// oluşan hatalar (HTTP durum satırı, bağlantı kurulamadı) — akış ortasında
+/// üretilmez, bu yüzden kısmi akışı tekrar basma riski yoktur.
+fn is_retryable_provider_error(e: &str) -> bool {
+    e.starts_with("HTTP 429")
+        || e.starts_with("HTTP 5")
+        || e.contains("error sending request")
+}
+
+/// Geçici sağlayıcı hatalarında geri çekilmeli tekrar (429/5xx/bağlantı):
+/// en fazla 2 tekrar, 1.6 sn / 3.2 sn bekleme. Kalıcı hata ilk hatayla döner.
+fn post_with_retry<T>(mut f: impl FnMut() -> Result<T, String>) -> Result<T, String> {
+    let mut attempt = 0usize;
+    loop {
+        match f() {
+            Ok(v) => return Ok(v),
+            Err(e) if attempt < 2 && is_retryable_provider_error(&e) => {
+                attempt += 1;
+                std::thread::sleep(std::time::Duration::from_millis(800 * (1 << attempt)));
+            }
+            Err(e) => return Err(e),
+        }
+    }
+}
+
 /// Tool-call döngüsü. Araçlar `tools` kayıt sisteminden gelir (dosya/arama/
-/// şema); tümü workspace köküne sınırlıdır. Döndürür: (içerik, tur, usage).
+/// şema/düzenleme); tümü workspace köküne sınırlıdır. Döndürür: (içerik,
+/// düşünme, tur, usage, edit_file/write_file kayıtları).
 #[allow(clippy::too_many_arguments)] // iç çağrı: 8 bağımsız parametre; struct'a sarmak churn
 pub fn run_tool_loop(
     transport: &dyn Transport,
@@ -374,9 +471,9 @@ pub fn run_tool_loop(
     max_rounds: usize,
     reasoning_effort: Option<&str>,
     gen: GenOptions,
-) -> Result<(String, String, usize, Value), String> {
+) -> Result<(String, String, usize, Value, Vec<tools::RecordedEdit>), String> {
     let tools_json = tools::specs();
-    let ctx = tools::ToolCtx { root, code_blocks };
+    let ctx = tools::ToolCtx::new(root, code_blocks);
     let headers = vec![("Authorization".to_string(), format!("Bearer {}", api_key))];
     let mut rounds = 0usize;
     let mut usage = Value::Null;
@@ -397,7 +494,7 @@ pub fn run_tool_loop(
         if let Some(effort) = reasoning_effort {
             body["reasoning_effort"] = json!(effort);
         }
-        let resp = transport.post_json(url, &headers, &body)?;
+        let resp = post_with_retry(|| transport.post_json(url, &headers, &body))?;
         if let Some(u) = resp.get("usage") {
             usage = u.clone(); // son yanıtın kullanımı
         }
@@ -416,20 +513,26 @@ pub fn run_tool_loop(
                 .or_else(|| msg["reasoning_content"].as_str())
                 .unwrap_or("")
                 .to_string();
-            return Ok((content, reasoning, rounds, usage));
+            return Ok((content, reasoning, rounds, usage, ctx.edits.into_inner()));
         }
         messages.push(msg);
+        let mut fresh_chars = 0usize;
         for tc in &tool_calls {
             let name = tc["function"]["name"].as_str().unwrap_or("").to_string();
             let args_raw = tc["function"]["arguments"].as_str().unwrap_or("{}");
             let args: Value = serde_json::from_str(args_raw).unwrap_or(json!({}));
             let result = tools::execute(&name, &args, &ctx);
+            fresh_chars += result.chars().count();
             messages.push(json!({
                 "role": "tool",
                 "tool_call_id": tc["id"].as_str().unwrap_or(""),
                 "content": result,
             }));
         }
+        if let Some(e) = round_budget_error(fresh_chars) {
+            return Err(e);
+        }
+        trim_old_tool_results(&mut messages, tool_calls.len());
     }
 }
 
@@ -789,10 +892,7 @@ fn stream_tool_loop(
     gen: GenOptions,
 ) {
     let tools_json = tools::specs();
-    let ctx = tools::ToolCtx {
-        root,
-        code_blocks,
-    };
+    let ctx = tools::ToolCtx::new(root, code_blocks);
     let mut rounds = 0usize;
     let mut usage = Value::Null;
     loop {
@@ -804,16 +904,21 @@ fn stream_tool_loop(
             );
             return;
         }
-        match stream_one_round(
-            tx,
-            url,
-            api_key,
-            model,
-            &messages,
-            &tools_json,
-            reasoning_effort,
-            gen,
-        ) {
+        // Geçici hatalarda turu tekrarla: HTTP durum hataları akış
+        // BAŞLAMADAN oluşur (emit yok), kısmi akış tekrarı riski yoktur.
+        let round = post_with_retry(|| {
+            stream_one_round(
+                tx,
+                url,
+                api_key,
+                model,
+                &messages,
+                &tools_json,
+                reasoning_effort,
+                gen,
+            )
+        });
+        match round {
             Ok((content, _reasoning, tool_calls, round_usage, finish_reason)) => {
                 if !round_usage.is_null() {
                     usage = round_usage;
@@ -824,6 +929,7 @@ fn stream_tool_loop(
                         "rounds": rounds,
                         "usage": usage,
                         "finish_reason": finish_reason,
+                        "edits": recorded_edits_json(&ctx.edits.borrow()),
                     }));
                     return;
                 }
@@ -832,17 +938,24 @@ fn stream_tool_loop(
                     "content": if content.is_empty() { Value::Null } else { Value::String(content) },
                     "tool_calls": tool_calls.clone(),
                 }));
+                let mut fresh_chars = 0usize;
                 for tc in &tool_calls {
                     let name = tc["function"]["name"].as_str().unwrap_or("").to_string();
                     let args_raw = tc["function"]["arguments"].as_str().unwrap_or("{}");
                     let args: Value = serde_json::from_str(args_raw).unwrap_or(json!({}));
                     let result = tools::execute(&name, &args, &ctx);
+                    fresh_chars += result.chars().count();
                     messages.push(json!({
                         "role": "tool",
                         "tool_call_id": tc["id"].as_str().unwrap_or(""),
                         "content": result,
                     }));
                 }
+                if let Some(e) = round_budget_error(fresh_chars) {
+                    let _ = emit_event(tx, json!({"type": "error", "message": e}));
+                    return;
+                }
+                trim_old_tool_results(&mut messages, tool_calls.len());
             }
             Err(e) => {
                 let _ = emit_event(tx, json!({"type": "error", "message": e}));
@@ -962,7 +1075,11 @@ pub async fn ai_chat(
     .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
     .map_err(|e| (axum::http::StatusCode::BAD_GATEWAY, e))?;
 
-    let edits = finalize_edits(&result.0, &blocks);
+    // Araç edit'leri (edit_file/write_file) önce; sonra nihai yanıtta
+    // SEARCH/REPLACE ile gelenler. Aynı dosyada ikisi birden varsa araç
+    // kaydı zaten kümülatif son gövdeyi taşır.
+    let mut edits = recorded_edits_json(&result.4);
+    edits.extend(finalize_edits(&result.0, &blocks));
 
     // Aider stratejisi: SEARCH/REPLACE eşleşmediyse whole-file yedeği dene.
     // Blocking client async çalışanda çağrılamaz — spawn_blocking'e taşındı
@@ -1013,6 +1130,181 @@ pub async fn ai_chat(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tool_loop_aborts_when_round_budget_exceeded() {
+        // 5 × ~32 KB read_file = ~164k karakter > TOOL_RESULT_BUDGET (150k):
+        // döngü hata ile durmalı, kullanıcı sessizce büyük faturaya boğulmamalı.
+        let tmp = std::env::temp_dir().join(format!("thx_bud_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&tmp);
+        std::fs::write(
+            tmp.join("big.txt"),
+            format!("{}\n", "a".repeat(200)).repeat(250),
+        )
+        .unwrap();
+        let calls: Vec<Value> = (0..5)
+            .map(|i| {
+                json!({
+                    "id": format!("c{}", i),
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": "{\"path\":\"big.txt\"}"}
+                })
+            })
+            .collect();
+        let transport = FakeTransport {
+            responses: vec![
+                json!({"choices":[{"message":{"role":"assistant","tool_calls":calls}}]}),
+                json!({"choices":[{"message":{"content":"hepsini okudum"}}]}),
+            ],
+            seen: std::sync::Mutex::new(Vec::new()),
+        };
+        let err = run_tool_loop(
+            &transport,
+            "http://x",
+            "k",
+            "m",
+            vec![json!({"role": "user", "content": "big.txt oku"})],
+            &[],
+            std::path::Path::new(&tmp),
+            4,
+            None,
+            GenOptions::default(),
+        )
+        .unwrap_err();
+        assert!(err.contains("budget"), "bütçe hatası beklenirdi: {}", err);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// İlk çağrılarda kuyruğundaki hataları döndüren taşıma; sonra yanıtlar.
+    struct FlakyTransport {
+        errors: std::sync::Mutex<Vec<String>>,
+        responses: std::sync::Mutex<Vec<Value>>,
+        seen: std::sync::Mutex<usize>,
+    }
+    impl Transport for FlakyTransport {
+        fn post_json(
+            &self,
+            _url: &str,
+            _h: &[(String, String)],
+            _body: &Value,
+        ) -> Result<Value, String> {
+            let mut n = self.seen.lock().unwrap_or_else(|e| e.into_inner());
+            *n += 1;
+            let mut errs = self.errors.lock().unwrap_or_else(|e| e.into_inner());
+            if !errs.is_empty() {
+                return Err(errs.remove(0));
+            }
+            drop(errs);
+            let mut resps = self.responses.lock().unwrap_or_else(|e| e.into_inner());
+            if resps.is_empty() {
+                return Err("yanıt tükendi".into());
+            }
+            Ok(resps.remove(0))
+        }
+    }
+
+    #[test]
+    fn transient_provider_errors_are_retried() {
+        let transport = FlakyTransport {
+            errors: std::sync::Mutex::new(vec![
+                "HTTP 429: rate limited".to_string(),
+                "HTTP 503: try again".to_string(),
+            ]),
+            responses: std::sync::Mutex::new(vec![
+                json!({"choices":[{"message":{"content":"tamam"}}]}),
+            ]),
+            seen: std::sync::Mutex::new(0),
+        };
+        let (content, _, rounds, _, _) = run_tool_loop(
+            &transport,
+            "http://x",
+            "k",
+            "m",
+            vec![json!({"role": "user", "content": "merhaba"})],
+            &[],
+            std::path::Path::new("."),
+            4,
+            None,
+            GenOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(content, "tamam");
+        assert_eq!(*transport.seen.lock().unwrap_or_else(|e| e.into_inner()), 3);
+        assert_eq!(rounds, 1);
+    }
+
+    #[test]
+    fn permanent_provider_errors_are_not_retried() {
+        let transport = FlakyTransport {
+            errors: std::sync::Mutex::new(vec!["HTTP 401: bad key".to_string()]),
+            responses: std::sync::Mutex::new(vec![]),
+            seen: std::sync::Mutex::new(0),
+        };
+        let err = run_tool_loop(
+            &transport,
+            "http://x",
+            "k",
+            "m",
+            vec![json!({"role": "user", "content": "merhaba"})],
+            &[],
+            std::path::Path::new("."),
+            4,
+            None,
+            GenOptions::default(),
+        )
+        .unwrap_err();
+        assert!(err.contains("401"));
+        assert_eq!(*transport.seen.lock().unwrap_or_else(|e| e.into_inner()), 1);
+    }
+
+    #[test]
+    fn recorded_tool_edits_last_per_file() {
+        let recs = vec![
+            tools::RecordedEdit {
+                file: "a.ts".into(),
+                new_body: "eski a".into(),
+                message: "m1".into(),
+            },
+            tools::RecordedEdit {
+                file: "b.ts".into(),
+                new_body: "b gövde".into(),
+                message: "m2".into(),
+            },
+            tools::RecordedEdit {
+                file: "a.ts".into(),
+                new_body: "yeni a".into(),
+                message: "m3".into(),
+            },
+        ];
+        let out = recorded_edits_json(&recs);
+        assert_eq!(out.len(), 2, "dosya başına tek kayıt");
+        assert_eq!(out[0]["file"], "a.ts");
+        assert_eq!(out[0]["new_body"], "yeni a", "son kayıt kazanmalı");
+        assert_eq!(out[1]["file"], "b.ts");
+    }
+
+    #[test]
+    fn old_tool_results_are_trimmed_fresh_kept() {
+        let big = "x".repeat(5_000);
+        let mut messages = vec![
+            json!({"role": "user", "content": "soru"}),
+            json!({"role": "tool", "tool_call_id": "a", "content": big.clone()}),
+            json!({"role": "tool", "tool_call_id": "b", "content": "kısa sonuç"}),
+            json!({"role": "tool", "tool_call_id": "c", "content": big.clone()}),
+        ];
+        // Güncel tur: son 1 araç sonucu tam kalmalı.
+        trim_old_tool_results(&mut messages, 1);
+        assert!(
+            messages[1]["content"].as_str().unwrap().contains("trimmed"),
+            "eski büyük sonuç kırpılmalı"
+        );
+        assert_eq!(messages[2]["content"].as_str().unwrap(), "kısa sonuç");
+        assert_eq!(
+            messages[3]["content"].as_str().unwrap(),
+            big,
+            "güncel turun sonucu tam kalmalı"
+        );
+    }
 
     #[test]
     fn big_repeated_json_message_is_compressed_invisibly() {
@@ -1109,7 +1401,7 @@ mod tests {
         )];
         let messages = vec![json!({"role":"user","content":"login kontrol et"})];
 
-        let (content, _reasoning, rounds, _usage) = run_tool_loop(
+        let (content, _reasoning, rounds, _usage, _edits) = run_tool_loop(
             &transport,
             "http://x",
             "key",
@@ -1149,7 +1441,7 @@ mod tests {
             "login".to_string(),
             "def login(): pass".to_string(),
         )];
-        let (content, _reasoning, _, _usage) = run_tool_loop(
+        let (content, _reasoning, _, _usage, _edits) = run_tool_loop(
             &transport,
             "http://x",
             "k",
