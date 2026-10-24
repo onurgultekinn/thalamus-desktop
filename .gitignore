@@ -22,6 +22,9 @@ _backups/
 _preview_test.*
 _term_real.txt
 _test_create.txt
+denetim
+hatalar.txt
+.zcode/plans/
 
 # @file-viewer offline asset kopyaları (üretilir)
 public/file-viewer/
