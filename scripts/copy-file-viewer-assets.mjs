@@ -17,31 +17,15 @@ const target = join(root, 'public', 'file-viewer');
 const stampPath = join(target, '.asset-stamp.json');
 
 // Kopyalama/purge mantığı değişince artır.
-const SCRIPT_VERSION = 2;
+const SCRIPT_VERSION = 4;
 
-const PACKAGES = [
-  '@file-viewer/assets-standard',
-  '@file-viewer/assets-ppt',
-  '@file-viewer/assets-chm',
-  '@file-viewer/assets-drawing',
-];
+// `assets-ppt` eski binary .ppt runtime'ını (proprietary, filigran zorunlu),
+// `assets-drawing` drawio varlıklarını (Atlassian kısıtlı lisans) taşır; ikisi
+// de bilerek kopyalanmaz. CHM Apache-2.0 olduğu için geri getirildi.
+const PACKAGES = ['@file-viewer/assets-standard', '@file-viewer/assets-chm'];
 
-// Eski .ppt (.ppt/.pot — PowerPoint 97-2003) motoru font/wasm/worker yollarını
-// `presentation.pptFontUrl|pptWasmUrl|pptWorkerUrl` seçeneklerinden okur
-// (renderer-presentation → @file-viewer/ppt). Uygulama bu seçenekleri VERMİYOR
-// (bkz. src/lib/fileViewerSetup.ts → createFullAssetOptions yalnız archive/docx/
-// pdf/presentation/spreadsheet anahtarlarını üretir), bu yüzden motor kendi
-// gömülü `/assets/ppt-font-cjk-*.otf` / `ppt-native-*.wasm` kopyalarını kullanır.
-// Buradaki kopyalar hiç istenmiyor: 16 MB CJK font + 1.5 MB wasm gereksiz.
-// LICENSE/NOTICE korunur. (Geri almak için bu bloğu silip scripti yeniden çalıştırın;
-// dosyalar node_modules/@file-viewer/assets-ppt içinde duruyor.)
-const PPT_UNUSED_RUNTIME = [
-  'vendor/ppt/ppt-font-cjk.otf',
-  'vendor/ppt/ppt-native.wasm',
-  'vendor/ppt/index.mjs',
-  'vendor/ppt/worker.mjs',
-  'vendor/ppt/frame-cache.mjs',
-];
+// Bu dizinler preset'te yok; eski kopyalardan kalmışsa temizle.
+const PURGE_DIRS = ['vendor/ppt', 'vendor/drawio'];
 
 // Hedef ağacın sağlıklı olduğunu gösteren kritik dosyalar. Kullanıcı
 // public/file-viewer'ı elle silerse stamp eşleşse bile yeniden kopyalanır.
@@ -71,7 +55,7 @@ const signature = createHash('sha1')
       SCRIPT_VERSION,
       scriptSource,
       packageMeta,
-      purge: PPT_UNUSED_RUNTIME,
+      purge: PURGE_DIRS,
     })
   )
   .digest('hex');
@@ -87,23 +71,23 @@ function upToDate() {
   return SENTINELS.every((rel) => existsSync(join(target, rel)));
 }
 
-function purgeUnusedPptRuntime() {
+function purgeUnusedRuntimeDirs() {
   let purged = 0;
-  for (const rel of PPT_UNUSED_RUNTIME) {
+  for (const rel of PURGE_DIRS) {
     const file = join(target, rel);
     if (existsSync(file)) {
-      rmSync(file, { force: true });
+      rmSync(file, { recursive: true, force: true });
       purged++;
     }
   }
   if (purged > 0) {
-    console.log(`[file-viewer] dropped ${purged} unused legacy .ppt runtime file(s) from public/file-viewer/vendor/ppt`);
+    console.log(`[file-viewer] dropped ${purged} unused/restricted asset dir(s) from public/file-viewer`);
   }
 }
 
 if (upToDate()) {
   // Önceki çalıştırmada purge edilmiş dosyalar geri gelmiş olabilir; ucuz kontrol.
-  purgeUnusedPptRuntime();
+  purgeUnusedRuntimeDirs();
   console.log('[file-viewer] assets up to date (copy skipped) -> public/file-viewer');
   process.exit(0);
 }
@@ -123,6 +107,6 @@ for (const pkg of PACKAGES) {
 
 console.log(`[file-viewer] assets copied from ${copied}/${PACKAGES.length} packages -> public/file-viewer`);
 
-purgeUnusedPptRuntime();
+purgeUnusedRuntimeDirs();
 
 writeFileSync(stampPath, JSON.stringify({ signature, SCRIPT_VERSION, packageMeta }, null, 2));

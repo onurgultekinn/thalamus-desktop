@@ -1,8 +1,12 @@
 import {
-  type PointerEvent as RPointerEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState,
+  type ReactNode, useEffect, useMemo, useRef, useState,
 } from 'react';
-import { ChevronDown, ChevronRight, Copy, Plus, Sparkles, Trash2, X } from 'lucide-react';
-import { PixelOffice } from './PixelOffice';
+import {
+  ArrowLeft, ChevronDown, ChevronRight, Copy, Play, Plus, Redo2, Sparkles, Trash2, Undo2, X,
+} from 'lucide-react';
+import { PixelOffice, agentHeadDataUrl } from './PixelOffice';
+import { AgentMesh } from './AgentMesh';
+import { FlowEditorX6 } from './FlowEditorX6';
 import { aiChat, getActiveProvider, type AiMessage } from '../services/aiClient';
 import { getProviderModel, modelChoices } from '../lib/models';
 import { getLang, useT, type Lang } from '../lib/i18n';
@@ -10,7 +14,7 @@ import { getLang, useT, type Lang } from '../lib/i18n';
 type View = 'plan' | 'chart' | 'office';
 type TplKey = 'software' | 'content' | 'research';
 
-interface PlanAgent {
+export interface PlanAgent {
   id: string;
   parentId: string | null;
   name: string;
@@ -18,13 +22,38 @@ interface PlanAgent {
   mission: string;
   resp: string;
   model: string;
+  /** Flow'da elle yerleştirilen konum; yoksa otomatik hiyerarşi kullanılır. */
+  x?: number;
+  y?: number;
+}
+
+/** Hiyerarşi dışı serbest bağ: "A → B ne yapar / ne için". */
+export interface AgentLink {
+  id: string;
+  from: string;
+  to: string;
+  /** İlişkinin türü; hazır seçeneklerden ya da serbest metinden. */
+  label: string;
+  /** Bu bağlantının amacı. */
+  note: string;
 }
 
 interface Plan {
   v: 2;
   name: string;
   agents: PlanAgent[];
+  links: AgentLink[];
 }
+
+const REL_PRESETS = [
+  'company.relDelegates',
+  'company.relCoordinates',
+  'company.relHandoff',
+  'company.relReviews',
+  'company.relInforms',
+  'company.relConsults',
+  'company.relDepends',
+] as const;
 
 interface TplAgent {
   name: string;
@@ -34,12 +63,6 @@ interface TplAgent {
   parent: number | null;
 }
 
-interface ChartNode {
-  agent: PlanAgent;
-  x: number;
-  y: number;
-  depth: number;
-}
 
 const STORE = 'tlm_agent_company';
 const VIEW_KEY = 'tlm_agent_company_view';
@@ -47,8 +70,6 @@ const NODE_W = 172;
 const NODE_H = 56;
 const GAP_X = 22;
 const GAP_Y = 40;
-const MIN_ZOOM = 0.3;
-const MAX_ZOOM = 2;
 
 const TB = 'flex h-6 shrink-0 items-center gap-1 rounded-[3px] px-1.5 text-[10.5px] text-[#A8A397] '
   + 'hover:bg-[#F2F0E5]/5 hover:text-[#F2F0E5] disabled:opacity-40 disabled:hover:bg-transparent cursor-pointer';
@@ -56,6 +77,11 @@ const TBI = 'grid h-6 w-6 shrink-0 place-items-center rounded-[3px] text-[#A8A39
   + 'hover:bg-[#F2F0E5]/5 hover:text-[#F2F0E5] cursor-pointer';
 const PRIMARY = 'flex h-6 shrink-0 items-center gap-1 rounded-[3px] bg-[#dcb67a] px-2 text-[10.5px] font-medium '
   + 'text-[#141210] hover:bg-[#EBCB99] disabled:cursor-default disabled:opacity-40';
+/* Araç çubuğu düğmeleri için nötr stil: "Add agent" sarı PRIMARY kullanıyordu
+   ve paleti bozuyordu; onay gerektiren iletiş kutuları sarı kalır. */
+const NEUTRAL = 'flex h-6 shrink-0 items-center gap-1 rounded-[3px] border border-[#2A2825] bg-[#171614] px-2 '
+  + 'text-[10.5px] font-medium text-[#E8E4DA] hover:border-[#3C3830] hover:bg-[#201E1B] '
+  + 'disabled:cursor-default disabled:opacity-40';
 const LABEL = 'mb-1 block text-[9px] uppercase tracking-[0.08em] text-[#7C776B]';
 const FIELD = 'w-full min-w-0 rounded-[3px] border border-[#2A2825] bg-[#0F0E0E] px-2 py-1 text-[11px] '
   + 'text-[#E8E4DA] outline-none placeholder:text-[#565248] focus:border-[#dcb67a]/50';
@@ -127,6 +153,27 @@ function uid() {
   return `a-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
+function linkUid() {
+  return `l-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function normalizeLinks(v: unknown, ids: Set<string>): AgentLink[] {
+  if (!Array.isArray(v)) return [];
+  const out: AgentLink[] = [];
+  const seen = new Set<string>();
+  for (const raw of v) {
+    const l = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+    const from = str(l.from);
+    const to = str(l.to);
+    if (!from || !to || from === to || !ids.has(from) || !ids.has(to)) continue;
+    const id = str(l.id) || linkUid();
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push({ id, from, to, label: str(l.label), note: str(l.note) });
+  }
+  return out;
+}
+
 function str(v: unknown) {
   return typeof v === 'string' ? v : '';
 }
@@ -136,9 +183,6 @@ function respStr(v: unknown) {
   return str(v);
 }
 
-function clampZoom(z: number) {
-  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
-}
 
 function flatten(list: PlanAgent[]): PlanAgent[] {
   const map = new Map(list.map((a) => [a.id, a]));
@@ -226,6 +270,9 @@ function normalizeAgent(v: unknown): PlanAgent {
     mission: str(a.mission) || str(a.task),
     resp: respStr(a.resp) || respStr(a.instructions),
     model: str(a.model),
+    ...(Number.isFinite(Number(a.x)) && Number.isFinite(Number(a.y))
+      ? { x: Number(a.x), y: Number(a.y) }
+      : {}),
   };
 }
 
@@ -246,20 +293,26 @@ function deriveParents(agents: PlanAgent[], edges: unknown) {
   }
 }
 
+function emptyPlan(): Plan {
+  return { v: 2, name: '', agents: [], links: [] };
+}
+
 function loadPlan(): Plan {
   try {
     const raw = localStorage.getItem(STORE);
-    if (!raw) return { v: 2, name: '', agents: [] };
+    if (!raw) return emptyPlan();
     const data = JSON.parse(raw) as Record<string, unknown> | null;
-    if (!data || typeof data !== 'object') return { v: 2, name: '', agents: [] };
+    if (!data || typeof data !== 'object') return emptyPlan();
     const name = str(data.name);
     if (data.v === 2 && Array.isArray(data.agents)) {
-      return { v: 2, name, agents: sanitizeAgents(data.agents.map(normalizeAgent)) };
+      const agents = sanitizeAgents(data.agents.map(normalizeAgent));
+      return { v: 2, name, agents, links: normalizeLinks(data.links, new Set(agents.map((a) => a.id))) };
     }
     if (Array.isArray(data.agents)) {
       const agents = data.agents.map(normalizeAgent);
       deriveParents(agents, data.edges);
-      return { v: 2, name, agents: sanitizeAgents(agents) };
+      const clean = sanitizeAgents(agents);
+      return { v: 2, name, agents: clean, links: normalizeLinks(data.links, new Set(clean.map((a) => a.id))) };
     }
     if (Array.isArray(data.nodes)) {
       const nodes = data.nodes.filter((n) => {
@@ -276,10 +329,11 @@ function loadPlan(): Plan {
         model: str(n.model),
       }));
       deriveParents(agents, data.edges);
-      return { v: 2, name, agents: sanitizeAgents(agents) };
+      const clean = sanitizeAgents(agents);
+      return { v: 2, name, agents: clean, links: normalizeLinks(data.links, new Set(clean.map((a) => a.id))) };
     }
   } catch {}
-  return { v: 2, name: '', agents: [] };
+  return emptyPlan();
 }
 
 function parseAiPlan(text: string): PlanAgent[] {
@@ -328,7 +382,7 @@ function parseAiPlan(text: string): PlanAgent[] {
   }));
 }
 
-function toMarkdown(plan: Plan, companyFallback: string, agentFallback: string) {
+function toMarkdown(plan: Plan, companyFallback: string, agentFallback: string, connectionsTitle: string) {
   const kids = childMap(plan.agents);
   const lines = [`# ${plan.name.trim() || companyFallback}`, ''];
   const walk = (pid: string | null, depth: number) => {
@@ -342,10 +396,19 @@ function toMarkdown(plan: Plan, companyFallback: string, agentFallback: string) 
     }
   };
   walk(null, 0);
+  if (plan.links.length) {
+    const nameOf = (id: string) => plan.agents.find((a) => a.id === id)?.name.trim() || agentFallback;
+    lines.push(`## ${connectionsTitle}`, '');
+    for (const l of plan.links) {
+      const label = l.label.trim();
+      const note = l.note.trim();
+      lines.push(`- ${nameOf(l.from)} → ${nameOf(l.to)}${label ? ` — ${label}` : ''}${note ? `: ${note}` : ''}`);
+    }
+  }
   return `${lines.join('\n').trim()}\n`;
 }
 
-export function AgentCompany() {
+export function AgentCompany({ active = true }: { active?: boolean }) {
   const t = useT();
   const lang = getLang();
   const [plan, setPlan] = useState<Plan>(() => loadPlan());
@@ -355,6 +418,31 @@ export function AgentCompany() {
       return v === 'chart' || v === 'office' ? v : 'plan';
     } catch { return 'plan'; }
   });
+
+  /**
+   * Flow (X6) editörünü boşta önceden kur. Plan ↔ Flow geçişinde editör
+   * yeniden mount edilmediği için grafik kurulum maliyeti geçişe yansımaz.
+   */
+  const [chartReady, setChartReady] = useState(false);
+  useEffect(() => {
+    if (chartReady) return;
+    if (view === 'chart') {
+      setChartReady(true);
+      return;
+    }
+    let idleId: number | undefined;
+    const warm = () => setChartReady(true);
+    if (typeof window.requestIdleCallback === 'function') {
+      idleId = window.requestIdleCallback(warm, { timeout: 1500 });
+    } else {
+      idleId = window.setTimeout(warm, 600);
+    }
+    return () => {
+      if (idleId === undefined) return;
+      if (typeof window.cancelIdleCallback === 'function') window.cancelIdleCallback(idleId);
+      window.clearTimeout(idleId);
+    };
+  }, [view, chartReady]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [focusId, setFocusId] = useState<string | null>(null);
@@ -366,15 +454,21 @@ export function AgentCompany() {
   const [copied, setCopied] = useState(false);
   const [providerId, setProviderId] = useState('');
   const [activeModel, setActiveModel] = useState('');
-  const [cam, setCam] = useState({ x: 0, y: 0, zoom: 1 });
-
-  const canvasRef = useRef<HTMLDivElement>(null);
+  /** Ofiste seçili ajan (inspector) ve hiyerarşide seçili düğüm. */
+  const [selectedOffice, setSelectedOffice] = useState<string | null>(null);
+  const [selectedChart, setSelectedChart] = useState<string | null>(null);
+  /** Seçili bağlantı: hedef (çocuk) ajanın id'si. */
+  const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
+  /** Seçili serbest bağlantı (hiyerarşi dışı ilişki). */
+  const [selectedLink, setSelectedLink] = useState<string | null>(null);
+  /** Flow içinde gerçek çok-ajan çalıştırma paneli. */
+  const [showRun, setShowRun] = useState(false);
+  /** Yeni Flow editöründe "sığdır" tetikleyicisi. */
+  const [flowFitNonce, setFlowFitNonce] = useState(0);
   const planScrollRef = useRef<HTMLDivElement>(null);
   const planRef = useRef(plan);
   planRef.current = plan;
   const aiAbort = useRef<AbortController | null>(null);
-  const panRef = useRef<{ x: number; y: number; camX: number; camY: number } | null>(null);
-  const fitRef = useRef<() => void>(() => {});
 
   const agents = plan.agents;
   const byId = useMemo(() => new Map(agents.map((a) => [a.id, a])), [agents]);
@@ -397,74 +491,6 @@ export function AgentCompany() {
     return max;
   }, [agents, byId]);
 
-  const layout = useMemo(() => {
-    const map = childMap(agents);
-    const widths = new Map<string, number>();
-    const measured = new Set<string>();
-    const measure = (a: PlanAgent): number => {
-      if (measured.has(a.id)) return NODE_W;
-      measured.add(a.id);
-      const ch = map.get(a.id) ?? [];
-      let w = NODE_W;
-      if (ch.length) w = Math.max(NODE_W, ch.reduce((s, c) => s + measure(c), 0) + GAP_X * (ch.length - 1));
-      widths.set(a.id, w);
-      return w;
-    };
-    const roots = map.get(null) ?? [];
-    for (const r of roots) measure(r);
-    const nodes: ChartNode[] = [];
-    const placed = new Set<string>();
-    const place = (a: PlanAgent, left: number, depth: number) => {
-      if (placed.has(a.id)) return;
-      placed.add(a.id);
-      const w = widths.get(a.id) ?? NODE_W;
-      nodes.push({ agent: a, x: left + (w - NODE_W) / 2, y: depth * (NODE_H + GAP_Y), depth });
-      let cx = left;
-      for (const c of map.get(a.id) ?? []) {
-        place(c, cx, depth + 1);
-        cx += (widths.get(c.id) ?? NODE_W) + GAP_X;
-      }
-    };
-    let left = 0;
-    for (const r of roots) {
-      place(r, left, 0);
-      left += (widths.get(r.id) ?? NODE_W) + GAP_X * 2;
-    }
-    const minX = nodes.length ? Math.min(...nodes.map((n) => n.x)) : 0;
-    const minY = nodes.length ? Math.min(...nodes.map((n) => n.y)) : 0;
-    for (const n of nodes) {
-      n.x += 60 - minX;
-      n.y += 60 - minY;
-    }
-    const pos = new Map(nodes.map((n) => [n.agent.id, n]));
-    const edges: Array<{ from: ChartNode; to: ChartNode }> = [];
-    for (const n of nodes) {
-      for (const c of map.get(n.agent.id) ?? []) {
-        const cn = pos.get(c.id);
-        if (cn) edges.push({ from: n, to: cn });
-      }
-    }
-    const maxX = nodes.length ? Math.max(...nodes.map((n) => n.x)) : 0;
-    const maxY = nodes.length ? Math.max(...nodes.map((n) => n.y)) : 0;
-    return {
-      nodes,
-      edges,
-      w: Math.max(360, maxX - 60 + NODE_W + 120),
-      h: Math.max(260, maxY - 60 + NODE_H + 120),
-      empty: nodes.length === 0,
-    };
-  }, [agents]);
-
-  const fitView = useCallback(() => {
-    const el = canvasRef.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    if (!r.width || !r.height) return;
-    const zoom = clampZoom(Math.min(1, (r.width - 48) / layout.w, (r.height - 48) / layout.h));
-    setCam({ x: (r.width - layout.w * zoom) / 2, y: (r.height - layout.h * zoom) / 2, zoom });
-  }, [layout]);
-  fitRef.current = fitView;
-
   useEffect(() => {
     const id = window.setTimeout(() => {
       try { localStorage.setItem(STORE, JSON.stringify(plan)); } catch {}
@@ -481,6 +507,11 @@ export function AgentCompany() {
 
   useEffect(() => {
     try { localStorage.setItem(VIEW_KEY, view); } catch {}
+    if (view !== 'chart') {
+      setSelectedEdge(null);
+      setSelectedLink(null);
+      setSelectedChart(null);
+    }
   }, [view]);
 
   useEffect(() => {
@@ -495,34 +526,9 @@ export function AgentCompany() {
     return () => { alive = false; };
   }, []);
 
-  useEffect(() => {
-    if (view !== 'chart') return;
-    const el = canvasRef.current;
-    if (!el) return;
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      if (e.ctrlKey || e.metaKey) {
-        const r = el.getBoundingClientRect();
-        const px = e.clientX - r.left;
-        const py = e.clientY - r.top;
-        setCam((c) => {
-          const zoom = clampZoom(c.zoom * (e.deltaY < 0 ? 1.12 : 1 / 1.12));
-          const k = zoom / c.zoom;
-          return { zoom, x: px - (px - c.x) * k, y: py - (py - c.y) * k };
-        });
-      } else {
-        setCam((c) => ({ ...c, x: c.x - e.deltaX, y: c.y - e.deltaY }));
-      }
-    };
-    el.addEventListener('wheel', onWheel, { passive: false });
-    return () => el.removeEventListener('wheel', onWheel);
-  }, [view]);
 
-  useEffect(() => {
-    if (view !== 'chart') return;
-    const raf = window.requestAnimationFrame(() => fitRef.current());
-    return () => window.cancelAnimationFrame(raf);
-  }, [view]);
+
+
 
   useEffect(() => {
     if (view !== 'plan' || !focusId) return;
@@ -563,7 +569,82 @@ export function AgentCompany() {
     setPlan((p) => ({ ...p, agents: p.agents.map((a) => (a.id === id ? { ...a, ...fields } : a)) }));
   };
 
-  const addAgent = (parentId: string | null, afterId?: string) => {
+  // ── Flow editörü ──────────────────────────────────────────────────────
+  const historyRef = useRef<Plan[]>([]);
+  /** Geri alınan işlemler: ileri (redo) için tutulur. */
+  const redoRef = useRef<Plan[]>([]);
+  const pushHistory = () => {
+    historyRef.current.push(planRef.current);
+    if (historyRef.current.length > 40) historyRef.current.shift();
+    redoRef.current = [];
+  };
+  const undo = () => {
+    const prev = historyRef.current.pop();
+    if (!prev) return;
+    redoRef.current.push(planRef.current);
+    setPlan(prev);
+  };
+  const redo = () => {
+    const next = redoRef.current.pop();
+    if (!next) return;
+    historyRef.current.push(planRef.current);
+    setPlan(next);
+  };
+  /** Hedefin atalarında `candidate` varsa bağlantı çevrim oluşturur. */
+  const isAncestor = (candidate: string, of: string) => {
+    let p = byId.get(of)?.parentId ?? null;
+    const seen = new Set<string>();
+    while (p) {
+      if (p === candidate) return true;
+      if (seen.has(p)) break;
+      seen.add(p);
+      p = byId.get(p)?.parentId ?? null;
+    }
+    return false;
+  };
+  const connect = (from: string, to: string) => {
+    if (!from || !to || from === to || isAncestor(to, from)) {
+      return;
+    }
+    pushHistory();
+    setPlan((p) => ({
+      ...p,
+      agents: p.agents.map((a) => (a.id === to ? { ...a, parentId: from } : a)),
+    }));
+    setSelectedEdge(to);
+    setSelectedLink(null);
+    setSelectedChart(null);
+  };
+  const detach = (childId: string) => {
+    if (!byId.get(childId)?.parentId) return;
+    pushHistory();
+    setPlan((p) => ({
+      ...p,
+      agents: p.agents.map((a) => (a.id === childId ? { ...a, parentId: null } : a)),
+    }));
+    setSelectedEdge(null);
+  };
+
+  /** Hiyerarşi dışı bağ: karttan karta serbest ilişki. */
+  const addLink = (from: string, to: string) => {
+    if (!from || !to || from === to) return;
+    const id = linkUid();
+    pushHistory();
+    setPlan((p) => ({ ...p, links: [...p.links, { id, from, to, label: '', note: '' }] }));
+    setSelectedLink(id);
+    setSelectedEdge(null);
+    setSelectedChart(null);
+  };
+  const patchLink = (id: string, fields: Partial<AgentLink>) => {
+    setPlan((p) => ({ ...p, links: p.links.map((l) => (l.id === id ? { ...l, ...fields } : l)) }));
+  };
+  const removeLink = (id: string) => {
+    pushHistory();
+    setPlan((p) => ({ ...p, links: p.links.filter((l) => l.id !== id) }));
+    setSelectedLink(null);
+  };
+
+  const addAgent = (parentId: string | null, afterId?: string, stayInView = false) => {
     const id = uid();
     const agent: PlanAgent = {
       id,
@@ -574,6 +655,7 @@ export function AgentCompany() {
       resp: '',
       model: activeModel,
     };
+    pushHistory();
     setPlan((p) => {
       const list = [...p.agents];
       let at = list.length;
@@ -584,7 +666,16 @@ export function AgentCompany() {
         const i = list.findIndex((a) => a.id === parentId);
         if (i >= 0) at = subtreeEnd(list, i);
       }
-      list.splice(at, 0, agent);
+      // Serbest konum modunda yeni ajanı ebeveyninin altına yerleştir;
+      // aksi halde otomatik hiyerarşi konumlandırır.
+      const nextAgent = { ...agent };
+      if (p.agents.some((a) => Number.isFinite(a.x) && Number.isFinite(a.y))) {
+        const parent = parentId ? p.agents.find((a) => a.id === parentId) : null;
+        const siblings = p.agents.filter((a) => a.parentId === parentId);
+        nextAgent.x = (parent?.x ?? 60) + siblings.length * (NODE_W + GAP_X);
+        nextAgent.y = parent ? (parent.y ?? 60) + NODE_H + GAP_Y : 60;
+      }
+      list.splice(at, 0, nextAgent);
       return { ...p, agents: list };
     });
     if (parentId) {
@@ -594,7 +685,9 @@ export function AgentCompany() {
         return next;
       });
     }
-    setView('plan');
+    if (!stayInView) setView('plan');
+    else setFlowFitNonce((n) => n + 1);
+    setSelectedChart(id);
     setFocusId(id);
   };
 
@@ -604,6 +697,8 @@ export function AgentCompany() {
   };
 
   const addChild = (id: string) => addAgent(id);
+  /** Flow'da kalarak alt ajan ekle. */
+  const addChildInFlow = (id: string) => addAgent(id, undefined, true);
 
   const indent = (id: string) => {
     setPlan((p) => {
@@ -673,6 +768,7 @@ export function AgentCompany() {
       return {
         ...p,
         agents: p.agents.filter((a) => a.id !== id).map((a) => (a.parentId === id ? { ...a, parentId } : a)),
+        links: p.links.filter((l) => l.from !== id && l.to !== id),
       };
     });
     setExpandedId((v) => (v === id ? null : v));
@@ -682,6 +778,45 @@ export function AgentCompany() {
       return next;
     });
   };
+
+  // Flow kısayolları: Ctrl+Z geri al, Delete seçili düğüm/bağlantıyı sil,
+  // Esc bağlantı/ seçim modunu kapat. Input içinde yazarken dokunma.
+  useEffect(() => {
+    if (!active || view !== 'chart') return;
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      const typing = !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
+      if (typing) return;
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+        e.preventDefault();
+        redo();
+        return;
+      }
+      if (e.key === 'Escape') {
+        setSelectedEdge(null);
+        setSelectedLink(null);
+        setSelectedChart(null);
+        return;
+      }
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selectedEdge) {
+          e.preventDefault();
+          detach(selectedEdge);
+        } else if (selectedLink) {
+          e.preventDefault();
+          removeLink(selectedLink);
+        }
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [view, active, selectedEdge, selectedLink, selectedChart]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleCollapse = (id: string) => {
     setCollapsed((prev) => {
@@ -703,7 +838,7 @@ export function AgentCompany() {
       resp: d.resp,
       model: activeModel,
     })));
-    setPlan((p) => ({ ...p, agents: agentsNext }));
+    setPlan((p) => ({ ...p, agents: agentsNext, links: [] }));
     setExpandedId(null);
     setCollapsed(new Set());
     setFocusId(null);
@@ -732,7 +867,9 @@ export function AgentCompany() {
 
   const copyPlan = async () => {
     try {
-      await navigator.clipboard.writeText(toMarkdown(plan, t('company.title'), t('company.newName')));
+      await navigator.clipboard.writeText(
+        toMarkdown(plan, t('company.title'), t('company.newName'), t('company.connections'))
+      );
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1500);
     } catch {}
@@ -768,6 +905,7 @@ export function AgentCompany() {
       setPlan((p) => ({
         ...p,
         agents: next.map((a) => ({ ...a, model: a.model || activeModel })),
+        links: [],
       }));
       setExpandedId(null);
       setCollapsed(new Set());
@@ -787,23 +925,6 @@ export function AgentCompany() {
         setAiLoading(false);
       }
     }
-  };
-
-  const startPan = (e: RPointerEvent<HTMLDivElement>) => {
-    if (e.button !== 0) return;
-    e.currentTarget.setPointerCapture(e.pointerId);
-    panRef.current = { x: e.clientX, y: e.clientY, camX: cam.x, camY: cam.y };
-  };
-
-  const movePan = (e: RPointerEvent<HTMLDivElement>) => {
-    const p = panRef.current;
-    if (!p) return;
-    setCam((c) => ({ ...c, x: p.camX + e.clientX - p.x, y: p.camY + e.clientY - p.y }));
-  };
-
-  const endPan = (e: RPointerEvent<HTMLDivElement>) => {
-    panRef.current = null;
-    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
   };
 
   const tplList: Array<{ key: TplKey; name: string; desc: string; count: number }> = [
@@ -878,6 +999,27 @@ export function AgentCompany() {
         </div>
       </div>
     );
+  };
+
+  const flowProps = {
+    agents,
+    links: plan.links,
+    selectedNodeId: selectedChart,
+    selectedEdgeId: selectedEdge,
+    selectedLinkId: selectedLink,
+    fitNonce: flowFitNonce,
+    onSelectNode: (id: string | null) => { setSelectedChart(id); setSelectedEdge(null); setSelectedLink(null); },
+    onSelectEdge: (childId: string | null) => { setSelectedEdge(childId); setSelectedChart(null); setSelectedLink(null); },
+    onSelectLink: (id: string | null) => { setSelectedLink(id); setSelectedChart(null); setSelectedEdge(null); },
+    onMove: (id: string, x: number, y: number) => patch(id, { x, y }),
+    onDragStart: pushHistory,
+    onLink: connect,
+    onRequestLink: addLink,
+    onDetach: detach,
+    onDelete: (id: string) => { pushHistory(); remove(id); setSelectedChart(null); setSelectedLink(null); },
+    onAdd: () => addAgent(null, undefined, true),
+    onAddChild: addChildInFlow,
+    onOpenPlan: openInPlan,
   };
 
   const rows: ReactNode[] = [];
@@ -975,7 +1117,7 @@ export function AgentCompany() {
   walkRows(null, 0);
 
   return (
-    <div className="relative flex h-full min-h-0 min-w-0 flex-col bg-[#0F0E0E] text-[#E8E4DA]">
+    <div className="relative flex h-full w-full min-h-0 min-w-0 flex-1 flex-col bg-[#0F0E0E] text-[#E8E4DA]">
       <datalist id="tlm-agent-models">
         {modelOptions.map((m) => <option key={m.id} value={m.id}>{m.label ?? m.id}</option>)}
       </datalist>
@@ -990,7 +1132,7 @@ export function AgentCompany() {
               view === v ? 'text-[#EDE9DD]' : 'text-[#87857F] hover:text-[#C9C5BA]'
             }`}
           >
-            {v === 'plan' ? t('company.plan') : v === 'chart' ? t('company.chart') : t('company.office')}
+            {v === 'plan' ? t('company.plan') : v === 'chart' ? t('company.flow') : t('company.office')}
             {view === v && <span className="absolute inset-x-1 -bottom-px h-[1.5px] bg-[#dcb67a]" />}
           </button>
         ))}
@@ -1002,30 +1144,54 @@ export function AgentCompany() {
           className="h-6 w-[150px] min-w-[56px] shrink rounded-[3px] border border-transparent bg-transparent px-1 text-[11px] text-[#E8E4DA] outline-none placeholder:text-[#565248] hover:border-[#24221F] focus:border-[#2F2D28]"
         />
         <div className="ml-auto flex shrink-0 items-center gap-0.5">
-          <button type="button" onClick={() => setDialog('tpl')} className={TB}>
-            {t('company.templates')}
-            <ChevronDown size={10} />
-          </button>
-          <button
-            type="button"
-            onClick={() => { setAiError(null); setDialog('ai'); }}
-            className={TB}
-            title={t('company.aiPlan')}
-          >
-            <Sparkles size={11} />
-            {t('company.aiShort')}
-          </button>
-          <button type="button" onClick={copyPlan} className={TBI} title={t('company.copyPlan')}>
-            <Copy size={12} />
-          </button>
-          <button type="button" onClick={() => addAgent(null)} className={PRIMARY}>
-            <Plus size={12} />
-            {t('company.add')}
-          </button>
+          {view === 'chart' && (
+            <>
+              <button type="button" onClick={undo} className={TBI} title={t('company.undo')}>
+                <Undo2 size={12} />
+              </button>
+              <button type="button" onClick={redo} className={TBI} title={t('company.redo')}>
+                <Redo2 size={12} />
+              </button>
+            </>
+          )}
+          {view !== 'office' && (
+            <>
+              <button type="button" onClick={() => setDialog('tpl')} className={TB}>
+                {t('company.templates')}
+                <ChevronDown size={10} />
+              </button>
+              <button
+                type="button"
+                onClick={() => { setAiError(null); setDialog('ai'); }}
+                className={TB}
+                title={t('company.aiPlan')}
+              >
+                <Sparkles size={11} />
+                {t('company.aiShort')}
+              </button>
+              <button type="button" onClick={copyPlan} className={TBI} title={t('company.copyPlan')}>
+                <Copy size={12} />
+              </button>
+            </>
+          )}
+          {/* Flow'da Run, Add agent'ın sağında aynı tasarımda durur (alt
+              köşedeki minik yeşil çip yerine). */}
+          {view === 'chart' && agents.length > 0 && (
+            <button type="button" onClick={() => setShowRun(true)} className={NEUTRAL} title={t('company.runHint')}>
+              <Play size={11} />
+              {t('company.run')}
+            </button>
+          )}
+          {view !== 'office' && (
+            <button type="button" onClick={() => addAgent(null, undefined, view === 'chart')} className={NEUTRAL}>
+              <Plus size={12} />
+              {t('company.add')}
+            </button>
+          )}
         </div>
       </div>
 
-      {view === 'plan' ? (
+      {view === 'plan' && (
         <div ref={planScrollRef} className="min-h-0 flex-1 overflow-y-auto">
           {agents.length === 0 ? (
             <div className="mx-auto flex min-h-full w-full max-w-[520px] flex-col justify-center px-5 py-12">
@@ -1071,82 +1237,42 @@ export function AgentCompany() {
             <div className="mx-auto w-full max-w-[780px] px-4 py-3">{rows}</div>
           )}
         </div>
-      ) : view === 'chart' ? (
-        <div
-          ref={canvasRef}
-          onPointerDown={startPan}
-          onPointerMove={movePan}
-          onPointerUp={endPan}
-          onPointerCancel={endPan}
-          className="relative min-h-0 flex-1 cursor-grab select-none overflow-hidden bg-[#0D0C0C] active:cursor-grabbing"
-          style={{
-            backgroundImage: 'linear-gradient(rgba(255,255,255,0.022) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.022) 1px, transparent 1px)',
-            backgroundSize: '32px 32px',
-          }}
-        >
-          <div
-            className="absolute left-0 top-0 origin-top-left"
-            style={{ transform: `translate(${cam.x}px, ${cam.y}px) scale(${cam.zoom})`, width: layout.w, height: layout.h }}
-          >
-            <svg width={layout.w} height={layout.h} className="absolute left-0 top-0 overflow-visible">
-              {layout.edges.map((e) => {
-                const x1 = e.from.x + NODE_W / 2;
-                const y1 = e.from.y + NODE_H;
-                const x2 = e.to.x + NODE_W / 2;
-                const y2 = e.to.y;
-                const mid = y1 + (y2 - y1) / 2;
-                return (
-                  <path
-                    key={`${e.from.agent.id}-${e.to.agent.id}`}
-                    d={`M ${x1} ${y1} V ${mid} H ${x2} V ${y2}`}
-                    fill="none"
-                    stroke="#2E2B26"
-                    strokeWidth={1.25}
-                  />
-                );
-              })}
-            </svg>
-            {layout.nodes.map((n) => {
-              const root = !n.agent.parentId;
-              return (
-                <div
-                  key={n.agent.id}
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onClick={() => openInPlan(n.agent.id)}
-                  style={{ left: n.x, top: n.y, width: NODE_W, height: NODE_H }}
-                  className={`absolute flex cursor-pointer flex-col justify-center rounded-[4px] border bg-[#151412] px-2.5 hover:bg-[#191816] ${
-                    root ? 'border-[#3A3429] hover:border-[#4E463A]' : 'border-[#282620] hover:border-[#3C3830]'
-                  }`}
-                >
-                  <div className="flex items-center gap-1.5">
-                    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${root ? 'bg-[#dcb67a]' : 'bg-[#4385BE]'}`} />
-                    <span className="truncate text-[11.5px] font-medium text-[#E8E4DA]">
-                      {n.agent.name || t('company.newName')}
-                    </span>
-                  </div>
-                  <div className="mt-0.5 truncate pl-3 text-[9.5px] text-[#8C877B]">
-                    {n.agent.role || t('company.roleDefault')}
-                  </div>
-                </div>
-              );
-            })}
+      )}
+
+      {(chartReady || view === 'chart') && (
+        <div className={`relative flex min-h-0 flex-1 flex-col ${view === 'chart' ? '' : 'hidden'}`}>
+          <div className="min-h-0 flex-1">
+            <FlowEditorX6 {...flowProps} />
           </div>
-          {layout.empty && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2.5 px-6 text-center">
-              <p className="text-[11px] text-[#7C776B]">{t('company.emptyPlan')}</p>
-              <button type="button" onClick={() => addAgent(null)} className={PRIMARY}>
-                <Plus size={12} />
-                {t('company.firstAgent')}
-              </button>
+
+          {/* Flow içinde gerçek çok-ajan çalıştırma: ayrı sekme değil,
+              aynı ajan yüzeyinin devamı. */}
+          {showRun && (
+            <div className="absolute inset-0 z-20 flex flex-col bg-[#0F0E0E]">
+              <div className="flex h-8 shrink-0 items-center gap-2 border-b border-[#24221F] px-2">
+                <button type="button" onClick={() => setShowRun(false)} className={TB}>
+                  <ArrowLeft size={11} /> {t('company.backToFlow')}
+                </button>
+                <span className="truncate text-[10px] text-[#87857F]">{t('company.runTitle')}</span>
+              </div>
+              <div className="flex min-h-0 flex-1">
+                <AgentMesh
+                  embedded
+                  initialTask={agents.find((a) => !a.parentId)?.mission || plan.name}
+                />
+              </div>
             </div>
           )}
         </div>
-      ) : (
+      )}
+
+      {view === 'office' && (
         <div className="relative min-h-0 flex-1 overflow-hidden bg-[#20242c]">
           <PixelOffice
             agents={agents}
-            selected={null}
-            onSelect={(id) => { if (id) openInPlan(id); }}
+            selected={selectedOffice}
+            onSelect={setSelectedOffice}
+            onActivate={(id) => openInPlan(id)}
           />
           {agents.length === 0 && (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[11px] text-[#6E6B66]">
@@ -1156,20 +1282,269 @@ export function AgentCompany() {
         </div>
       )}
 
-      <div className="flex h-6 shrink-0 items-center gap-2 border-t border-[#24221F] px-2 text-[9.5px] text-[#7C776B]">
+      {/* Ajan düzenleme: akışın üstünde ortalanmış pencere. */}
+      {view === 'chart' && selectedChart && (() => {
+        const agent = byId.get(selectedChart);
+        if (!agent) return null;
+        return (
+          <div
+            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/55 p-4"
+            onMouseDown={(e) => { if (e.target === e.currentTarget) setSelectedChart(null); }}
+          >
+            <div
+              className="flex max-h-[86vh] w-full max-w-[540px] flex-col overflow-hidden rounded-lg border border-[#34332F] bg-[#151412] shadow-2xl"
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <div className="flex shrink-0 items-center gap-2.5 border-b border-[#24221F] px-3 py-2.5">
+                <img
+                  src={agentHeadDataUrl(agent.id)}
+                  alt=""
+                  width={32}
+                  height={32}
+                  className="h-8 w-8 shrink-0 rounded-[4px] border border-black/40"
+                  style={{ imageRendering: 'pixelated' }}
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[12.5px] font-semibold text-[#EDE9DD]">
+                    {agent.name || t('company.newName')}
+                  </div>
+                  <div className="truncate text-[10px] text-[#8C877B]">
+                    {agent.role || t('company.roleDefault')}
+                  </div>
+                </div>
+                <button type="button" onClick={() => setSelectedChart(null)} className={TBI} aria-label={t('company.cancel')}>
+                  <X size={13} />
+                </button>
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3 pretty-scrollbar">
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="block min-w-0">
+                    <span className={LABEL}>{t('company.name')}</span>
+                    <input className={FIELD} value={agent.name} onChange={(e) => patch(agent.id, { name: e.target.value })} />
+                  </label>
+                  <label className="block min-w-0">
+                    <span className={LABEL}>{t('company.role')}</span>
+                    <input
+                      className={FIELD}
+                      value={agent.role}
+                      onChange={(e) => patch(agent.id, { role: e.target.value })}
+                      placeholder={t('company.roleDefault')}
+                    />
+                  </label>
+                </div>
+                <label className="mt-2.5 block">
+                  <span className={LABEL}>{t('company.task')}</span>
+                  <textarea
+                    rows={2}
+                    className={`${FIELD} resize-none`}
+                    value={agent.mission}
+                    onChange={(e) => patch(agent.id, { mission: e.target.value })}
+                    placeholder={t('company.instructionsPlaceholder')}
+                  />
+                </label>
+                <label className="mt-2.5 block">
+                  <span className={LABEL}>{t('company.responsibilities')}</span>
+                  <textarea
+                    rows={4}
+                    className={`${FIELD} resize-none`}
+                    value={agent.resp}
+                    onChange={(e) => patch(agent.id, { resp: e.target.value })}
+                    placeholder={t('company.responsibilitiesHint')}
+                  />
+                </label>
+                <label className="mt-2.5 block">
+                  <span className={LABEL}>{t('company.model')}</span>
+                  <input
+                    className={FIELD}
+                    list="tlm-agent-models"
+                    value={agent.model}
+                    onChange={(e) => patch(agent.id, { model: e.target.value })}
+                    placeholder={activeModel || t('company.model')}
+                  />
+                </label>
+                <div className="mt-2.5 flex items-center justify-between gap-2 text-[9.5px] text-[#7C776B]">
+                  <span className="truncate">
+                    {agent.parentId
+                      ? `${t('company.reportsTo')}: ${byId.get(agent.parentId)?.name || t('company.newName')}`
+                      : t('company.rootAgent')}
+                  </span>
+                  <span className="shrink-0">{t('company.directReports')}: {kids.get(agent.id)?.length ?? 0}</span>
+                </div>
+              </div>
+
+              <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-t border-[#24221F] px-3 py-2">
+                <button type="button" onClick={() => openInPlan(agent.id)} className={PRIMARY}>
+                  {t('company.openPlan')}
+                </button>
+                <button type="button" onClick={() => addChildInFlow(agent.id)} className={NEUTRAL}>
+                  <Plus size={10} /> {t('company.addChild')}
+                </button>
+                {agent.parentId && (
+                  <button
+                    type="button"
+                    onClick={() => { pushHistory(); patch(agent.id, { parentId: null }); }}
+                    className={NEUTRAL}
+                  >
+                    {t('company.makeRoot')}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => { pushHistory(); remove(agent.id); setSelectedChart(null); }}
+                  className="ml-auto flex items-center gap-1 rounded px-1.5 py-1 text-[10px] text-[#B98A82] hover:bg-[#2A1715] hover:text-[#E06C75] cursor-pointer"
+                >
+                  <Trash2 size={10} /> {t('company.deleteAgent')}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Bağlantı düzenleme: sağ tıkla kurulan bağın anlamı ve amacı. */}
+      {view === 'chart' && (() => {
+        const link = selectedLink ? plan.links.find((l) => l.id === selectedLink) : null;
+        const hierChild = !link && selectedEdge ? byId.get(selectedEdge) : null;
+        const from = byId.get(link?.from ?? hierChild?.parentId ?? '');
+        const to = byId.get(link?.to ?? hierChild?.id ?? '');
+        if ((!link && !hierChild) || !from || !to) return null;
+        const close = () => { setSelectedLink(null); setSelectedEdge(null); };
+        return (
+          <div
+            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/55 p-4"
+            onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}
+          >
+            <div
+              className="w-full max-w-[460px] overflow-hidden rounded-lg border border-[#34332F] bg-[#151412] shadow-2xl"
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-2 border-b border-[#24221F] px-3 py-2.5">
+                <div className="flex min-w-0 flex-1 items-center gap-2">
+                  <img
+                    src={agentHeadDataUrl(from.id)}
+                    alt=""
+                    width={26}
+                    height={26}
+                    className="h-[26px] w-[26px] shrink-0 rounded-[4px] border border-black/40"
+                    style={{ imageRendering: 'pixelated' }}
+                  />
+                  <div className="min-w-0">
+                    <div className="truncate text-[11.5px] font-medium text-[#EDE9DD]">{from.name || t('company.newName')}</div>
+                    <div className="truncate text-[9.5px] text-[#7C776B]">{from.role || t('company.roleDefault')}</div>
+                  </div>
+                  <span className="shrink-0 px-0.5 text-[#6B675D]">→</span>
+                  <img
+                    src={agentHeadDataUrl(to.id)}
+                    alt=""
+                    width={26}
+                    height={26}
+                    className="h-[26px] w-[26px] shrink-0 rounded-[4px] border border-black/40"
+                    style={{ imageRendering: 'pixelated' }}
+                  />
+                  <div className="min-w-0">
+                    <div className="truncate text-[11.5px] font-medium text-[#EDE9DD]">{to.name || t('company.newName')}</div>
+                    <div className="truncate text-[9.5px] text-[#7C776B]">{to.role || t('company.roleDefault')}</div>
+                  </div>
+                </div>
+                <button type="button" onClick={close} className={TBI} aria-label={t('company.cancel')}>
+                  <X size={13} />
+                </button>
+              </div>
+
+              <div className="px-3 py-3">
+                <div className="text-[9px] uppercase tracking-[0.08em] text-[#7C776B]">
+                  {link ? t('company.connection') : t('company.chart')}
+                </div>
+                {link ? (
+                  <>
+                    <div className="mt-1.5 flex flex-wrap gap-1">
+                      {REL_PRESETS.map((key) => {
+                        const text = t(key);
+                        const active = link.label.trim() === text;
+                        return (
+                          <button
+                            key={key}
+                            type="button"
+                            onClick={() => patchLink(link.id, { label: text })}
+                            className={`rounded border px-1.5 py-1 text-[10px] cursor-pointer ${
+                              active
+                                ? 'border-[#dcb67a]/60 bg-[#dcb67a]/10 text-[#EDE9DD]'
+                                : 'border-[#2A2825] text-[#A8A397] hover:border-[#3C3830] hover:text-[#E8E4DA]'
+                            }`}
+                          >
+                            {text}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <label className="mt-2.5 block">
+                      <span className={LABEL}>{t('company.linkLabel')}</span>
+                      <input
+                        className={FIELD}
+                        value={link.label}
+                        onChange={(e) => patchLink(link.id, { label: e.target.value })}
+                        placeholder={t('company.linkLabelPlaceholder')}
+                      />
+                    </label>
+                    <label className="mt-2.5 block">
+                      <span className={LABEL}>{t('company.linkNote')}</span>
+                      <textarea
+                        rows={2}
+                        className={`${FIELD} resize-none`}
+                        value={link.note}
+                        onChange={(e) => patchLink(link.id, { note: e.target.value })}
+                        placeholder={t('company.linkNotePlaceholder')}
+                      />
+                    </label>
+                  </>
+                ) : (
+                  <p className="mt-1.5 text-[11px] leading-snug text-[#A8A397]">
+                    {t('company.linkHierarchyHint', {
+                      from: from.name || t('company.newName'),
+                      to: to.name || t('company.newName'),
+                    })}
+                  </p>
+                )}
+              </div>
+
+              <div className="flex items-center gap-1.5 border-t border-[#24221F] px-3 py-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (link) removeLink(link.id);
+                    else if (hierChild) detach(hierChild.id);
+                    close();
+                  }}
+                  className="flex items-center gap-1 rounded px-1.5 py-1 text-[10px] text-[#B98A82] hover:bg-[#2A1715] hover:text-[#E06C75] cursor-pointer"
+                >
+                  <Trash2 size={10} /> {t('company.deleteEdge')}
+                </button>
+                <button type="button" onClick={close} className={`${NEUTRAL} ml-auto`}>
+                  {link ? t('company.save') : t('company.cancel')}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      <div className="flex h-6 shrink-0 items-center gap-2 border-t border-[#24221F] px-2 text-[10px] text-[#8C877B]">
+        {/* Sayaç: sayılar belirgin, etiketler soluk — küçük gri satır değil. */}
         <span className="shrink-0 whitespace-nowrap">
-          {t('company.agentCount', { n: agents.length })} · {t('company.levelCount', { n: levels })}
+          <span className="font-medium text-[#E8E4DA]">{agents.length}</span> {t('company.agentCount', { n: '' }).replace(/^\s*/, '')}
+          {' · '}
+          <span className="font-medium text-[#E8E4DA]">{levels}</span> {t('company.levelCount', { n: '' }).replace(/^\s*/, '')}
+          {plan.links.length > 0 && (
+            <>
+              {' · '}
+              <span className="font-medium text-[#E8E4DA]">{plan.links.length}</span>{' '}
+              {t('company.linkCount', { n: '' }).replace(/^\s*/, '')}
+            </>
+          )}
         </span>
         {copied && <span className="shrink-0 text-[#dcb67a]">{t('company.copied')}</span>}
         <span className="ml-auto flex min-w-0 items-center gap-2 overflow-hidden">
-          {view === 'chart' && (
-            <>
-              <span className="shrink-0 tabular-nums">{Math.round(cam.zoom * 100)}%</span>
-              <button type="button" onClick={fitView} className="shrink-0 hover:text-[#E8E4DA]">
-                {t('company.fit')}
-              </button>
-            </>
-          )}
           <span className="truncate">
             {view === 'plan' ? t('company.planHint') : view === 'chart' ? t('company.chartHint') : t('company.officeHint')}
           </span>

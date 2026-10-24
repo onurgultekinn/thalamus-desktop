@@ -101,14 +101,14 @@ export function useAutoMinWidth(
  */
 export function useFloatingPanel(
   id: string,
-  opts: { def: Rect; min?: { w: number; h: number } },
+  opts: { def: Rect; min?: { w: number; h: number }; alwaysFloating?: boolean },
 ): UseFloating {
   const minH = opts.min?.h ?? 160;
   const initRef = useRef<Persisted | null>(null);
   if (initRef.current === null) initRef.current = load(id, opts.def);
   const init = initRef.current;
 
-  const [floating, setFloating] = useState(init.floating);
+  const [floating, setFloating] = useState(opts.alwaysFloating ? true : init.floating);
   const [rect, setRect] = useState<Rect>({ x: init.x, y: init.y, w: init.w, h: init.h });
   const [minW, setMinW] = useState<number>(opts.min?.w ?? 260);
   const minWRef = useRef(minW);

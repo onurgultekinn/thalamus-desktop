@@ -1,14 +1,56 @@
 import { Fragment, memo, useEffect, useRef, useState, type RefObject } from 'react';
 import { FileCode2, FolderOpen, KeyRound, Gauge, Pencil } from 'lucide-react';
+import { AskQuestionCard } from './AskQuestionCard';
 import { MarkdownMessage } from './MarkdownMessage';
 import { StreamingMessage } from './StreamingMarkdown';
 import { TextDivider } from './TextDivider';
 import { useToast } from './Toast';
+import { askQuestionAsText } from '../lib/askQuestion';
 import { useT } from '../lib/i18n';
 import type { Message } from '../types';
 
 /** Gecikme: 1 sn altı ms, üstü tek ondalıkla saniye. */
 const fmtLatency = (ms: number) => (ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`);
+
+/**
+ * Düşünme bloğu: model yazarken içerik uzar; kullanıcı yukarı kaydırıp okumaya
+ * çıkmadıysa görünüm kendiliğinden en yeni satırda kalır.
+ */
+function ReasoningBlock({ text, streaming }: { text: string; streaming?: boolean }) {
+  const t = useT();
+  const preRef = useRef<HTMLPreElement>(null);
+  const stickRef = useRef(true);
+  // Akış sürerken blok kendiliğinden açık gelir ve en yeni satırı izler;
+  // kullanıcı kapatırsa dokunmayız, yukarı kaydırırsa takibi bırakırız.
+  const [open, setOpen] = useState(streaming);
+  useEffect(() => {
+    if (streaming) setOpen(true);
+  }, [streaming]);
+  useEffect(() => {
+    const el = preRef.current;
+    if (!el || !stickRef.current) return;
+    el.scrollTop = el.scrollHeight;
+  }, [text, open]);
+  return (
+    <details
+      className="msg-reasoning"
+      open={open}
+      onToggle={(e) => setOpen(e.currentTarget.open)}
+    >
+      <summary>{t('chat.reasoning')}</summary>
+      <pre
+        ref={preRef}
+        className="msg-reasoning-text pretty-scrollbar"
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 32;
+        }}
+      >
+        {text}
+      </pre>
+    </details>
+  );
+}
 
 /**
  * Rendering window: opening a long chat mounts every message, and each mount
@@ -27,6 +69,7 @@ const WINDOW_STEP = 30;
 function ChatViewInner({
   messages,
   loading,
+  loadingLabel,
   userName,
   onlinePricing,
   projectName,
@@ -37,12 +80,13 @@ function ChatViewInner({
   onOpenSettings,
   onEngineDiagnostic,
   onRegenerate,
-  onInspectDiff,
   onEditMessage,
+  onAnswerQuestion,
   hasProvider = false,
 }: {
   messages: Message[];
   loading: boolean;
+  loadingLabel?: string;
   userName: string;
   targetModel: string;
   onlinePricing: boolean;
@@ -55,9 +99,9 @@ function ChatViewInner({
   onOpenSettings: () => void;
   onEngineDiagnostic: () => void;
   onRegenerate: (idx: number) => void;
-  onInspectDiff: (msg: Message, idx: number) => void;
   /** Kullanıcı mesajını düzeltip o noktadan yeniden yanıt üretir. */
   onEditMessage: (idx: number, content: string) => void;
+  onAnswerQuestion: (idx: number, answer: string) => void;
   /** En az bir sağlayıcı anahtarı bağlı mı? Bağlıysa "model bağla" kartı gizlenir. */
   hasProvider?: boolean;
 }) {
@@ -200,6 +244,16 @@ function ChatViewInner({
           {visibleMessages.map((msg, i) => {
             const idx = windowStart + i;
             const latencyMs = msg.latencyMs ?? msg.metrics?.executionTimeMs;
+            const copyText = msg.content.trim() || (msg.question ? askQuestionAsText(msg.question) : '');
+            const liveContent = msg.streaming
+              ? msg.content.replace(/```(?:question|ask|soru)[\s\S]*$/i, '').trimEnd()
+              : msg.content;
+            // Akış yeni başladığında boş bir "hayalet" balon + alttaki yükleme
+            // kartı üst üste görünüyordu. İlk parça (cevap veya düşünme) gelene
+            // kadar balonu çizme; yükleme kartı tek başına kalsın.
+            if (msg.role === 'assistant' && msg.streaming && !liveContent.trim() && !msg.reasoning?.trim()) {
+              return null;
+            }
             return (
           <Fragment key={idx}>
 
@@ -232,18 +286,6 @@ function ChatViewInner({
                       </div>
                     </>
                   )}
-
-                  <div className="inner-divider" />
-                  <div className="flex flex-col items-start">
-                    <div className="column-label">{t('chat.codeChange')}</div>
-                    <button
-                      type="button"
-                      className="analytics-diff-btn"
-                      onClick={() => onInspectDiff(msg, idx)}
-                    >
-                      {t('chat.inspectChanges')}
-                    </button>
-                  </div>
                 </div>
               </div>
             )}
@@ -261,8 +303,16 @@ function ChatViewInner({
                   <div className="msg-header-right">
                     {msg.role === 'assistant' && (
                       <>
-                        {/* D1: modelName yoksa pazarlama modeli uydurma */}
-                        <span className="msg-model-name">{msg.modelName || t('chat.localMessage')}</span>
+                        {/* D1: modelName yoksa pazarlama modeli uydurma.
+                            Rozette yalnız MODEL id'si gösterilir; "Custom
+                            (OpenAI-compatible) · claude-..." gibi uzun etiket
+                            başlığa sıkışır — tam etiket tooltip'te durur. */}
+                        <span
+                          className="msg-model-name"
+                          title={msg.modelName || undefined}
+                        >
+                          {(msg.modelName || t('chat.localMessage')).split(' · ').pop()}
+                        </span>
                         <span className="dot-separator">·</span>
                         <span title={msg.streaming ? t('chat.streaming') : t('chat.latency')}>
                           {msg.streaming ? t('chat.streaming') : latencyMs ? fmtLatency(latencyMs) : '—'}
@@ -276,10 +326,7 @@ function ChatViewInner({
                     kapatmadıysa gelir. Varsayılan KAPALI gelir (gürültü değil,
                     isteğe bağlı ayrıntı); tıklayınca açılır. */}
                 {msg.role === 'assistant' && !!msg.reasoning?.trim() && (
-                  <details className="msg-reasoning">
-                    <summary>{t('chat.reasoning')}</summary>
-                    <pre className="msg-reasoning-text pretty-scrollbar">{msg.reasoning.trim()}</pre>
-                  </details>
+                  <ReasoningBlock text={msg.reasoning.trim()} streaming={msg.streaming} />
                 )}
 
                 {editingIdx === idx ? (
@@ -317,20 +364,34 @@ function ChatViewInner({
                     </div>
                   </div>
                 ) : (
-                  <div className={`mod-text ${msg.content.length > 300 && !msg.streaming && !msg.streamed ? 'msg-content-scrollable pretty-scrollbar' : ''}`}>
-                    {msg.streaming
-                      ? <StreamingMessage content={msg.content} />
-                      : <MarkdownMessage content={msg.content} />}
-                    {msg.stopped && (
-                      <div className="msg-stopped-note">
-                        {msg.stopped === 'timeout'
-                          ? t('chat.timeoutNote')
-                          : msg.stopped === 'error'
-                            ? t('chat.brokenNote')
-                            : t('chat.stoppedNote')}
+                  <>
+                    {(liveContent.trim().length > 0 || msg.stopped) && (
+                      <div className={`mod-text ${msg.content.length > 300 && !msg.streaming && !msg.streamed ? 'msg-content-scrollable pretty-scrollbar' : ''}`}>
+                        {msg.streaming
+                          ? <StreamingMessage content={liveContent} />
+                          : <MarkdownMessage content={msg.content} />}
+                        {msg.stopped && (
+                          <div className="msg-stopped-note">
+                            {msg.stopped === 'timeout'
+                              ? t('chat.timeoutNote')
+                              : msg.stopped === 'error'
+                                ? t('chat.brokenNote')
+                                : msg.stopped === 'length'
+                                  ? t('chat.lengthNote')
+                                  : t('chat.stoppedNote')}
+                          </div>
+                        )}
                       </div>
                     )}
-                  </div>
+                    {msg.role === 'assistant' && msg.question && !msg.streaming && (
+                      <AskQuestionCard
+                        question={msg.question}
+                        answered={msg.questionAnswer}
+                        disabled={loading || idx !== messages.length - 1}
+                        onAnswer={(answer) => onAnswerQuestion(idx, answer)}
+                      />
+                    )}
+                  </>
                 )}
 
                 <div className="msg-footer">
@@ -361,7 +422,7 @@ function ChatViewInner({
                       className="msg-btn-action"
                       title={t('chat.copy')}
                       onClick={() => {
-                        navigator.clipboard.writeText(msg.content)
+                        navigator.clipboard.writeText(copyText)
                           .then(() => showToast(t('chat.copied'), undefined, 'success'))
                           .catch(() => showToast(t('chat.copyFailed'), t('chat.copyFailedMsg'), 'error', undefined, '[500] clipboard unavailable'));
                       }}
@@ -374,16 +435,20 @@ function ChatViewInner({
                     <span>
                       {/* T7: her tahmin '≈' taşır; görsel mesajlar ek'teki ölçülmüş
                           estTokens'i toplar — '[1 image] = 1 tokens' yalanı gitti. */}
-                      {msg.metrics?.compressedTokens
-                        ? t('chat.tokens', { n: msg.metrics.compressedTokens })
-                        : msg.images?.length
-                          ? t('chat.tokensImageEst', { n: msg.images.reduce((s, i) => s + i.estTokens, 0) + (typeof msg.content === 'string' ? Math.ceil(msg.content.length / 4) : 0) })
-                          : t('chat.tokensEst', { n: Math.ceil(msg.content.length / 4) })}
+                      {msg.usage && (msg.usage.prompt_tokens || msg.usage.completion_tokens)
+                        ? t('chat.usage', { input: msg.usage.prompt_tokens ?? 0, output: msg.usage.completion_tokens ?? 0 })
+                        : msg.metrics?.compressedTokens
+                          ? t('chat.tokens', { n: msg.metrics.compressedTokens })
+                          : msg.images?.length
+                            ? t('chat.tokensImageEst', { n: msg.images.reduce((s, i) => s + i.estTokens, 0) + Math.ceil(copyText.length / 4) })
+                            : t('chat.tokensEst', { n: Math.ceil(copyText.length / 4) })}
                     </span>
-                    {onlinePricing && (
+                    {msg.engine && msg.engine.compressedTokens > 0 && msg.engine.compressedTokens < msg.engine.originalTokens && (
                       <>
                         <span className="dot-separator">·</span>
-                        <span>{msg.metrics?.cost || '—'}</span>
+                        <span className="text-[#3AA99F]" title={t('chat.engineTitle')}>
+                          {t('chat.engineBadge', { from: msg.engine.originalTokens, to: msg.engine.compressedTokens })}
+                        </span>
                       </>
                     )}
                     <span className="dot-separator">·</span>
@@ -391,8 +456,8 @@ function ChatViewInner({
                   </div>
                 </div>
 
-              </div>
             </div>
+          </div>
 
             {msg.role === 'assistant' && idx < messages.length - 1 && (
               <TextDivider />
@@ -404,22 +469,25 @@ function ChatViewInner({
         </>
       )}
 
-      {loading && (
-        <div className="msg-wrapper msg-assistant-left">
-          <div className="custom-loader-card">
-            <div className="custom-loader-container">
-              <span>{t('chat.processing')}</span>
-              <div className="custom-loader-words">
-                <span className="custom-loader-word">{t('chat.proc.models')}</span>
-                <span className="custom-loader-word">{t('chat.proc.prompts')}</span>
-                <span className="custom-loader-word">{t('chat.proc.keys')}</span>
-                <span className="custom-loader-word">{t('chat.proc.tokens')}</span>
-                <span className="custom-loader-word">{t('chat.proc.models')}</span>
+      {loading &&
+        !visibleMessages.some(
+          (m) => m.streaming && (m.content.trim() || m.reasoning?.trim())
+        ) && (
+          <div className="msg-wrapper msg-assistant-left">
+            <div className="custom-loader-card">
+              <div className="custom-loader-container">
+                <span>{loadingLabel || t('chat.processing')}</span>
+                <div className="custom-loader-words">
+                  <span className="custom-loader-word">{t('chat.proc.models')}</span>
+                  <span className="custom-loader-word">{t('chat.proc.prompts')}</span>
+                  <span className="custom-loader-word">{t('chat.proc.keys')}</span>
+                  <span className="custom-loader-word">{t('chat.proc.tokens')}</span>
+                  <span className="custom-loader-word">{t('chat.proc.models')}</span>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
       <div ref={chatEndRef} />
     </>

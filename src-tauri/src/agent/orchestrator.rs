@@ -427,6 +427,13 @@ pub fn start_run(
         )?)
     };
 
+    // Yerel modelde tüm koşu boyunca "meşgul" kal: sohbet sonu kapatma
+    // talebi ajanın ortasındaki turda süreci öldürmesin.
+    let lease = req
+        .base_url
+        .as_deref()
+        .and_then(crate::backend::serve::begin_use);
+
     let run_id = new_run_id();
     let agents = [&PLANNER, &CODER, &REVIEWER, &REPORTER]
         .iter()
@@ -464,6 +471,7 @@ pub fn start_run(
 
     let bpe2 = bpe.clone();
     std::thread::spawn(move || {
+        let _lease = lease;
         let result = run_pipeline(run.clone(), brain, bpe2, root, max_tasks);
         let mut r = lock(&run);
         let was_cancelled = r.state.status == "cancelled";

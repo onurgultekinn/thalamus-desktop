@@ -8,11 +8,15 @@
 // Kod bloklarına (fenced/inline) ve metne asla dokunulmaz; segment sırası
 // girdi sırasını birebir korur. Sıkıştırılamayan her şey ham kalır.
 use crate::engine::certification;
+use crate::engine::hw;
 use crate::engine::jscompress::JsonCompressor;
 use crate::engine::sanitize_json_string;
 use crate::engine::segments::{PromptSegmenter, Segment};
+use crate::engine::tokencache;
 use crate::engine::MINIMAL_DECODER_INSTRUCTION;
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::sync::OnceLock;
 use std::time::Instant;
 use tiktoken_rs::CoreBPE;
 
@@ -85,8 +89,26 @@ impl DecisionEngine {
 // ---------------------------------------------------------------------------
 // Segment analizi ve ana hat
 // ---------------------------------------------------------------------------
+
+/// Segment analizi icin donanima gore boyutlanmis is parcacigi havuzu.
+/// Zayif makinede tek is parcacik (paralellik getirisi gurultuye donusmesin),
+/// guclu makinede fiziksel cekirdekler kullanilir.
+fn engine_pool() -> &'static rayon::ThreadPool {
+    static POOL: OnceLock<rayon::ThreadPool> = OnceLock::new();
+    POOL.get_or_init(|| {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(hw::profile().engine_workers())
+            .thread_name(|i| format!("tlm-engine-{i}"))
+            .build()
+            .expect("engine thread pool")
+    })
+}
+
+/// Token sayimi: onbellek uzerinden. Sonuc deterministik oldugu icin
+/// memoizasyon kayipsizdir. Buyuk metinlerde ince tokenizer katmani kullanilir
+/// (tiktoken ile birebir ayni sonuc, daha hizli tarama).
 fn count_tokens(bpe: &CoreBPE, text: &str) -> usize {
-    bpe.encode_with_special_tokens(text).len()
+    tokencache::global().count_with(bpe, text, crate::engine::fasttok::count)
 }
 
 fn is_lossless(raw: &str, compressed: &str) -> bool {
@@ -121,82 +143,88 @@ pub fn process(raw_prompt: &str, bpe: &CoreBPE, veto_override: bool) -> String {
     }
 
     // AŞAMA 1 — ANALİZ: yalnız JSON/yapısal adaylar. Metin ve talimat dokunulmaz.
-    let mut candidates: Vec<Candidate> = Vec::new();
-
-    for seg in &segments {
-        match seg {
-            // Metin (talimat/prose) hiçbir zaman sıkıştırılmaz ve niyet
-            // tahmini yapılmaz. Koruma kararı yalnız çağıranın `preserve`
-            // ayarından gelir (D-040).
-            Segment::Text(_) => {}
-            Segment::Verbatim(_) => {
+    // Segmentler birbirinden bağımsızdır; deterministik sıra korunarak
+    // donanıma göre boyutlanmış havuzda paralel işlenir.
+    let candidates: Vec<Candidate> = engine_pool().install(|| {
+        segments
+            .par_iter()
+            .filter_map(|seg| match seg {
+                // Metin (talimat/prose) hiçbir zaman sıkıştırılmaz ve niyet
+                // tahmini yapılmaz. Koruma kararı yalnız çağıranın `preserve`
+                // ayarından gelir (D-040).
+                Segment::Text(_) => None,
                 // Fenced/inline kod: asla dokunulmaz.
-            }
-            Segment::Structured {
-                raw,
-                compressed,
-                kind,
-            } => {
-                // Segmenter yalnız kayıpsız doğrulanmış temsilleri üretir.
-                let raw_tokens = count_tokens(bpe, raw);
-                let candidate_tokens = count_tokens(bpe, compressed);
-                // SERTİFİKASYON EŞİĞİ: anlama kapısından geçmemiş veya bu
-                // aday için kazanç eşiğin altındaysa ham kalır (D-031).
-                let savings_pct = if raw_tokens == 0 {
-                    0.0
-                } else {
-                    100.0 * (raw_tokens.saturating_sub(candidate_tokens) as f64)
-                        / (raw_tokens as f64)
-                };
-                let certified = certification::plain_table_ok(*kind, savings_pct);
-                candidates.push(Candidate {
+                Segment::Verbatim(_) => None,
+                Segment::Structured {
                     raw,
-                    compressed: if certified {
-                        Some(compressed.clone())
+                    compressed,
+                    kind,
+                } => {
+                    // Segmenter yalnız kayıpsız doğrulanmış temsilleri üretir.
+                    let raw_tokens = count_tokens(bpe, raw);
+                    let candidate_tokens = count_tokens(bpe, compressed);
+                    // SERTİFİKASYON EŞİĞİ: anlama kapısından geçmemiş veya bu
+                    // aday için kazanç eşiğin altındaysa ham kalır (D-031).
+                    let savings_pct = if raw_tokens == 0 {
+                        0.0
                     } else {
-                        None
-                    },
-                    cost: CandidateCost {
-                        raw_tokens,
-                        optimized_tokens: if certified { candidate_tokens } else { raw_tokens },
-                        lossless: true,
-                    },
-                    structured: true,
-                });
-            }
-            Segment::Json(raw) | Segment::Data { raw, json: _ } => {
-                let raw_tokens = count_tokens(bpe, raw);
-                let mut cand = Candidate {
-                    raw,
-                    compressed: None,
-                    cost: CandidateCost {
-                        raw_tokens,
-                        optimized_tokens: raw_tokens,
-                        lossless: false,
-                    },
-                    structured: false,
-                };
-
-                let is_giant = raw.len() >= GIANT_PAYLOAD_THRESHOLD;
-                // Json segmentinde ham metin zaten JSON'dur; Data segmentinde
-                // ingest edilmiş kanonik JSON üzerinde çalışılır.
-                let source_json = match seg {
-                    Segment::Json(raw) => raw,
-                    Segment::Data { json, .. } => json.as_str(),
-                    _ => unreachable!(),
-                };
-                if let Ok(compressed) = JsonCompressor::compress(source_json, is_giant) {
-                    // compress() zaten kayıpsızlığı doğrular; reddederse ham kalır.
-                    if veto_override || is_lossless(source_json, &compressed) {
-                        cand.cost.optimized_tokens = count_tokens(bpe, &compressed);
-                        cand.cost.lossless = true;
-                        cand.compressed = Some(compressed);
-                    }
+                        100.0 * (raw_tokens.saturating_sub(candidate_tokens) as f64)
+                            / (raw_tokens as f64)
+                    };
+                    let certified = certification::plain_table_ok(*kind, savings_pct);
+                    Some(Candidate {
+                        raw,
+                        compressed: if certified {
+                            Some(compressed.clone())
+                        } else {
+                            None
+                        },
+                        cost: CandidateCost {
+                            raw_tokens,
+                            optimized_tokens: if certified {
+                                candidate_tokens
+                            } else {
+                                raw_tokens
+                            },
+                            lossless: true,
+                        },
+                        structured: true,
+                    })
                 }
-                candidates.push(cand);
-            }
-        }
-    }
+                Segment::Json(raw) | Segment::Data { raw, json: _ } => {
+                    let raw_tokens = count_tokens(bpe, raw);
+                    let mut cand = Candidate {
+                        raw,
+                        compressed: None,
+                        cost: CandidateCost {
+                            raw_tokens,
+                            optimized_tokens: raw_tokens,
+                            lossless: false,
+                        },
+                        structured: false,
+                    };
+
+                    let is_giant = raw.len() >= GIANT_PAYLOAD_THRESHOLD;
+                    // Json segmentinde ham metin zaten JSON'dur; Data segmentinde
+                    // ingest edilmiş kanonik JSON üzerinde çalışılır.
+                    let source_json = match seg {
+                        Segment::Json(raw) => raw,
+                        Segment::Data { json, .. } => json.as_str(),
+                        _ => unreachable!(),
+                    };
+                    if let Ok(compressed) = JsonCompressor::compress(source_json, is_giant) {
+                        // compress() zaten kayıpsızlığı doğrular; reddederse ham kalır.
+                        if veto_override || is_lossless(source_json, &compressed) {
+                            cand.cost.optimized_tokens = count_tokens(bpe, &compressed);
+                            cand.cost.lossless = true;
+                            cand.compressed = Some(compressed);
+                        }
+                    }
+                    Some(cand)
+                }
+            })
+            .collect()
+    });
 
     if candidates.is_empty() {
         return raw_prompt.to_string();

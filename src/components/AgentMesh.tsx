@@ -123,11 +123,12 @@ function MessageCard({ msg }: { msg: WireMessage }) {
   );
 }
 
-export function AgentMesh() {
+export function AgentMesh({ embedded = false, initialTask = '' }: { embedded?: boolean; initialTask?: string } = {}) {
   const t = useT();
-  const [task, setTask] = useState('');
+  const [task, setTask] = useState(initialTask);
   const [maxTasks, setMaxTasks] = useState(5);
-  const [useMock, setUseMock] = useState(true);
+  // Varsayılan GERÇEK sağlayıcı; mock yalnız ağsız test için açıkça seçilir.
+  const [useMock, setUseMock] = useState(false);
   const [providerLabel, setProviderLabel] = useState('');
   const [runId, setRunId] = useState<string | null>(null);
   const [state, setState] = useState<RunState | null>(null);
@@ -234,25 +235,45 @@ export function AgentMesh() {
 
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-[#1C1B1A] text-[#CECDC3]">
-      {/* Header */}
-      <div className="px-3 py-2 border-b border-[#34332F] flex-shrink-0">
-        <div className="flex items-center gap-2">
-          <Network size={15} className="text-[#3AA99F]" />
-          <h2 className="text-[13px] font-semibold text-[#F2F0E5]">{t('agents.title')}</h2>
-          {state && (
-            <span className="flex items-center gap-1.5 text-[11px] font-mono">
-              <span
-                className={`w-1.5 h-1.5 rounded-full ${state.status === 'running' ? 'animate-pulse' : ''}`}
-                style={{ backgroundColor: STATUS_COLOR[state.status] || '#87857F' }}
-              />
-              <span className="text-[#A8A49E]">{statusLabel}</span>
-              <span className="text-[#5F5C57]">·</span>
-              <span className="text-[#87857F]">{t('agents.phase')}: {state.phase}</span>
-            </span>
-          )}
+      {/* Header — gömülü modda Agent Company başlığı zaten var; ama ne işe
+          yaradığı anlaşılsın diye kısa bir açıklama her modda gösterilir. */}
+      {!embedded && (
+        <div className="px-3 py-2 border-b border-[#34332F] flex-shrink-0">
+          <div className="flex items-center gap-2">
+            <Network size={15} className="text-[#3AA99F]" />
+            <h2 className="text-[13px] font-semibold text-[#F2F0E5]">{t('agents.title')}</h2>
+            {state && (
+              <span className="flex items-center gap-1.5 text-[11px] font-mono">
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${state.status === 'running' ? 'animate-pulse' : ''}`}
+                  style={{ backgroundColor: STATUS_COLOR[state.status] || '#87857F' }}
+                />
+                <span className="text-[#A8A49E]">{statusLabel}</span>
+                <span className="text-[#5F5C57]">·</span>
+                <span className="text-[#87857F]">{t('agents.phase')}: {state.phase}</span>
+              </span>
+            )}
+          </div>
+          <p className="text-[11px] text-[#87857F] mt-1 leading-relaxed">{t('agents.subtitle')}</p>
         </div>
-        <p className="text-[11px] text-[#87857F] mt-1 leading-relaxed">{t('agents.subtitle')}</p>
-      </div>
+      )}
+      {embedded && (
+        <div className="px-3 pt-2.5 pb-1 border-b border-[#34332F] flex-shrink-0">
+          <div className="flex items-center gap-2">
+            <span className="text-[12px] font-semibold text-[#F2F0E5]">{t('company.runTitle')}</span>
+            {state && (
+              <span className="flex items-center gap-1.5 text-[10.5px] font-mono ml-auto">
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${state.status === 'running' ? 'animate-pulse' : ''}`}
+                  style={{ backgroundColor: STATUS_COLOR[state.status] || '#87857F' }}
+                />
+                <span className="text-[#A8A49E]">{statusLabel}</span>
+              </span>
+            )}
+          </div>
+          <p className="text-[10.5px] text-[#87857F] mt-0.5 leading-relaxed">{t('agents.embeddedHint')}</p>
+        </div>
+      )}
 
       {/* Composer */}
       <div className="px-3 py-2 border-b border-[#34332F] flex-shrink-0 flex flex-col gap-2">
@@ -296,19 +317,31 @@ export function AgentMesh() {
           )}
         </div>
 
-        <div className="flex items-center gap-3 text-[11px]">
-          <label className="flex items-center gap-1.5 cursor-pointer">
-            <input type="radio" checked={useMock} onChange={() => setUseMock(true)} className="accent-[#3AA99F]" />
-            <span className={useMock ? 'text-[#CECDC3]' : 'text-[#87857F]'}>{t('agents.modeMock')}</span>
-          </label>
-          <label className="flex items-center gap-1.5 cursor-pointer">
-            <input type="radio" checked={!useMock} onChange={() => setUseMock(false)} className="accent-[#3AA99F]" />
-            <span className={!useMock ? 'text-[#CECDC3]' : 'text-[#87857F]'}>
-              {t('agents.modeActive')}{providerLabel ? ` — ${providerLabel}` : ''}
-            </span>
-          </label>
-          <span className="text-[#5F5C57] truncate">
-            {useMock ? t('agents.modeMockHint') : t('agents.modeActiveHint')}
+        {/* Mod seçimi: radyo düğüm yığını yerine segment kontrol. */}
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] uppercase tracking-wide text-[#6F6C66] flex-shrink-0">{t('agents.modeTitle')}</span>
+          <div className="flex rounded-md border border-[#34332F] overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setUseMock(true)}
+              className={`px-2.5 py-1 text-[10.5px] cursor-pointer transition-colors ${
+                useMock ? 'bg-[#34332F] text-[#F2F0E5]' : 'text-[#87857F] hover:text-[#CECDC3]'
+              }`}
+            >
+              {t('agents.modeMock')}
+            </button>
+            <button
+              type="button"
+              onClick={() => setUseMock(false)}
+              className={`px-2.5 py-1 text-[10.5px] cursor-pointer transition-colors border-l border-[#34332F] ${
+                !useMock ? 'bg-[#34332F] text-[#F2F0E5]' : 'text-[#87857F] hover:text-[#CECDC3]'
+              }`}
+            >
+              {t('agents.modeActive')}
+            </button>
+          </div>
+          <span className="text-[#5F5C57] text-[10.5px] truncate">
+            {useMock ? t('agents.modeMockHint') : providerLabel || t('agents.modeActiveHint')}
           </span>
         </div>
 

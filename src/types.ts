@@ -3,6 +3,19 @@
 
 import type { AttachedImage } from './lib/imageAttach';
 
+export interface AskQuestionOption {
+  label: string;
+  description?: string;
+}
+
+export interface AskQuestion {
+  question: string;
+  header?: string;
+  options: AskQuestionOption[];
+  multiple?: boolean;
+  allowOther?: boolean;
+}
+
 export interface MessageMetrics {
   originalTokens: number;
   compressedTokens: number;
@@ -34,7 +47,7 @@ export interface Message {
   /** Cevap hâlâ akıyor: ChatView artımlı (dondurulmuş blok + canlı kuyruk) çizer. */
   streaming?: boolean;
   /** Akış yarıda kaldıysa sebep — cevap silinmez, küçük bir not düşülür. */
-  stopped?: 'stop' | 'timeout' | 'error';
+  stopped?: 'stop' | 'timeout' | 'error' | 'length';
   /**
    * Cevap akışla geldi: 260 px iç kaydırma kutusuna SIKIŞTIRILMAZ. Aksi halde
    * akış sırasında yeni metin kutunun dışında kalır ve bitişte balon aniden
@@ -44,17 +57,37 @@ export interface Message {
   originalCodeSnippet?: string;
   compressedCodeSnippet?: string;
   metrics?: MessageMetrics;
+  question?: AskQuestion;
+  questionAnswer?: string;
+  /**
+   * Yerel motorun bu istekteki sıkıştırma bilançosu (backend `meta` olayı).
+   * Yalnız gerçekten kazanç varsa gösterilir; uydurma yüzde yazılmaz.
+   */
+  engine?: { originalTokens: number; compressedTokens: number; compressedMessages?: number };
   /**
    * Vision attachments for this user message (kept so Regenerate can re-send
    * them). Session-only: stripped before writing to localStorage — data URLs
    * would blow the 5 MB quota — so a reloaded chat cannot regenerate vision.
    */
   images?: AttachedImage[];
+  /**
+   * Sağlayıcının bildirdiği GERÇEK token kullanımı (akışın `done` olayı).
+   * Yoksa arayüz karakter/4 tahminine düşer — uydurma değer yazılmaz.
+   */
+  usage?: MessageUsage;
+}
+
+export interface MessageUsage {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
 }
 
 export interface ChatItem {
   id: string;
   title: string;
+  /** Sabitlenen sohbetler listede önce gösterilir. */
+  pinned?: boolean;
 }
 
 /** Subscription plan id — the registered plans live in the lib/plan.ts catalog. */

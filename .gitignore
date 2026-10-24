@@ -2,6 +2,12 @@
 node_modules/
 dist/
 src-tauri/target/
+# Yerel deneme derlemeleri / iç içe hedef dizinleri
+src-tauri/target*/
+src-tauri/src-tauri/
+
+# Yerel watcher günlüğü
+.zcode/shutdown-watch.log
 
 # İşletim sistemi / editör
 Thumbs.db
@@ -19,6 +25,9 @@ _test_create.txt
 
 # @file-viewer offline asset kopyaları (üretilir)
 public/file-viewer/
+
+# Yerel derleme hız ayarları (makineye özel mutlak yollar: rust-lld, sccache)
+.cargo/config.toml
 
 # @file-viewer kopyalanan assetleri (kök düzeyinde de olusabiliyor)
 public/file-viewer/

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { SyntaxHighlighter, vscDarkPlus } from '../lib/codeHighlight';
 import { useToast } from './Toast';
 import { useT } from '../lib/i18n';
@@ -32,6 +33,65 @@ const HIGHLIGHT_CACHE = new Map<string, React.ReactNode>();
 const HIGHLIGHT_CACHE_MAX = 400;
 
 const cacheKey = (lang: string, code: string) => `${lang}\u0000${code}`;
+
+/**
+ * Modeller tabloyu BAZEN tek satıra yazar: `| A | B | |---|---| | 1 | 2 |`.
+ * GFM tablo sözdizimi çok satır isterdiğinden bu satır tabloya dönüşmez ve
+ * ham haliyle basılır. Burada ayraç hücrelerinden (`---`) tabloyu yeniden
+ * çok satıra açar; normal çok satırlı tablolar hiç dokunulmadan geçer.
+ */
+export function expandSingleLineTables(src: string): string {
+  if (!src.includes('|')) return src;
+  return src.split('\n').map((line) => {
+    if (!/^\s*\|/.test(line) || !/\|/.test(line)) return line;
+    const tokens = line.split('|');
+    // Baş/sondaki boş token'lar çizgilerin konumudur; hücreler aradakilerdir.
+    const first = tokens[0] === '' ? 1 : 0;
+    const last = tokens.length - (tokens[tokens.length - 1] === '' ? 1 : 0);
+    if (last - first < 4) return line;
+
+    // Ayraç satırı: üst üste gelen yalnızca `-`/`:`/boşluk içeren hücreler.
+    const isSep = (s: string) => /^:-{2,}:$|^-{2,}:$|^:-{2,}$|^-{2,}$/.test(s.trim());
+    const isBlank = (s: string) => s.trim() === '';
+    let s = -1;
+    let e = -1;
+    for (let i = first; i < last; i++) {
+      if (isSep(tokens[i])) {
+        if (s < 0) s = i;
+      } else if (s >= 0) { e = i; break; }
+    }
+    if (s < 0 || e < 0) return line;
+    const sepCount = e - s;
+    if (sepCount < 2) return line;
+
+    // Tek satıra yazılan tabloda satırlar `| |` ile ayrılır → sınır başına
+    // BİR boş token düşer. Başlıkta sondaki, veride her satır başındaki boş
+    // token sınır hücresidir; bunları hesaba katmadan bölmek hizayı kaydırır.
+    const headerAll = tokens.slice(first, s).map((c) => c.trim());
+    if (headerAll.length > 0 && isBlank(headerAll[headerAll.length - 1])) headerAll.pop();
+    if (headerAll.length < sepCount) return line;
+    const lead = headerAll.length > sepCount ? headerAll.slice(0, headerAll.length - sepCount) : null;
+    const header = headerAll.slice(headerAll.length - sepCount);
+    const dataAll = tokens.slice(e, last);
+    const dataRows: string[][] = [];
+    let i = 0;
+    while (i < dataAll.length) {
+      if (!isBlank(dataAll[i])) return line; // beklenen sınır yok — dokunma
+      i += 1;
+      const chunk = dataAll.slice(i, i + sepCount).map((c) => c.trim());
+      if (chunk.length < sepCount) return line;
+      dataRows.push(chunk);
+      i += sepCount;
+    }
+
+    const sep = `| ${tokens.slice(s, e).map((c) => c.trim()).join(' | ')} |`;
+    const rows: string[] = [];
+    if (lead && lead.some(Boolean)) rows.push(lead.join(' ').trim());
+    rows.push(`| ${header.join(' | ')} |`, sep);
+    for (const chunk of dataRows) rows.push(`| ${chunk.join(' | ')} |`);
+    return rows.join('\n');
+  }).join('\n');
+}
 
 const cacheGet = (key: string): React.ReactNode | undefined => {
   const hit = HIGHLIGHT_CACHE.get(key);
@@ -174,6 +234,7 @@ export const MarkdownMessage: React.FC<MarkdownMessageProps> = React.memo(({ con
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
   const { showToast } = useToast();
   const t = useT();
+  const normalized = React.useMemo(() => expandSingleLineTables(content), [content]);
 
   const handleCopy = async (code: string) => {
     // Pano reddederse "Copied!" demeyiz: başarısızlık dürüstçe bildirilir.
@@ -193,7 +254,7 @@ export const MarkdownMessage: React.FC<MarkdownMessageProps> = React.memo(({ con
   const renderCodeBlock = (lang: string, codeString: string) => (
     <div className="my-2 rounded-md overflow-hidden border border-zinc-800 bg-[#100F0F] relative text-left">
       <div className="flex items-center justify-between px-3 py-1.5 bg-[#1C1B1A] border-b border-zinc-800 font-mono text-[11px]">
-        <span className="text-cyan-400 font-semibold">{lang || 'text'}</span>
+        <span className="text-[#dcb67a] font-semibold">{lang || 'text'}</span>
         <button
           type="button"
           onClick={() => handleCopy(codeString)}
@@ -221,7 +282,9 @@ export const MarkdownMessage: React.FC<MarkdownMessageProps> = React.memo(({ con
   return (
     <div className="relative text-zinc-300 text-[13px] leading-relaxed break-words min-w-0">
       <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
         components={{
+
           h1({ children }) {
             return (
               <h1 className="text-[1.1rem] font-bold text-zinc-100 mt-3 mb-1.5 border-b border-zinc-800 pb-1">
@@ -250,7 +313,7 @@ export const MarkdownMessage: React.FC<MarkdownMessageProps> = React.memo(({ con
           },
           blockquote({ children }) {
             return (
-              <blockquote className="border-l-2 border-cyan-500/60 bg-zinc-900/40 pl-3 pr-2 py-1 my-2 text-zinc-400 italic">
+              <blockquote className="border-l-2 border-[#dcb67a]/50 bg-white/[0.03] pl-3 pr-2 py-1 my-2 text-zinc-400 italic">
                 {children}
               </blockquote>
             );
@@ -304,14 +367,14 @@ export const MarkdownMessage: React.FC<MarkdownMessageProps> = React.memo(({ con
               return renderCodeBlock(m[1], codeString);
             }
             return (
-              <code className="bg-zinc-800 text-cyan-300 px-1.5 py-0.5 rounded font-mono text-[0.775rem]">
+              <code className="bg-white/[0.07] text-[#EBCB99] px-1.5 py-0.5 rounded font-mono text-[0.775rem]">
                 {children}
               </code>
             );
           }
         }}
       >
-        {content}
+        {normalized}
       </ReactMarkdown>
     </div>
   );

@@ -1,23 +1,28 @@
 {
   "name": "thalamus_desktop",
   "private": true,
-  "version": "0.0.0",
+  "license": "UNLICENSED",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
+    "license:check": "node scripts/check-licenses.mjs",
     "preview": "vite preview",
     "backend": "cargo run --manifest-path src-tauri/Cargo.toml -- --serve-only",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "predev": "node scripts/copy-file-viewer-assets.mjs",
-    "prebuild": "node scripts/copy-file-viewer-assets.mjs"
+    "prebuild": "node scripts/copy-file-viewer-assets.mjs && node scripts/generate-notices.mjs",
+    "postbuild": "node scripts/check-bundle-licenses.mjs",
+    "attributions": "node scripts/gen-attributions.mjs"
   },
   "dependencies": {
-    "@file-viewer/assets-chm": "^3.2.1",
-    "@file-viewer/assets-drawing": "^3.2.1",
-    "@file-viewer/assets-ppt": "^3.2.1",
+    "@antv/x6": "^3.1.8",
+    "@antv/x6-react-shape": "^3.0.1",
+    "@dagrejs/dagre": "^3.1.1",
+    "@file-viewer/assets-chm": "^3.2.2",
     "@file-viewer/assets-standard": "^3.2.1",
     "@file-viewer/capability-drawio-official": "^3.2.1",
     "@file-viewer/capability-mermaid": "^3.2.1",
@@ -30,8 +35,6 @@
     "@file-viewer/core": "^3.2.1",
     "@file-viewer/preset-standard": "^3.2.1",
     "@file-viewer/react": "^3.2.1",
-    "@file-viewer/react-full": "^3.2.1",
-    "@file-viewer/renderer-3d": "^3.2.1",
     "@file-viewer/renderer-archive": "^3.2.1",
     "@file-viewer/renderer-chm": "^3.2.1",
     "@file-viewer/renderer-data": "^3.2.1",
@@ -47,7 +50,6 @@
     "@file-viewer/renderer-mindmap": "^3.2.1",
     "@file-viewer/renderer-ofd": "^3.2.1",
     "@file-viewer/renderer-pdf": "^3.2.1",
-    "@file-viewer/renderer-presentation": "^3.2.1",
     "@file-viewer/renderer-spreadsheet": "^3.2.1",
     "@file-viewer/renderer-text": "^3.2.1",
     "@file-viewer/renderer-typst": "^3.2.1",
@@ -65,7 +67,8 @@
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-markdown": "^10.1.0",
-    "react-syntax-highlighter": "^16.1.1"
+    "react-syntax-highlighter": "^16.1.1",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.4",
@@ -80,5 +83,8 @@
     "tailwindcss": "^3.4.19",
     "typescript": "~6.0.2",
     "vite": "^8.1.1"
+  },
+  "overrides": {
+    "dompurify": "3.4.17"
   }
 }

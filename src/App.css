@@ -100,9 +100,10 @@
   --tlm-loader-word: 34 211 238;    /* #22d3ee */
   --tlm-added-border: 27 67 50;     /* #1b4332 */
   --tlm-added-text: 52 211 153;     /* #34d399 */
-  --tlm-scroll-thumb: 45 90 69;
-  --tlm-scroll-thumb-hover: 115 186 155;
-  --tlm-scroll-track: 20 23 32;
+  /* Nötr taş rengi: paletle uyumlu, yeşil değil */
+  --tlm-scroll-thumb: 62 60 56;
+  --tlm-scroll-thumb-hover: 96 94 90;
+  --tlm-scroll-track: 24 23 22;
 }
 
 /* Paper texture: grain drifting over the whole interface (does not harm readability) */
@@ -153,22 +154,6 @@ select option {
   color: rgb(var(--tlm-fg));
 }
 
-/* DiffView: code lines are full width and schema (added) lines are highlighted.
-   react-syntax-highlighter produces lines with inline spans + newline "\n";
-   since white-space:pre disables soft-wrap, making them inline-block lays the
-   lines on a single line and overflows horizontally. A block layout reliably
-   stacks the lines one below another. */
-.diff-code-pane code {
-  display: block !important;
-}
-.diff-code-pane code > span {
-  display: block !important;
-}
-.diff-code-pane .diff-line-added {
-  background: rgba(78, 201, 176, 0.08) !important;
-  box-shadow: inset 2px 0 0 rgb(var(--tlm-aqua));
-}
-
 /* ==========================================================================
    1. Typography, Reset & Scrollbar (Far Right & Prominent)
    ========================================================================== */
@@ -188,7 +173,7 @@ body, html {
   -webkit-font-smoothing: antialiased;
 }
 
-code, pre, .metrics-row, .model-badge, .header-path, .diff-code-scroll-area, .analytics-inner-content, .left-meta-info {
+code, pre, .metrics-row, .model-badge, .header-path, .analytics-inner-content, .left-meta-info {
   font-family: 'Cascadia Code', 'Ubuntu Sans Mono', ui-monospace, Consolas, monospace;
   letter-spacing: -0.01em;
 }
@@ -313,9 +298,9 @@ code, pre, .metrics-row, .model-badge, .header-path, .diff-code-scroll-area, .an
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
-  color: rgb(var(--tlm-fg));
+  color: rgb(var(--tlm-fg-soft));
   white-space: nowrap;
 }
 
@@ -334,8 +319,12 @@ code, pre, .metrics-row, .model-badge, .header-path, .diff-code-scroll-area, .an
 }
 
 .msg-model-name {
-  color: rgb(var(--tlm-fg));
+  color: rgb(var(--tlm-fg-muted));
   font-weight: 500;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 /* ==========================================================================
    3.2 Right/Left Alignment Layout & Code Block Palette Harmony
@@ -400,6 +389,8 @@ code, pre, .metrics-row, .model-badge, .header-path, .diff-code-scroll-area, .an
   padding-top: 6px;
   border-top: 1px solid rgba(255, 255, 255, 0.04);
   width: 100%;
+  color: rgb(var(--tlm-fg-faint));
+  font-size: 10.5px;
 }
 
 .msg-actions {
@@ -485,8 +476,6 @@ code, pre, .metrics-row, .model-badge, .header-path, .diff-code-scroll-area, .an
 .analytics-tokens-note { font-family: 'Cormorant Garamond', serif; font-style: italic; color: rgb(var(--tlm-fg-muted)); font-size: 12px; margin-left: 0.3rem; }
 .analytics-text-gold { color: rgb(var(--tlm-warn)); font-weight: 600; }
 .inner-divider { height: 16px; width: 1px; background: linear-gradient(to bottom, transparent, rgba(255, 255, 255, 0.06), transparent); }
-.analytics-diff-btn { background: transparent; border: none; font-family: 'Cormorant Garamond', serif; font-style: italic; font-size: 13px; color: rgb(var(--tlm-fg-muted)); cursor: pointer; }
-.analytics-diff-btn:hover { color: rgb(var(--tlm-fg)); }
 
 /* ==========================================================================
    5. Sidebar, CommandBar & Header (Slate Base + Matte Crimson Accent Integration)
@@ -574,100 +563,7 @@ code, pre, .metrics-row, .model-badge, .header-path, .diff-code-scroll-area, .an
 /* ==========================================================================
    6. Premium IDE Code Profiler & Analytics Dashboard Rules
    ========================================================================== */
-.diff-view-layout {
-  height: 100%;
-  width: 100%;
-  background-color: rgb(var(--tlm-bg)) !important;
-}
 
-.diff-header-bar {
-  background-color: rgb(var(--tlm-panel)) !important;
-  border-color: rgb(var(--tlm-surface)) !important;
-}
-
-/* General column width rule for the code line list */
-.line-num-col {
-  width: 24px !important;
-  display: inline-block !important;
-  text-align: right !important;
-  padding-right: 8px !important;
-  color: rgb(var(--tlm-line)) !important;
-  font-family: -apple-system, sans-serif !important;
-  font-size: 10px !important;
-  user-select: none !important;
-}
-
-/* 🟥 LEFT PANEL: Matte Dark Military Red Lines */
-.profiler-row-removed {
-  background-color: rgba(122, 34, 42, 0.12) !important;
-  border-left: 3px solid rgba(122, 34, 42, 0.6) !important;
-  width: 100%;
-}
-.profiler-row-removed code {
-  color: rgb(var(--tlm-danger)) !important;
-}
-
-/* 🟩 RIGHT PANEL: STRICTLY MATTE AND DARK MILITARY GREEN LINES */
-.profiler-row-added {
-  background-color: rgba(19, 44, 35, 0.4) !important; /* The matte dark military emerald green fill you wanted */
-  border-left: 3px solid rgb(var(--tlm-added-border)) !important;          /* Matte solid green border line */
-  width: 100%;
-}
-.profiler-row-added code {
-  color: rgb(var(--tlm-added-text)) !important; /* Easy-to-read faded green text */
-}
-
-/* VS Code-style fill background pattern */
-.diff-row-empty {
-  background-color: rgba(255, 255, 255, 0.005) !important;
-  background-image: repeating-linear-gradient(
-    45deg,
-    rgba(255, 255, 255, 0.01) 0px,
-    rgba(255, 255, 255, 0.01) 2px,
-    transparent 2px,
-    transparent 8px
-  ) !important;
-  width: 100%;
-}
-
-/* 📱 Independent Panel Scrollbars */
-.custom-diff-scrollbar::-webkit-scrollbar {
-  width: 6px !important;
-  height: 6px !important;
-}
-.custom-diff-scrollbar::-webkit-scrollbar-track {
-  background: transparent !important;
-}
-.custom-diff-scrollbar::-webkit-scrollbar-thumb {
-  background: rgb(var(--tlm-panel)) !important;
-  border-radius: 3px !important;
-}
-.custom-diff-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: rgb(var(--tlm-surface)) !important;
-}
-
-/* Graph Lines and Text Harmonies */
-.diff-view-layout .font-sans p strong {
-  font-family: 'Cascadia Code', 'Ubuntu Sans Mono', ui-monospace, monospace !important;
-}
-
-.custom-diff-scrollbar::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-.custom-diff-scrollbar::-webkit-scrollbar-track {
-  background: rgb(var(--tlm-code-bg));
-}
-
-.custom-diff-scrollbar::-webkit-scrollbar-thumb {
-  background: rgb(var(--tlm-code-thumb));
-  border-radius: 4px;
-}
-
-.custom-diff-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: rgb(var(--tlm-code-thumb-hover));
-}
 /* Custom-Designed Elegant Scrollbar */
 .pretty-scrollbar::-webkit-scrollbar {
   width: 4px;
@@ -770,6 +666,12 @@ code, pre, .metrics-row, .model-badge, .header-path, .diff-code-scroll-area, .an
   align-items: center;
 }
 
+/* "PROCESSING:" etiketi ile sağında dönen kelime aynı satır yüksekliğinde
+   hizalanır; aksi halde kelime birkaç px aşağı kayıyordu. */
+.custom-loader-container > span {
+  line-height: 20px;
+}
+
 .custom-loader-words {
   overflow: hidden;
   position: relative;
@@ -792,7 +694,8 @@ code, pre, .metrics-row, .model-badge, .header-path, .diff-code-scroll-area, .an
 .custom-loader-word {
   display: block;
   height: 100%;
-  padding-left: 6px;
+  line-height: 20px;
+  padding-left: 8px;
   color: rgb(var(--tlm-loader-word)); /* cyan-400 */
   animation: spin_4991 4s infinite;
 }
@@ -1003,6 +906,16 @@ html[data-theme='nord-red'] .text-\[\#dcb67a\] { color: #DBA871 !important; }
   }
 }
 
+/* Nucleus mini-chat: yeni turlar abartısız bir yükselmeyle oturur. */
+@keyframes nucleus_msg_in {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: none; }
+}
+.nucleus-msg { animation: nucleus_msg_in 150ms ease-out both; }
+@media (prefers-reduced-motion: reduce) {
+  .nucleus-msg { animation: none; }
+}
+
 /* Sidebar folder icon: pops when a project becomes active. */
 .folder-pop {
   animation: tlm_folder_pop 260ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
@@ -1118,9 +1031,11 @@ html[data-theme='nord-red'] .text-\[\#dcb67a\] { color: #DBA871 !important; }
   50% { opacity: 0; }
 }
 
-/* Yanıp sönen imleç: son biçimli bloğun sonuna eklenir (ham metin yok). */
-.tlm-streaming > div > :is(p, li, h1, h2, h3, h4, h5, h6):last-child::after,
-.tlm-streaming > div > :is(ul, ol):last-child > li:last-child::after {
+/* Yanıp sönen imleç: yalnız CANLI kuyruğun sonuna eklenir. Eskiden tüm
+   akış sarmalayıcısını hedeflediği için donmuş her bloğun sonunda bir dik
+   çizgi beliriyordu; artık tek imleç yalnız yazılan yerde görünür. */
+.tlm-stream-tail > div > :is(p, li, h1, h2, h3, h4, h5, h6):last-child::after,
+.tlm-stream-tail > div > :is(ul, ol):last-child > li:last-child::after {
   content: '';
   display: inline-block;
   width: 2px;
@@ -1190,4 +1105,32 @@ html[data-theme='nord-red'] .text-\[\#dcb67a\] { color: #DBA871 !important; }
   outline: 1px solid rgba(220, 182, 122, 0.6);
   outline-offset: 2px;
   border-radius: 2px;
+}
+/* ── AntV X6 — Thalamus dark theme ─────────────────────────────────────── */
+.x6-thalamus .x6-graph {
+  background: transparent !important;
+}
+.x6-thalamus .x6-graph-svg {
+  background: transparent !important;
+}
+.x6-thalamus .x6-node {
+  cursor: grab;
+}
+.x6-thalamus .x6-node:active {
+  cursor: grabbing;
+}
+.x6-thalamus .x6-node foreignObject {
+  overflow: visible;
+}
+.x6-thalamus .x6-port-body {
+  cursor: crosshair;
+}
+.x6-thalamus .x6-edge path {
+  transition: stroke 120ms ease, stroke-width 120ms ease;
+}
+.x6-thalamus .x6-widget-selection-box {
+  border: 1px dashed rgba(58, 169, 159, 0.7);
+}
+.x6-thalamus .x6-widget-selection-inner {
+  border: 1px solid rgba(58, 169, 159, 0.4);
 }

@@ -3,6 +3,8 @@
 pub mod certification;
 pub mod code_shrink;
 pub mod edits;
+pub mod fasttok;
+pub mod hw;
 pub mod ingest;
 pub mod jscompress;
 pub mod pipeline;
@@ -10,6 +12,7 @@ pub mod plain_table;
 pub mod repo_map;
 pub mod schema;
 pub mod segments;
+pub mod tokencache;
 
 pub use jscompress::JsonCompressor;
 pub use pipeline::{process_with_metrics, CompressionMetrics};

@@ -24,34 +24,41 @@ import {
   Database,
   RefreshCw,
   Sparkles,
+  Plus,
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useToast } from './Toast';
-import { LocalModelList } from './LocalModelList';
-import { modelChoices, getProviderModel, setProviderModel } from '../lib/models';
+import { fetchModelList, getProviderModel, modelChoices } from '../lib/models';
 import {
   buildLocalModelEntries,
   getCachedLocalScan,
   listServing,
   localEndpointsFresh,
-  providerForBase,
   scanLocalModels,
-  serveLocalModel,
-  stopLocalModel,
+  clearPendingLocalModel,
+  getPendingLocalModel,
+  type LocalEndpoint,
+  type LocalModelEntry,
   type LocalScan,
-  type ModelFile,
 } from '../lib/localModels';
 import type { User } from '../types';
+import { activeProviderStorageKey } from '../lib/providers';
 import {
-  API_PROVIDERS,
-  type ProviderFamily,
-  baseStorageKey,
-  providerRequiresKey,
-  activeProviderStorageKey,
-} from '../lib/providers';
+  deleteConnection,
+  dismissEndpoint,
+  ensureConnectionsMigrated,
+  getConnection,
+  isLocalBaseUrl,
+  listConnections,
+  newConnectionId,
+  readDismissedEndpoints,
+  saveConnection,
+  undismissEndpoint,
+  type Connection,
+} from '../lib/connections';
 import { getStoredKey, setStoredKey, clearStoredKeys } from '../lib/secrets';
 import { readShowReasoning, writeShowReasoning } from '../lib/reasoning';
-import { getWorkspaceRoot, saveWorkspaceRoot, rememberProject } from '../lib/workspace';
+import { getWorkspaceRoot } from '../lib/workspace';
 import { explainError } from '../lib/errors';
 import { useT, LANGUAGES, getLang, setLang, type TranslationKey } from '../lib/i18n';
 
@@ -63,12 +70,6 @@ export type SettingsTab =
   | 'providers'
   | 'profile'
   | 'data';
-
-const FAMILY_LABEL: Record<ProviderFamily, TranslationKey> = {
-  openai: 'settings.family.openai',
-  anthropic: 'settings.family.anthropic',
-  local: 'settings.family.local',
-};
 
 type IconCmp = ComponentType<{ size?: number; className?: string }>;
 
@@ -109,10 +110,11 @@ const sectionDescKey = (id: SettingsTab): TranslationKey => `settings.desc.${id}
 const SEARCH_INDEX: { section: SettingsTab; labelKey: TranslationKey }[] = [
   { section: 'general', labelKey: 'settings.language' },
   { section: 'general', labelKey: 'settings.startupScreen' },
-  { section: 'general', labelKey: 'settings.workspaceRoot' },
   { section: 'appearance', labelKey: 'settings.theme' },
   { section: 'editor', labelKey: 'settings.editorFontSize' },
   { section: 'editor', labelKey: 'settings.editorTabSize' },
+  { section: 'editor', labelKey: 'settings.editorLineNumbers' },
+  { section: 'editor', labelKey: 'settings.editorAutosave' },
   { section: 'chat', labelKey: 'settings.answerMode' },
   { section: 'chat', labelKey: 'settings.showReasoning' },
   { section: 'chat', labelKey: 'settings.rawContext' },
@@ -122,7 +124,7 @@ const SEARCH_INDEX: { section: SettingsTab; labelKey: TranslationKey }[] = [
   { section: 'providers', labelKey: 'settings.provider' },
   { section: 'providers', labelKey: 'settings.baseUrl' },
   { section: 'providers', labelKey: 'settings.apiKey' },
-  { section: 'providers', labelKey: 'settings.model' },
+  { section: 'providers', labelKey: 'settings.models' },
   { section: 'data', labelKey: 'settings.livePrices' },
   { section: 'profile', labelKey: 'settings.displayName' },
   { section: 'data', labelKey: 'settings.resetTitle' },
@@ -173,6 +175,23 @@ function Card({
   );
 }
 
+/** Bilgi amaçlı model listesi: burada seçim YOK, model sohbette seçilir. */
+function ModelRows({ entries }: { entries: LocalModelEntry[] }) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      {entries.map((entry) => (
+        <div
+          key={entry.key}
+          title={entry.model}
+          className="truncate rounded-md px-2.5 py-2 text-[12.5px] text-[#CECDC3]"
+        >
+          {entry.label}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /** Theme picker with a live mini-preview so the choice is obvious at a glance. */
 function ThemeSwatches({
   value,
@@ -186,7 +205,7 @@ function ThemeSwatches({
     { id: 'nord-red' as const, label: 'Nord Red', bg: '#17100F', panel: '#211A18', accent: '#D99A6C' },
   ];
   return (
-    <div className="flex gap-2">
+    <div className="flex gap-2.5">
       {swatches.map((s) => {
         const active = value === s.id;
         return (
@@ -194,15 +213,38 @@ function ThemeSwatches({
             key={s.id}
             type="button"
             onClick={() => onChange(s.id)}
-            className={`flex cursor-pointer flex-col gap-1.5 rounded-md border p-1.5 transition-colors ${
-              active ? 'border-[#3AA99F]/70' : 'border-white/[0.08] hover:border-white/[0.16]'
+            className={`group flex cursor-pointer flex-col gap-1.5 rounded-lg border p-2 transition-colors ${
+              active ? 'border-[#3AA99F]/70 bg-[#3AA99F]/[0.06]' : 'border-white/[0.08] hover:border-white/[0.18]'
             }`}
           >
-            <span className="flex h-6 w-16 items-center gap-1 rounded-sm px-1.5" style={{ backgroundColor: s.bg }}>
-              <span className="h-3.5 w-3.5 rounded-sm" style={{ backgroundColor: s.panel }} />
-              <span className="h-2 w-2 rounded-full" style={{ backgroundColor: s.accent }} />
+            {/* Küçük pencere maketi: başlık çubuğu + kenar çubuğu + içerik
+                satırları — tema seçimi nokta/dikdörtgen değil, gerçek önizleme. */}
+            <span
+              className="flex h-[52px] w-[84px] flex-col overflow-hidden rounded-md border border-black/40"
+              style={{ backgroundColor: s.bg }}
+            >
+              <span className="flex h-3 items-center gap-1 px-1.5" style={{ backgroundColor: s.panel }}>
+                <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: s.accent }} />
+                <span className="h-[2px] w-5 rounded-full" style={{ backgroundColor: 'rgba(255,255,255,0.28)' }} />
+                <span className="ml-auto h-[2px] w-3 rounded-full" style={{ backgroundColor: 'rgba(255,255,255,0.14)' }} />
+              </span>
+              <span className="flex min-h-0 flex-1">
+                <span className="w-4 border-r border-black/30" style={{ backgroundColor: s.panel }} />
+                <span className="flex min-w-0 flex-1 flex-col gap-[5px] p-2">
+                  <span className="h-[3px] w-3/4 rounded-full" style={{ backgroundColor: 'rgba(255,255,255,0.22)' }} />
+                  <span className="h-[3px] w-1/2 rounded-full" style={{ backgroundColor: 'rgba(255,255,255,0.13)' }} />
+                  <span className="h-[3px] w-2/3 rounded-full" style={{ backgroundColor: s.accent, opacity: 0.55 }} />
+                </span>
+              </span>
             </span>
-            <span className={`text-[11px] ${active ? 'text-[#F2F0E5]' : 'text-[#87857F]'}`}>{s.label}</span>
+            <span className="flex items-center gap-1.5">
+              <span className={`text-[11.5px] ${active ? 'text-[#F2F0E5]' : 'text-[#87857F] group-hover:text-[#CECDC3]'}`}>{s.label}</span>
+              {active && (
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#3AA99F" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M20 6 9 17l-5-5" />
+                </svg>
+              )}
+            </span>
           </button>
         );
       })}
@@ -264,6 +306,8 @@ const inputCls =
 const selectCls =
   'rounded-md border border-white/[0.08] bg-white/[0.03] px-2.5 py-2 font-mono text-[12px] text-[#F2F0E5] focus:outline-none cursor-pointer';
 const labelCls = 'text-[11.5px] text-[#87857F]';
+/** Bağlantı formu etiketleri: providers bölümünün sabit ölçeği (12px). */
+const connLabelCls = 'text-[12px] text-[#CECDC3]';
 
 const AVATAR_SIZE = 256;
 
@@ -315,9 +359,10 @@ export function SettingsModal({
   const [clearChatsArmed, setClearChatsArmed] = useState(false);
   const [query, setQuery] = useState('');
 
-  // Providers
+  // Bağlantılar (kullanıcı tanımlı sağlayıcı kayıtları — lib/connections).
+  const [connections, setConnections] = useState<Connection[]>([]);
   const [keys, setKeys] = useState<Record<string, string>>({});
-  // V4: vault anahtarlari async yuklenir. Yuklenme bitmeden kaydetmek, bos
+  // V4: vault anahtarlari async yuklenir. Yukleme bitmeden kaydetmek, bos
   // kalan inputlar yuzunden vault'taki anahtarlari SILERDI (yaris kosulu —
   // denetim M10/V4). Save, yukleme bitene kadar kilitli; yukleme hatasinda
   // anahtar yazimi hic yapilmaz (mevcut anahtarlar korunur).
@@ -325,17 +370,25 @@ export function SettingsModal({
   const keysStatusRef = useRef<'loading' | 'ok' | 'error'>('loading');
   const loadedKeysRef = useRef<Record<string, string>>({});
   const [baseUrls, setBaseUrls] = useState<Record<string, string>>({});
-  const [activeProvider, setActiveProvider] = useState<string>('openai');
+  const [names, setNames] = useState<Record<string, string>>({});
+  const [activeProvider, setActiveProvider] = useState<string>('');
+  // Yerel (dosya tabanlı) modeller bağlantı listesinde ayrı bir satırdır;
+  // seçildiğinde sohbet sağlayıcısı değişmez, yalnızca model yönetimi açılır.
+  const [activeLocal, setActiveLocal] = useState(false);
   const [visibleProvider, setVisibleProvider] = useState<string | null>(null);
 
   // Appearance / Editor
   const [fontSize, setFontSize] = useState('13');
   const [tabSize, setTabSize] = useState('4');
   const [theme, setTheme] = useState<'dark' | 'nord-red'>('dark');
+  const [editorLineNumbers, setEditorLineNumbers] = useState(true);
+  const [editorAutosave, setEditorAutosave] = useState(false);
 
   // General
   const [livePricing, setLivePricing] = useState(false);
   const [workspaceRoot, setWorkspaceRoot] = useState('');
+  /** Son uygulanan kök: aynı yolu blur'da tekrar göndermeyi önler. */
+  const appliedWorkspaceRef = useRef('');
   const [showReasoning, setShowReasoning] = useState<boolean>(() => readShowReasoning());
   // Yanıt politikası: kullanıcı kelime yazmasa da açık tercih (H43).
   const [answerMode, setAnswerMode] = useState<'auto' | 'terse' | 'detailed'>(() => {
@@ -360,6 +413,25 @@ export function SettingsModal({
   });
   const [deepModels, setDeepModels] = useState<Record<string, string>>({});
 
+  // Üretim parametreleri (boş = sağlayıcı varsayılanı). aiClient bunları her
+  // istekte okur; burada yalnız yazılır.
+  const [temperature, setTemperature] = useState<string>(() => {
+    try { return localStorage.getItem('tlm_temperature') || ''; } catch { return ''; }
+  });
+  const [maxTokens, setMaxTokens] = useState<string>(() => {
+    try { return localStorage.getItem('tlm_max_tokens') || ''; } catch { return ''; }
+  });
+  const [customInstructions, setCustomInstructions] = useState<string>(() => {
+    try { return localStorage.getItem('tlm_custom_instructions') || ''; } catch { return ''; }
+  });
+
+  const writeGenSetting = (key: string, value: string) => {
+    try {
+      if (value.trim()) localStorage.setItem(key, value);
+      else localStorage.removeItem(key);
+    } catch { /* kota/kapalı depolama: sessizce yok say */ }
+  };
+
   // Sağlayıcı başına model seçimi (tlm_model_<id>); boşsa sağlayıcı varsayılanı.
   const [models, setModels] = useState<Record<string, string>>({});
   // Bilgisayardaki yerel model sunucuları ve model dosyaları.
@@ -369,7 +441,19 @@ export function SettingsModal({
   >([]);
   const [scanning, setScanning] = useState(false);
   const [scanFailed, setScanFailed] = useState(false);
-  const [busyModel, setBusyModel] = useState<string | null>(null);
+  const [modelsLoading, setModelsLoading] = useState<Record<string, boolean>>({});
+  const [modelsError, setModelsError] = useState<Record<string, string>>({});
+  /** En az bir kez çekme denendi mi — boş liste mesajı için. */
+  const [modelsTouched, setModelsTouched] = useState<Record<string, boolean>>({});
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  // Silme onayı (adım 2) bir süre dokunulmazsa kendiliğinden geri döner.
+  useEffect(() => {
+    if (!confirmingDelete) return;
+    const timer = window.setTimeout(() => setConfirmingDelete(false), 4000);
+    return () => window.clearTimeout(timer);
+  }, [confirmingDelete]);
+  /** Sağlayıcıdan çekilen gerçek model listesi (bağlantı başına). */
+  const [fetchedModels, setFetchedModels] = useState<Record<string, string[]>>({});
   const [startView, setStartView] = useState<'chat' | 'project'>('chat');
 
   // Profile
@@ -383,35 +467,64 @@ export function SettingsModal({
     keysStatusRef.current = 'loading';
     setKeysLoaded(false);
     loadedKeysRef.current = {};
-    // Keys are read asynchronously from the OS vault (desktop) or localStorage
-    // (browser); legacy localStorage entries in the vault are migrated automatically.
-    Promise.all(API_PROVIDERS.map(async (p) => [p.id, await getStoredKey(p.id)] as const))
-      .then((entries) => {
-        if (cancelled) return;
-        const map = Object.fromEntries(entries);
-        setKeys(map);
-        loadedKeysRef.current = map;
-        keysStatusRef.current = 'ok';
-        setKeysLoaded(true);
-      })
-      .catch(() => {
+    // Bağlantılar önce göç eder (eski preset ayarları → kayıt), sonra liste
+    // ve anahtarlar vault'tan async okunur.
+    void (async () => {
+      await ensureConnectionsMigrated();
+      if (cancelled) return;
+      const conns = listConnections();
+      setConnections(conns);
+      const localNames: Record<string, string> = {};
+      const localBases: Record<string, string> = {};
+      const localModels: Record<string, string> = {};
+      const localDeep: Record<string, string> = {};
+      const localFetched: Record<string, string[]> = {};
+      for (const c of conns) {
+        localNames[c.id] = c.name;
+        localBases[c.id] = c.baseUrl;
+        localModels[c.id] = getProviderModel(c.id);
+        localDeep[c.id] = localStorage.getItem('tlm_deep_model_' + c.id) || '';
+        if (c.models?.length) localFetched[c.id] = c.models;
+      }
+      // Sohbette yerel model seçildiyse (henüz yüklenmemiş olsa da) yerel
+      // bölüm seçili açılır.
+      const pending = getPendingLocalModel();
+      localModels.managed = pending?.model || getProviderModel('managed');
+      setNames(localNames);
+      setBaseUrls(localBases);
+      setModels(localModels);
+      setDeepModels(localDeep);
+      setFetchedModels(localFetched);
+      let sel = '';
+      try { sel = localStorage.getItem(activeProviderStorageKey) || ''; } catch { /* noop */ }
+      if (sel === 'managed' || pending) {
+        setActiveProvider('managed');
+        setActiveLocal(true);
+      } else {
+        if (!conns.some((c) => c.id === sel)) sel = conns[0]?.id || '';
+        setActiveProvider(sel);
+        setActiveLocal(false);
+      }
+      const map: Record<string, string> = {};
+      try {
+        await Promise.all(conns.map(async (c) => { map[c.id] = await getStoredKey(c.id); }));
+      } catch {
         if (cancelled) return;
         // Anahtarlar okunamadı: inputlar BOŞ kalır ama bu "sil" demek değildir.
         keysStatusRef.current = 'error';
         setKeysLoaded(true);
         showToast(t('settings.keyLoadFailed'), t('settings.keyLoadFailedMsg'), 'error', undefined, '[500] secrets vault read failed');
-      });
-    const loadedBases: Record<string, string> = {};
-    for (const p of API_PROVIDERS) {
-      loadedBases[p.id] = localStorage.getItem(baseStorageKey(p.id)) || p.defaultBaseUrl || '';
-    }
-    setBaseUrls(loadedBases);
+        return;
+      }
+      if (cancelled) return;
+      setKeys(map);
+      loadedKeysRef.current = map;
+      keysStatusRef.current = 'ok';
+      setKeysLoaded(true);
+    })();
     setLivePricing(localStorage.getItem('tlm_online_pricing') === 'true');
     const loadedTheme = (localStorage.getItem('tlm_theme') as 'dark' | 'nord-red') || 'dark';
     setTheme(loadedTheme);
-    const loadedModels: Record<string, string> = {};
-    for (const pr of API_PROVIDERS) loadedModels[pr.id] = getProviderModel(pr.id);
-    setModels(loadedModels);
     setShowReasoning(readShowReasoning());
     const am = localStorage.getItem('tlm_answer_mode');
     setAnswerMode(am === 'terse' || am === 'detailed' ? am : 'auto');
@@ -419,13 +532,7 @@ export function SettingsModal({
     setRouterEnabled(localStorage.getItem('tlm_router_enabled') === 'true');
     const rm = localStorage.getItem('tlm_router_mode');
     setRouterMode(rm === 'fast' || rm === 'deep' ? rm : 'auto');
-    const dm: Record<string, string> = {};
-    for (const pr of API_PROVIDERS) {
-      dm[pr.id] = localStorage.getItem('tlm_deep_model_' + pr.id) || '';
-    }
-    setDeepModels(dm);
     setStartView(localStorage.getItem('tlm_start_view') === 'project' ? 'project' : 'chat');
-    setActiveProvider(localStorage.getItem(activeProviderStorageKey) || 'openai');
     setResetArmed(false);
     setClearChatsArmed(false);
     setQuery('');
@@ -436,7 +543,9 @@ export function SettingsModal({
       const cfg = JSON.parse(localStorage.getItem('thalamus_config') || '{}');
       if (cfg.appearance?.fontSize) setFontSize(cfg.appearance.fontSize.replace('px', ''));
       if (cfg.appearance?.tabSize) setTabSize(String(cfg.appearance.tabSize));
-      if (typeof cfg.workspace_root === 'string') setWorkspaceRoot(cfg.workspace_root);
+      if (typeof cfg.appearance?.showLineNumbers === 'boolean') setEditorLineNumbers(cfg.appearance.showLineNumbers);
+      if (typeof cfg.appearance?.autosave === 'boolean') setEditorAutosave(cfg.appearance.autosave);
+      if (typeof cfg.workspace_root === 'string') { setWorkspaceRoot(cfg.workspace_root); appliedWorkspaceRef.current = cfg.workspace_root; }
     } catch {}
 
     // Keep the workspace field in sync with the backend's actual root.
@@ -452,33 +561,81 @@ export function SettingsModal({
 
   useEffect(() => setActiveSection(initialTab), [initialTab]);
 
+  /**
+   * Taranan sunucular kendi adlarıyla (Ollama, LM Studio…) bağlantı listesine
+   * eklenir; modelleri orada, tek yerde görünür. Silinen sunucu tekrar eklenmez.
+   */
+  const registerEndpoints = useCallback((endpoints: LocalEndpoint[]) => {
+    if (endpoints.length === 0) return;
+    const key = (url: string) => (url || '').trim().toLowerCase().replace(/\/+$/, '');
+    const dismissed = new Set(readDismissedEndpoints().map(key));
+    let list = listConnections();
+    let added = false;
+    for (const ep of endpoints) {
+      const base = (ep.baseUrl || '').trim().replace(/\/+$/, '');
+      if (!base || dismissed.has(key(base))) continue;
+      if (list.some((c) => key(c.baseUrl) === key(base))) continue;
+      const id = list.some((c) => c.id === ep.provider) ? newConnectionId() : ep.provider;
+      list = saveConnection({
+        id,
+        name: ep.label || ep.provider,
+        baseUrl: base,
+        models: ep.models,
+      });
+      added = true;
+    }
+    if (!added) return;
+    setConnections(list);
+    setNames((prev) => {
+      const next = { ...prev };
+      for (const c of list) next[c.id] = prev[c.id] ?? c.name;
+      return next;
+    });
+    setBaseUrls((prev) => {
+      const next = { ...prev };
+      for (const c of list) next[c.id] = prev[c.id] ?? c.baseUrl;
+      return next;
+    });
+    setFetchedModels((prev) => {
+      const next = { ...prev };
+      for (const c of list) if (c.models?.length && !next[c.id]) next[c.id] = c.models;
+      return next;
+    });
+  }, []);
+
   /** Bilgisayardaki yerel sunucuları, motorları ve model dosyalarını tarar. */
   const runLocalScan = useCallback(async (extra: string[]) => {
     setScanning(true);
     setScanFailed(false);
     try {
-      setLocalScan(await scanLocalModels(extra));
+      const scan = await scanLocalModels(extra);
+      setLocalScan(scan);
+      registerEndpoints(scan.endpoints);
       setServers(await listServing());
     } catch {
       setScanFailed(true);
     } finally {
       setScanning(false);
     }
-  }, []);
+  }, [registerEndpoints]);
 
   // Sağlayıcılar bölümü açıldığında tarama KENDİLİĞİNDEN yapılır (önbellek
   // tazeyse yalnız çalışan sunucular yenilenir) — kullanıcı "Tara"ya basmasın.
   useEffect(() => {
     if (!isOpen || activeSection !== 'providers') return;
-    setLocalScan(getCachedLocalScan());
+    const cached = getCachedLocalScan();
+    setLocalScan(cached);
+    if (cached) registerEndpoints(cached.endpoints);
     void listServing().then(setServers);
     if (localEndpointsFresh()) return;
     void runLocalScan([]);
-  }, [isOpen, activeSection, runLocalScan]);
+  }, [isOpen, activeSection, runLocalScan, registerEndpoints]);
 
   // Tema seçimi ANINDA kalıcıdır (previewTheme localStorage'a yazar); bu yüzden
   // kapatmak temayı geri almaz. Diğer (Kaydet'e bağlı) alanlar için Cancel iptal sayılır.
-  const requestClose = useCallback(() => onClose(), [onClose]);
+  const requestClose = useCallback(() => {
+    onClose();
+  }, [onClose]);
 
   // Esc closes the dialog (same semantics as the X button).
   useEffect(() => {
@@ -488,12 +645,8 @@ export function SettingsModal({
     return () => window.removeEventListener('keydown', onKey);
   }, [isOpen, requestClose]);
 
-  if (!isOpen) return null;
-
-  const p = API_PROVIDERS.find((x) => x.id === activeProvider) || API_PROVIDERS[0];
-  // Yalnız KULLANILABILIR sağlayıcılar sayılır: "coming soon" (ör. Anthropic)
-  // listelenir ama anahtarı olsa bile kullanılamaz — durum listesine katmak yanıltıcıydı.
-  const availableProviders = API_PROVIDERS.filter((x) => x.available !== false);
+  const conn = activeLocal ? null : (connections.find((c) => c.id === activeProvider) ?? null);
+  const connIsLocal = !!conn && isLocalBaseUrl(conn.baseUrl);
   // Yerel tarama sonucunun kısaltmaları (tarama yoksa boş).
   const localFiles = localScan?.files ?? [];
   const localEndpoints = localScan?.endpoints ?? [];
@@ -504,50 +657,117 @@ export function SettingsModal({
     activeProvider,
     currentModel: models[activeProvider] || '',
   });
+  // Dosya tabanlı modeller (paket içi motor). Ollama'nın yönettiği modeller ve
+  // bir sunucunun servis ettikleri burada TEKRAR etmez — onlar kendi
+  // bağlantılarında (ör. "Ollama") görünür.
+  const localFileEntries = localEntries.filter((e) => {
+    if (!e.key.startsWith('file:')) return false;
+    const file = localFiles.find((f) => `file:${f.id}` === e.key);
+    if (file && (file.kind === 'ollama' || file.engine === 'ollama')) return false;
+    return !e.running || e.provider === 'managed';
+  });
+  const showLocal = activeLocal || localFileEntries.length > 0;
 
-  /** Sağlayıcı + taban URL + modeli seçer ve kalıcılaştırır. */
-  const useEndpoint = (provider: string, baseUrl: string, model: string) => {
-    setActiveProvider(provider);
-    setBaseUrls((prev) => ({ ...prev, [provider]: baseUrl }));
-    setModels((prev) => ({ ...prev, [provider]: model }));
-    try {
-      localStorage.setItem(activeProviderStorageKey, provider);
-      localStorage.setItem(baseStorageKey(provider), baseUrl);
-    } catch { /* noop */ }
-    // Model yazımı 'thalamus_config_changed' yayar → App sağlayıcıyı yeniden çözer.
-    setProviderModel(provider, model);
+  /** Bağlantı listesinden bir kayıt seçer ve etkin yapar. */
+  const selectConnection = (id: string) => {
+    clearPendingLocalModel();
+    setActiveLocal(false);
+    setActiveProvider(id);
+    try { localStorage.setItem(activeProviderStorageKey, id); } catch { /* noop */ }
+    window.dispatchEvent(new Event('thalamus_config_changed'));
+    setVisibleProvider(null);
+    setConfirmingDelete(false);
   };
 
-  /**
-   * Bir modeli TEK tıkla kullanılır hale getirir: zaten çalışıyorsa ona
-   * bağlanır; çalışmıyorsa motorla başlatıp sonucu `managed` sağlayıcısına yazar.
-   */
-  const activateModel = async (file: ModelFile) => {
-    const served = file.servedBy[0];
-    if (served) {
-      useEndpoint(providerForBase(served), served, file.model);
+  const addConnection = () => {
+    const id = newConnectionId();
+    const name = t('settings.conn.untitled');
+    setConnections(saveConnection({ id, name, baseUrl: '' }));
+    setNames((prev) => ({ ...prev, [id]: name }));
+    setBaseUrls((prev) => ({ ...prev, [id]: '' }));
+    setModels((prev) => ({ ...prev, [id]: '' }));
+    setDeepModels((prev) => ({ ...prev, [id]: '' }));
+    setFetchedModels((prev) => ({ ...prev, [id]: [] }));
+    setKeys((prev) => ({ ...prev, [id]: '' }));
+    selectConnection(id);
+  };
+
+  const deleteSelectedConnection = () => {
+    if (!conn) return;
+    // İlk tıklama onay ister (satır içi), ikincisi siler.
+    if (!confirmingDelete) {
+      setConfirmingDelete(true);
       return;
     }
-    if (!file.servable || busyModel) return;
-    setBusyModel(file.id);
-    try {
-      const r = await serveLocalModel(file.id, file.path);
-      useEndpoint('managed', r.baseUrl, r.model);
-      setServers(await listServing());
-      showToast(t('settings.localStarted'), r.model, 'success');
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      showToast(t('settings.localStartFailed'), msg.slice(0, 300), 'error');
-    } finally {
-      setBusyModel(null);
+    setConfirmingDelete(false);
+    // Silinen yerel sunucu bir sonraki taramada kendiliğinden geri gelmesin.
+    if (isLocalBaseUrl(conn.baseUrl)) dismissEndpoint(conn.baseUrl);
+    void setStoredKey(conn.id, '');
+    const remaining = deleteConnection(conn.id);
+    setConnections(remaining);
+    if (activeProvider === conn.id) {
+      const next = remaining[0]?.id || '';
+      try {
+        if (next) localStorage.setItem(activeProviderStorageKey, next);
+        else localStorage.removeItem(activeProviderStorageKey);
+      } catch { /* noop */ }
+      setActiveProvider(next);
+      window.dispatchEvent(new Event('thalamus_config_changed'));
     }
   };
 
-  /** Durdurulan modelin sunucusunu kapatır. */
-  const stopServing = async (id: string) => {
-    await stopLocalModel(id);
-    setServers(await listServing());
+  /** Ad ya da taban URL değişikliği ANINDA kayda yazılır. */
+  const updateConnectionField = (field: 'name' | 'baseUrl', value: string) => {
+    if (!conn) return;
+    if (field === 'name') setNames((prev) => ({ ...prev, [conn.id]: value }));
+    else {
+      setBaseUrls((prev) => ({ ...prev, [conn.id]: value }));
+      // Elle girilen yerel adres "yok sayılanlar"dan çıkar.
+      if (isLocalBaseUrl(value)) undismissEndpoint(value);
+    }
+    setConnections(saveConnection({ ...conn, [field]: value }));
+    window.dispatchEvent(new Event('thalamus_config_changed'));
   };
+
+  /** Model listesini sessizce yeniden çeker (formdaki yenile ikonu). */
+  const refreshModels = useCallback(async (id: string) => {
+    const base = (baseUrls[id] ?? '').trim();
+    const key = (keys[id] || '').trim();
+    if (!base) return;
+    if (!isLocalBaseUrl(base) && key.length < 8) return;
+    setModelsLoading((prev) => ({ ...prev, [id]: true }));
+    setModelsTouched((prev) => ({ ...prev, [id]: true }));
+    try {
+      const listed = await fetchModelList(base, key);
+      setFetchedModels((prev) => ({ ...prev, [id]: listed }));
+      setModelsError((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+      // Liste BAĞLANTIYA kalıcı yazılır → sonraki açılışta anında hazır.
+      const current = getConnection(id);
+      if (current) setConnections(saveConnection({ ...current, models: listed }));
+    } catch (e) {
+      const x = explainError(e, 'Model list');
+      setModelsError((prev) => ({ ...prev, [id]: x.explanation }));
+    } finally {
+      setModelsLoading((prev) => ({ ...prev, [id]: false }));
+    }
+  }, [baseUrls, keys]);
+
+  // Liste KENDİLİĞİNDEN gelir: base URL + (uzakta) anahtar hazır olduğunda
+  // 700ms debounce ile çekilir — "Test"e basmak gerekmez.
+  const autoBase = activeProvider ? (baseUrls[activeProvider] ?? '') : '';
+  const autoKey = activeProvider ? (keys[activeProvider] || '') : '';
+  useEffect(() => {
+    if (!isOpen || !activeProvider) return;
+    const base = autoBase.trim();
+    if (!base) return;
+    if (!isLocalBaseUrl(base) && autoKey.trim().length < 8) return;
+    const timer = window.setTimeout(() => { void refreshModels(activeProvider); }, 700);
+    return () => window.clearTimeout(timer);
+  }, [isOpen, activeProvider, autoBase, autoKey, refreshModels]);
 
   /**
    * Ayar değişikliğini ANINDA kalıcılaştırır ve uygular (Kaydet beklenmez).
@@ -555,12 +775,20 @@ export function SettingsModal({
    * ProjectDashboard'a, model/fiyatlandırma aynı olayla App'e iletilir.
    */
   const persistConfig = (
-    patch: Partial<{ fontSize: string; tabSize: string; onlinePricing: boolean }> = {}
+    patch: Partial<{
+      fontSize: string;
+      tabSize: string;
+      onlinePricing: boolean;
+      showLineNumbers: boolean;
+      autosave: boolean;
+    }> = {}
   ) => {
     const cfg = {
       appearance: {
         fontSize: `${patch.fontSize ?? fontSize}px`,
         tabSize: Number(patch.tabSize ?? tabSize),
+        showLineNumbers: patch.showLineNumbers ?? editorLineNumbers,
+        autosave: patch.autosave ?? editorAutosave,
       },
       onlinePricing: patch.onlinePricing ?? livePricing,
       workspace_root: getWorkspaceRoot() ?? '',
@@ -568,27 +796,6 @@ export function SettingsModal({
     try { localStorage.setItem('thalamus_config', JSON.stringify(cfg)); } catch {}
     window.dispatchEvent(new Event('thalamus_config_changed'));
   };
-
-  /**
-   * Çalışma klasörünü ANINDA uygular (Kaydet beklenmez): gezgin, düzenleyici
-   * ve terminal yeni köke geçer. Geçersiz yol hiçbir yere yazılmaz.
-   */
-  async function applyWorkspace() {
-    const next = workspaceRoot.trim();
-    if (!next) return;
-    try {
-      const info = await invoke<{ root: string; name: string }>('set_workspace_root', { path: next });
-      if (!info?.root) return;
-      setWorkspaceRoot(info.root);
-      saveWorkspaceRoot(info.root);
-      rememberProject(info.root, info.name);
-      persistConfig();
-      showToast(t('settings.workspaceApplied'), t('settings.workspaceAppliedMsg', { path: info.root }), 'success');
-    } catch (e) {
-      const x = explainError(e, 'Workspace');
-      showToast(t('settings.workspaceError'), `${t('settings.workspaceErrorMsg', { path: next })} ${x.explanation}`, 'error', undefined, `[${x.code}] ${x.detail ?? String(e)}`);
-    }
-  }
 
   /**
    * Applies the theme immediately AND commits it: a display preference must
@@ -627,27 +834,21 @@ export function SettingsModal({
     }
     if (keysStatusRef.current === 'ok') {
       // Yalnizca kullaniciyi gercekten degistirdigi anahtarlari yaz.
-      const changed = API_PROVIDERS.filter(
-        (p) => (keys[p.id] || '').trim() !== (loadedKeysRef.current[p.id] || '').trim()
+      const changed = connections.filter(
+        (c) => (keys[c.id] || '').trim() !== (loadedKeysRef.current[c.id] || '').trim()
       );
-      const removed = changed.filter((p) => !(keys[p.id] || '').trim());
+      const removed = changed.filter((c) => !(keys[c.id] || '').trim());
       if (removed.length > 0) {
-        const names = removed.map((p) => p.name).join(', ');
+        const names = removed.map((c) => c.name).join(', ');
         if (!window.confirm(t('settings.removeKeyConfirm', { names }))) {
           return;
         }
       }
-      await Promise.all(changed.map((p) => setStoredKey(p.id, (keys[p.id] || '').trim())));
+      await Promise.all(changed.map((c) => setStoredKey(c.id, (keys[c.id] || '').trim())));
     }
     localStorage.setItem(activeProviderStorageKey, activeProvider);
 
-    for (const provider of API_PROVIDERS) {
-      if (provider.needsBaseUrl) {
-        const b = (baseUrls[provider.id] || '').trim();
-        if (b) localStorage.setItem(baseStorageKey(provider.id), b);
-        else localStorage.removeItem(baseStorageKey(provider.id));
-      }
-    }
+    // Taban URL'ler zaten kayıt anında yazıldı (updateConnectionField).
 
     localStorage.setItem('tlm_online_pricing', String(livePricing));
     localStorage.setItem('tlm_theme', theme);
@@ -671,6 +872,8 @@ export function SettingsModal({
       appearance: {
         fontSize: `${fontSize}px`,
         tabSize: Number(tabSize),
+        showLineNumbers: editorLineNumbers,
+        autosave: editorAutosave,
       },
       onlinePricing: livePricing,
       workspace_root: validatedRoot ?? getWorkspaceRoot() ?? '',
@@ -696,9 +899,9 @@ export function SettingsModal({
     window.dispatchEvent(new Event('thalamus_config_changed'));
   }
 
-  /** Clears stored keys + preferences; chats and files are kept. */
+  /** Clears stored keys + preferences; chats, files and the connection list are kept. */
   async function handleReset() {
-    await clearStoredKeys(API_PROVIDERS.map((p) => p.id));
+    await clearStoredKeys(listConnections().map((c) => c.id));
     // Backend config dosyası da silinir; yoksa workspace_root %APPDATA'da
     // kalıp bir sonraki açılışta "sıfırlandı" denen ayarı geri getirir.
     try {
@@ -707,7 +910,8 @@ export function SettingsModal({
       showToast(t('settings.resetIncomplete'), t('settings.resetIncompleteMsg'), 'error', undefined, `[500] ${String(e)}`);
     }
     for (const key of Object.keys(localStorage)) {
-      if (key.startsWith('tlm_')) localStorage.removeItem(key);
+      // Bağlantı listesi SIFIRLAMADA korunur (yeniden anahtar girmek yeterli).
+      if (key.startsWith('tlm_') && key !== 'tlm_connections_v1') localStorage.removeItem(key);
     }
     localStorage.removeItem('thalamus_config');
     showToast(t('settings.resetDone'), t('settings.resetDoneMsg'), 'info');
@@ -734,6 +938,8 @@ export function SettingsModal({
   const searchResults = q
     ? SEARCH_INDEX.filter((r) => t(r.labelKey).toLowerCase().includes(q))
     : [];
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
@@ -870,20 +1076,6 @@ export function SettingsModal({
                     />
                   }
                 />
-                <div className="flex flex-col gap-1.5 py-3.5">
-                  <label className={labelCls} htmlFor="settings-workspace">{t('settings.workspaceRoot')}</label>
-                  <input
-                    id="settings-workspace"
-                    type="text"
-                    value={workspaceRoot}
-                    onChange={(e) => setWorkspaceRoot(e.target.value)}
-                    onBlur={() => { void applyWorkspace(); }}
-                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void applyWorkspace(); } }}
-                    placeholder="C:/projects/my-app"
-                    className={inputCls}
-                  />
-                  <p className="text-[11px] text-[#87857F]">{t('settings.workspaceRootHint')}</p>
-                </div>
               </Card>
             )}
 
@@ -921,164 +1113,410 @@ export function SettingsModal({
                     </select>
                   }
                 />
+                <Row
+                  label={t('settings.editorLineNumbers')}
+                  hint={t('settings.editorLineNumbersHint')}
+                  control={
+                    <Switch
+                      checked={editorLineNumbers}
+                      onChange={(v) => { setEditorLineNumbers(v); persistConfig({ showLineNumbers: v }); }}
+                    />
+                  }
+                />
+                <Row
+                  label={t('settings.editorAutosave')}
+                  hint={t('settings.editorAutosaveHint')}
+                  control={
+                    <Switch
+                      checked={editorAutosave}
+                      onChange={(v) => { setEditorAutosave(v); persistConfig({ autosave: v }); }}
+                    />
+                  }
+                />
               </Card>
             )}
 
-            {/* ── PROVIDERS ── */}
+            {/* ── CONNECTIONS ── Bölüm modal başlığında adlandığı için burada
+                başlık tekrar edilmez. Liste + form tek kartta, modalın diğer
+                bölümleriyle aynı satır dilinde. */}
             {!q && activeSection === 'providers' && (
               <>
-                <Card title={t('settings.card.connectionTitle')} desc={t('settings.card.connectionDesc')}>
-                  <div className="flex flex-col gap-1.5 py-3.5">
-                    <label className={labelCls}>{t('settings.provider')}</label>
-                    <select
-                      value={activeProvider}
-                      onChange={(e) => {
-                        // Unavailable providers (e.g. Anthropic until the proxy
-                        // speaks /v1/messages) must not be selected — silently
-                        // ignoring the change keeps the previous choice intact.
-                        const target = API_PROVIDERS.find((x) => x.id === e.target.value);
-                        if (target && target.available === false) return;
-                        setActiveProvider(e.target.value);
-                        // Sağlayıcı seçimi ANINDA etki eder (Kaydet beklemez):
-                        // getActiveProvider bu anahtarı okur.
-                        try { localStorage.setItem(activeProviderStorageKey, e.target.value); } catch {}
-                        window.dispatchEvent(new Event('thalamus_config_changed'));
-                        setVisibleProvider(null);
-                      }}
-                      className={selectCls}
-                    >
-                      {API_PROVIDERS.map((x) => (
-                        <option key={x.id} value={x.id} disabled={x.available === false}>
-                          {x.name}
-                          {x.available === false ? t('settings.comingSoon') : ` — ${t(FAMILY_LABEL[x.family])}`}
-                        </option>
-                      ))}
-                    </select>
-                    {p.available === false && (
-                      <p className="text-[11px] text-amber-300/90">{t('settings.providerNotWired', { name: p.name })}</p>
+                <Card>
+                  <div className="flex flex-col gap-0.5 py-2">
+                    {showLocal && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveLocal(true);
+                          setVisibleProvider(null);
+                          setConfirmingDelete(false);
+                        }}
+                        className={`flex w-full items-center rounded-md px-2.5 py-2 text-left transition-colors ${
+                          activeLocal ? 'bg-white/[0.06]' : 'hover:bg-white/[0.03]'
+                        }`}
+                      >
+                        <span
+                          className={`min-w-0 truncate text-[12.5px] ${activeLocal ? 'text-[#F2F0E5]' : 'text-[#CECDC3]'}`}
+                        >
+                          {t('settings.conn.local')}
+                        </span>
+                      </button>
                     )}
+                    {connections.map((c) => {
+                      const selected = !activeLocal && c.id === activeProvider;
+                      return (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => selectConnection(c.id)}
+                          className={`flex w-full items-center rounded-md px-2.5 py-2 text-left transition-colors ${
+                            selected ? 'bg-white/[0.06]' : 'hover:bg-white/[0.03]'
+                          }`}
+                        >
+                          <span
+                            className={`min-w-0 truncate text-[12.5px] ${selected ? 'text-[#F2F0E5]' : 'text-[#CECDC3]'}`}
+                          >
+                            {c.name || c.id}
+                          </span>
+                        </button>
+                      );
+                    })}
+                    {connections.length === 0 && !showLocal && (
+                      <p className="px-2.5 py-1.5 text-[12px] text-[#87857F]">
+                        {t('settings.conn.empty')}
+                      </p>
+                    )}
+                    <div className="flex items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={addConnection}
+                        className="flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-left text-[12px] text-[#87857F] transition-colors hover:bg-white/[0.03] hover:text-[#CECDC3]"
+                      >
+                        <Plus size={12} />
+                        {t('settings.conn.new')}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={scanning}
+                        onClick={() => void runLocalScan([])}
+                        className="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-[11.5px] text-[#575654] transition-colors hover:text-[#CECDC3] disabled:cursor-default disabled:opacity-50"
+                      >
+                        <RefreshCw size={11} className={scanning ? 'animate-spin' : ''} />
+                        {t('settings.localScan')}
+                      </button>
+                    </div>
                   </div>
 
-                  {p.needsBaseUrl && (
-                    <div className="flex flex-col gap-1.5 py-3.5">
-                      <label className={labelCls}>{t('settings.baseUrl')}</label>
-                      <input
-                        type="text"
-                        value={baseUrls[p.id] || ''}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          setBaseUrls((prev) => ({ ...prev, [p.id]: v }));
-                          // Temel URL de anında kalıcıdır.
-                          try { if (v.trim()) localStorage.setItem(baseStorageKey(p.id), v); else localStorage.removeItem(baseStorageKey(p.id)); } catch {}
-                          window.dispatchEvent(new Event('thalamus_config_changed'));
-                        }}
-                        placeholder={p.defaultBaseUrl || 'http://localhost:8000/v1'}
-                        className={inputCls}
-                        spellCheck={false}
-                      />
+                  {activeLocal && (
+                    <div className="flex flex-col gap-2 py-4">
+                      <span className={connLabelCls}>{t('settings.models')}</span>
+                      {localFileEntries.length > 0 ? (
+                        <ModelRows entries={localFileEntries} />
+                      ) : (
+                        <p className="px-2.5 py-1.5 text-[12px] text-[#87857F]">
+                          {scanFailed ? t('settings.localScanFailed') : t('settings.localNone')}
+                        </p>
+                      )}
                     </div>
                   )}
 
-                  <div className="flex flex-col gap-1.5 py-3.5">
-                    <label className={labelCls}>
-                      {providerRequiresKey(p) ? t('settings.apiKey') : t('settings.apiKeyOptional')}
-                    </label>
-                    <div className="relative">
-                      <input
-                        type={visibleProvider === p.id ? 'text' : 'password'}
-                        value={keys[p.id] || ''}
-                        onChange={(e) => setKeys((prev) => ({ ...prev, [p.id]: e.target.value }))}
-                        placeholder={p.keyPlaceholder}
-                        className={inputCls}
-                        autoComplete="off"
-                        spellCheck={false}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setVisibleProvider(visibleProvider === p.id ? null : p.id)}
-                        aria-label={visibleProvider === p.id ? t('settings.hideKey') : t('settings.showKey')}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-[#575654] transition-colors hover:text-[#CECDC3] cursor-pointer"
-                        tabIndex={-1}
-                      >
-                        {visibleProvider === p.id ? <EyeOff size={13} /> : <Eye size={13} />}
-                      </button>
+                  {conn && (
+                    <div className="flex flex-col gap-4 py-4">
+                      <label className="flex flex-col gap-1.5">
+                        <span className={connLabelCls}>{t('settings.conn.name')}</span>
+                        <input
+                          type="text"
+                          value={names[conn.id] ?? conn.name}
+                          onChange={(e) => updateConnectionField('name', e.target.value)}
+                          placeholder={t('settings.conn.untitled')}
+                          className={inputCls}
+                          spellCheck={false}
+                        />
+                      </label>
+
+                      <label className="flex flex-col gap-1.5">
+                        <span className={connLabelCls}>{t('settings.baseUrl')}</span>
+                        <input
+                          type="text"
+                          value={baseUrls[conn.id] ?? conn.baseUrl}
+                          onChange={(e) => updateConnectionField('baseUrl', e.target.value)}
+                          placeholder="https://api.example.com/v1"
+                          className={inputCls}
+                          spellCheck={false}
+                        />
+                      </label>
+
+                      <div className="flex flex-col gap-1.5">
+                        <span className={connLabelCls}>{t('settings.apiKey')}</span>
+                        <div className="relative">
+                          <input
+                            type={visibleProvider === conn.id ? 'text' : 'password'}
+                            value={keys[conn.id] || ''}
+                            onChange={(e) =>
+                              setKeys((prev) => ({ ...prev, [conn.id]: e.target.value }))
+                            }
+                            placeholder={connIsLocal ? '—' : 'sk-...'}
+                            className={inputCls}
+                            autoComplete="off"
+                            spellCheck={false}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setVisibleProvider(visibleProvider === conn.id ? null : conn.id)}
+                            aria-label={visibleProvider === conn.id ? t('settings.hideKey') : t('settings.showKey')}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-[#575654] transition-colors hover:text-[#CECDC3] cursor-pointer"
+                            tabIndex={-1}
+                          >
+                            {visibleProvider === conn.id ? <EyeOff size={13} /> : <Eye size={13} />}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Modeller: seçim yok — sağlayıcının tüm listesi burada,
+                          modeli sohbet sırasında seçersin. */}
+                      <div className="flex flex-col gap-2">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className={connLabelCls}>{t('settings.models')}</span>
+                          <span className="flex items-center gap-1.5">
+                            <span
+                              title={modelsError[conn.id] || undefined}
+                              className={`text-[11.5px] ${modelsError[conn.id] ? 'text-red-300/80' : 'text-[#575654]'}`}
+                            >
+                              {modelsLoading[conn.id]
+                                ? t('settings.modelsLoading')
+                                : modelsError[conn.id]
+                                  ? t('settings.modelsError')
+                                  : (fetchedModels[conn.id]?.length ?? 0) > 0
+                                    ? t('settings.modelsCount', { count: fetchedModels[conn.id].length })
+                                    : ''}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => void refreshModels(conn.id)}
+                              aria-label={t('settings.modelsRefresh')}
+                              title={t('settings.modelsRefresh')}
+                              className="cursor-pointer text-[#575654] transition-colors hover:text-[#CECDC3]"
+                            >
+                              <RefreshCw size={11} className={modelsLoading[conn.id] ? 'animate-spin' : ''} />
+                            </button>
+                          </span>
+                        </div>
+
+                        {(fetchedModels[conn.id]?.length ?? 0) > 0 && !modelsError[conn.id] && (
+                          <div className="max-h-[168px] overflow-y-auto rounded-md border border-white/[0.06] pretty-scrollbar">
+                            {fetchedModels[conn.id].map((m) => (
+                              <div
+                                key={m}
+                                title={m}
+                                className="truncate px-2.5 py-1.5 font-mono text-[11.5px] text-[#CECDC3]"
+                              >
+                                {m}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {modelsTouched[conn.id] &&
+                          !modelsLoading[conn.id] &&
+                          !modelsError[conn.id] &&
+                          (fetchedModels[conn.id]?.length ?? 0) === 0 && (
+                            <p className="text-[11.5px] text-[#575654]">{t('settings.modelsEmpty')}</p>
+                          )}
+                      </div>
+
+                      {/* Sil (sağ, iki adımlı onay). */}
+                      <div className="flex items-center justify-end border-t border-white/[0.05] pt-3.5">
+                        <button
+                          type="button"
+                          onClick={deleteSelectedConnection}
+                          className={`cursor-pointer px-1 text-[12px] transition-colors ${
+                            confirmingDelete
+                              ? 'text-rose-300/90'
+                              : 'text-[#87857F] hover:text-[#CECDC3]'
+                          }`}
+                        >
+                          {confirmingDelete ? t('settings.conn.deleteAsk') : t('settings.conn.delete')}
+                        </button>
+                      </div>
                     </div>
-                    <p className="text-[11px] text-[#87857F]">{t('settings.apiKeyHint')}</p>
-                    {p.docsUrl && (
-                      <a
-                        href={p.docsUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="self-start text-[11.5px] text-[#3AA99F] hover:underline"
+                  )}
+                </Card>
+              </>
+            )}
+
+            {/* ── CHAT & AI ── */}
+            {!q && activeSection === 'chat' && (
+              <>
+                <Card title={t('settings.card.answerTitle')} desc={t('settings.card.answerDesc')}>
+                  <Row
+                    label={t('settings.answerMode')}
+                    hint={t('settings.answerModeHint')}
+                    control={
+                      <select
+                        value={answerMode}
+                        onChange={(e) => {
+                          const v = e.target.value as 'auto' | 'terse' | 'detailed';
+                          setAnswerMode(v);
+                          try { localStorage.setItem('tlm_answer_mode', v); } catch {}
+                        }}
+                        className={selectCls}
                       >
-                        {t('settings.getApiKey')}
-                      </a>
-                    )}
-                  </div>
+                        <option value="auto">{t('settings.answerAuto')}</option>
+                        <option value="terse">{t('settings.answerTerse')}</option>
+                        <option value="detailed">{t('settings.answerDetailed')}</option>
+                      </select>
+                    }
+                  />
+                  <Row
+                    label={t('settings.showReasoning')}
+                    hint={t('settings.showReasoningHint')}
+                    control={
+                      <Switch
+                        checked={showReasoning}
+                        onChange={(v) => {
+                          setShowReasoning(v);
+                          writeShowReasoning(v);
+                          window.dispatchEvent(new Event('thalamus_config_changed'));
+                        }}
+                      />
+                    }
+                  />
+                </Card>
 
+                <Card title={t('settings.card.instructionsTitle')} desc={t('settings.card.instructionsDesc')}>
                   <div className="flex flex-col gap-1.5 py-3.5">
-                    <label className={labelCls} htmlFor={`model-${p.id}`}>{t('settings.model')}</label>
-                    <input
-                      id={`model-${p.id}`}
-                      type="text"
-                      list={`model-list-${p.id}`}
-                      value={models[p.id] ?? p.defaultModel ?? ''}
+                    <label className={labelCls} htmlFor="settings-instructions">{t('settings.instructions')}</label>
+                    <textarea
+                      id="settings-instructions"
+                      rows={3}
+                      value={customInstructions}
                       onChange={(e) => {
-                        const v = e.target.value;
-                        setModels((prev) => ({ ...prev, [p.id]: v }));
-                        // Model de ANINDA etki eder: getActiveProvider bu
-                        // anahtarı okur; boş bırakılırsa sağlayıcı varsayılanı.
-                        setProviderModel(p.id, v);
+                        setCustomInstructions(e.target.value);
+                        writeGenSetting('tlm_custom_instructions', e.target.value);
                       }}
-                      placeholder={p.defaultModel || 'model-id'}
-                      className={inputCls}
-                      spellCheck={false}
-                      autoComplete="off"
+                      placeholder={t('settings.instructionsPlaceholder')}
+                      className={`${inputCls} min-h-[72px] resize-y`}
                     />
-                    <datalist id={`model-list-${p.id}`}>
-                      {modelChoices(p.id).map((m) => (
-                        <option key={m.id} value={m.id}>{m.label}</option>
-                      ))}
-                    </datalist>
-                    <p className="text-[11px] text-[#87857F]">{t('settings.modelHint')}</p>
+                    <p className="text-[11px] text-[#87857F]">{t('settings.instructionsHint')}</p>
                   </div>
                 </Card>
 
-                <Card
-                  title={t('settings.card.localTitle')}
-                  desc={t('settings.card.localDesc')}
-                  action={
-                    <button
-                      type="button"
-                      disabled={scanning}
-                      onClick={() => {
-                        const custom = (baseUrls[p.id] || '').trim();
-                        void runLocalScan(p.needsBaseUrl && custom ? [custom] : []);
-                      }}
-                      className="flex cursor-pointer items-center gap-1.5 rounded-md border border-white/[0.08] px-2.5 py-1 text-[11px] text-[#CECDC3] transition-colors hover:border-white/[0.16] hover:bg-white/[0.04] disabled:cursor-default disabled:opacity-50"
-                    >
-                      <RefreshCw size={11} className={scanning ? 'animate-spin' : ''} />
-                      {t('settings.localScan')}
-                    </button>
-                  }
-                >
-                  <div className="py-1.5">
-                    <LocalModelList
-                      entries={localEntries}
-                      scanning={scanning}
-                      scanFailed={scanFailed}
-                      busyKey={busyModel ? `file:${busyModel}` : null}
-                      onUse={(entry) => useEndpoint(entry.provider, entry.baseUrl, entry.model)}
-                      onStart={(entry) => {
-                        const file = localFiles.find((f) => `file:${f.id}` === entry.key);
-                        if (file) void activateModel(file);
-                      }}
-                      onStop={(id) => void stopServing(id)}
-                      onScan={() => void runLocalScan([])}
-                    />
+                <Card title={t('settings.card.generationTitle')} desc={t('settings.card.generationDesc')}>
+                  <div className="grid grid-cols-1 gap-3 py-3.5 sm:grid-cols-2">
+                    <div className="flex flex-col gap-1.5">
+                      <label className={labelCls} htmlFor="settings-temperature">{t('settings.temperature')}</label>
+                      <input
+                        id="settings-temperature"
+                        type="number"
+                        min={0}
+                        max={2}
+                        step={0.1}
+                        value={temperature}
+                        placeholder={t('settings.providerDefault')}
+                        onChange={(e) => {
+                          setTemperature(e.target.value);
+                          writeGenSetting('tlm_temperature', e.target.value);
+                        }}
+                        className={inputCls}
+                      />
+                      <p className="text-[11px] leading-snug text-[#87857F]">{t('settings.temperatureHint')}</p>
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <label className={labelCls} htmlFor="settings-max-tokens">{t('settings.maxTokens')}</label>
+                      <input
+                        id="settings-max-tokens"
+                        type="number"
+                        min={1}
+                        max={32768}
+                        step={1}
+                        value={maxTokens}
+                        placeholder="4096"
+                        onChange={(e) => {
+                          setMaxTokens(e.target.value);
+                          writeGenSetting('tlm_max_tokens', e.target.value);
+                        }}
+                        className={inputCls}
+                      />
+                      <p className="text-[11px] leading-snug text-[#87857F]">{t('settings.maxTokensHint')}</p>
+                    </div>
                   </div>
                 </Card>
 
+                <Card title={t('settings.card.contextTitle')} desc={t('settings.card.contextDesc')}>
+                  <Row
+                    label={t('settings.rawContext')}
+                    hint={t('settings.rawContextHint')}
+                    control={
+                      <Switch
+                        checked={rawContext}
+                        onChange={(v) => {
+                          setRawContext(v);
+                          try { localStorage.setItem('tlm_raw_context', String(v)); } catch {}
+                        }}
+                      />
+                    }
+                  />
+                  <Row
+                    label={t('settings.router')}
+                    hint={t('settings.routerHint')}
+                    control={
+                      <Switch
+                        checked={routerEnabled}
+                        onChange={(v) => {
+                          setRouterEnabled(v);
+                          try { localStorage.setItem('tlm_router_enabled', String(v)); } catch {}
+                        }}
+                      />
+                    }
+                  />
+                  {routerEnabled && (
+                    <Row
+                      label={t('settings.routerMode')}
+                      hint={t('settings.routerModeHint')}
+                      control={
+                        <select
+                          value={routerMode}
+                          onChange={(e) => {
+                            const v = e.target.value as 'auto' | 'fast' | 'deep';
+                            setRouterMode(v);
+                            try { localStorage.setItem('tlm_router_mode', v); } catch {}
+                          }}
+                          className={selectCls}
+                        >
+                          <option value="auto">{t('settings.routerAuto')}</option>
+                          <option value="fast">{t('settings.routerFast')}</option>
+                          <option value="deep">{t('settings.routerDeep')}</option>
+                        </select>
+                      }
+                    />
+                  )}
+                  {routerEnabled && (
+                    <div className="flex flex-col gap-1.5 py-3.5">
+                      <label className={labelCls} htmlFor="settings-deep-model">{t('settings.deepModel')}</label>
+                      <input
+                        id="settings-deep-model"
+                        type="text"
+                        list={`model-list-${activeProvider}`}
+                        value={deepModels[activeProvider] ?? ''}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setDeepModels((prev) => ({ ...prev, [activeProvider]: v }));
+                          try { localStorage.setItem('tlm_deep_model_' + activeProvider, v); } catch {}
+                        }}
+                        placeholder={t('settings.deepModelPlaceholder')}
+                        className={inputCls}
+                        spellCheck={false}
+                        autoComplete="off"
+                      />
+                      <datalist id={`model-list-${activeProvider}`}>
+                        {modelChoices(activeProvider).map((m) => (
+                          <option key={m.id} value={m.id}>{m.label}</option>
+                        ))}
+                      </datalist>
+                      <p className="text-[11px] text-[#87857F]">{t('settings.deepModelHint')}</p>
+                    </div>
+                  )}
+                </Card>
               </>
             )}
 
@@ -1145,6 +1583,23 @@ export function SettingsModal({
 
             {/* ── DATA & RESET ── */}
             {!q && activeSection === 'data' && (
+              <>
+              <Card title={t('settings.card.privacyTitle')} desc={t('settings.card.privacyDesc')}>
+                <Row
+                  label={t('settings.livePrices')}
+                  hint={t('settings.livePricesHint')}
+                  control={
+                    <Switch
+                      checked={livePricing}
+                      onChange={(v) => {
+                        setLivePricing(v);
+                        try { localStorage.setItem('tlm_online_pricing', String(v)); } catch {}
+                        persistConfig({ onlinePricing: v });
+                      }}
+                    />
+                  }
+                />
+              </Card>
               <Card>
                 <Row
                   label={t('settings.resetTitle')}
@@ -1195,10 +1650,13 @@ export function SettingsModal({
                   }
                 />
               </Card>
+              </>
             )}
           </div>
 
-          <footer className="flex flex-shrink-0 items-center justify-end gap-2 border-t border-white/[0.06] px-6 py-3">
+          <footer className="flex flex-shrink-0 items-center justify-between gap-2 border-t border-white/[0.06] px-6 py-3">
+            <span className="text-[10.5px] text-[#575654]">{t('settings.instantHint')}</span>
+            <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={requestClose}
@@ -1216,6 +1674,7 @@ export function SettingsModal({
               <Save size={12} />
               {keysLoaded ? t('settings.save') : t('settings.save') + '…'}
             </button>
+            </div>
           </footer>
         </div>
       </div>

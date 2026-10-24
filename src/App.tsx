@@ -2,24 +2,26 @@ import { useState, useRef, useEffect, useCallback, type FormEvent } from 'react'
 import { ts } from './lib/format';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
-import { DiffView } from './components/DiffView';
 import { ProjectDashboard } from './components/ProjectDashboard';
 import { CommandBar } from './components/CommandBar';
 import { FilePreviewDrawer, type PreviewItem } from './components/FilePreviewDrawer';
 import type { AttachedImage } from './lib/imageAttach';
 import { ChatView } from './components/ChatView';
-import type { DiffCodeData } from './components/DiffView';
 import { useThalamus } from './hooks/useThalamus';
 import { SettingsModal } from './components/SettingsModal';
+import { NucleusCommand } from './components/NucleusCommand';
+import { CommandPalette, type PaletteAction } from './components/CommandPalette';
 import { AuthScreen } from './components/auth/AuthScreen';
 import { useToast } from './components/Toast';
 import { API_BASE } from './services/ThalamusClient';
 import { aiChat, aiChatStream, userMessage, getActiveProvider } from './services/aiClient';
 import { setProviderModel } from './lib/models';
-import { priceForModel, usePriceMap } from './lib/pricing';
 import {
+  LOCAL_LOADING_EVENT,
   LOCAL_MODELS_EVENT,
+  clearPendingLocalModel,
   getCachedLocalScan,
+  getPendingLocalModel,
   isLocalProvider,
   listServing,
   localEndpointsFresh,
@@ -27,17 +29,24 @@ import {
   providerForBase,
   scanLocalModels,
   serveLocalModel,
+  setPendingLocalModel,
   stopLocalModel,
   type ModelFile,
 } from './lib/localModels';
-import { API_PROVIDERS, activeProviderStorageKey, baseStorageKey } from './lib/providers';
+import { activeProviderStorageKey, baseStorageKey } from './lib/providers';
+import { connectionName, upsertConnection } from './lib/connections';
 import { getWorkspaceName, getWorkspaceRoot, openProject, pruneRecentProjects, rememberProject } from './lib/workspace';
 import { planFileContext, addSavings, loadSavings, estimateTokens, cacheAwareHistory, type SessionSavings } from './lib/contextPlan';
 import { expandCompactDiff } from './lib/compactDiff';
+import { askQuestionHistoryText, parseAskQuestion } from './lib/askQuestion';
+import { chatToJson, chatToMarkdown, downloadText, safeFilename } from './lib/chatExport';
+import type { NucleusAction } from './lib/nucleusActions';
+import { NUCLEUS_LIMITS } from './lib/nucleusPolicy';
 import { policyFromSettings, policyDirective, type AnswerMode } from './lib/intentPolicy';
 import { routeModel, type RoutingMode, type TaskClass } from './lib/modelRouter';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
-import { explainError, splitExplanation } from './lib/errors';
+import { invoke } from '@tauri-apps/api/core';
+import { explainError, splitExplanation, type ExplainedError } from './lib/errors';
 import { markSwitchStart, reportSwitchPaint } from './lib/perfTrace';
 import { useT, t } from './lib/i18n';
 import type { Message, ChatItem, User } from './types';
@@ -48,6 +57,12 @@ import './App.css';
 // Mesaj rozetleri pazarlama modeli adı (Claude/GPT…) değil, gerçekte
 // kullanılanı yazar.
 const localEngineStamp = () => t('app.engineStamp');
+
+const chatErrorContent = (x: ExplainedError): string => {
+  const action = splitExplanation(x.explanation).rest ?? x.explanation;
+  const detail = x.detail && !action.includes(x.detail) ? `\n\n\`${x.detail}\`` : '';
+  return `**[${x.code}] ${x.title}**\n\n${action}${detail}\n\n*${t('toast.wiki')}*`;
+};
 
 // Yerel model yalnızca sohbet sürerken açık kalsın: son etkinlikten bu kadar
 // sonra uygulamanın başlattığı sunucular durdurulur (sonraki istekte yeniden başlar).
@@ -68,10 +83,15 @@ export default function App() {
   // Images attached to the next message. A model is only called when this is
   // non-empty, so text-only chats keep the zero-model compression path.
   const [pendingImages, setPendingImages] = useState<AttachedImage[]>([]);
-  const [currentView, setCurrentView] = useState<'chat' | 'diff' | 'project'>(() => {
+  const [currentView, setCurrentView] = useState<'chat' | 'project'>(() => {
     const saved = localStorage.getItem('tlm_start_view');
     return saved === 'project' ? 'project' : 'chat';
   });
+  /** Proje paneli ilk açılıştan sonra gizlenir, unmount edilmez (PTY yaşar). */
+  const [projectMounted, setProjectMounted] = useState(currentView === 'project');
+  useEffect(() => {
+    if (currentView === 'project') setProjectMounted(true);
+  }, [currentView]);
   // Gerçekte yanıtlayacak sağlayıcı · model; composer'ın dürüst ipucu için.
   // Ayarlar değişince (anahtar kaydı, sağlayıcı seçimi, model) yeniden çözülür.
   const [activeProviderId, setActiveProviderId] = useState<string>('');
@@ -81,6 +101,15 @@ export default function App() {
     let cancelled = false;
     const resolve = async () => {
       try {
+        const pending = getPendingLocalModel();
+        if (pending) {
+          if (cancelled) return;
+          const name = connectionName('managed');
+          setActiveProviderId('managed');
+          setActiveModel(pending.model);
+          setActiveModelLabel(`${name} — ${pending.model}`);
+          return;
+        }
         const p = await getActiveProvider();
         if (cancelled) return;
         setActiveProviderId(p?.id ?? '');
@@ -127,12 +156,37 @@ export default function App() {
 
   const useLocalEndpoint = useCallback((provider: string, baseUrl: string, model: string) => {
     lastModelUseRef.current = Date.now();
+    // Ollama'nın Windows CUDA yolu modeli RAM'e kopyalıyor (düşük RAM'de
+    // 20–50 sn). Tek GGUF blob'u olan modelleri kendi llama-server'ımızla
+    // mmap üzerinden aç: aynı model, ~4–10 sn. Görsel/parçalı modellerde
+    // backend otomatik olarak Ollama'ya düşer.
+    const file = /:11434\/v1$/.test(normalizeBaseUrl(baseUrl))
+      ? getCachedLocalScan()?.files.find(
+          (f) => f.kind === 'ollama' && f.model === model && f.servable
+        )
+      : undefined;
+    if (provider === 'ollama' && file) {
+      setPendingLocalModel({
+        id: file.id,
+        path: file.path,
+        model: file.model,
+        label: file.label,
+      });
+      const name = connectionName('managed');
+      setActiveProviderId('managed');
+      setActiveModel(file.model);
+      setActiveModelLabel(`${name} - ${file.model}`);
+      return;
+    }
+    clearPendingLocalModel();
     try {
       localStorage.setItem(activeProviderStorageKey, provider);
       localStorage.setItem(baseStorageKey(provider), baseUrl);
     } catch { /* noop */ }
+    // Seçilen uç nokta bir KAYITLI BAĞLANTIYA dönüşür (geçiş listesinde görünsün).
+    if (provider !== 'managed') upsertConnection({ id: provider, baseUrl });
     setProviderModel(provider, model);
-    const name = API_PROVIDERS.find((p) => p.id === provider)?.name ?? provider;
+    const name = connectionName(provider);
     setActiveProviderId(provider);
     setActiveModel(model);
     setActiveModelLabel(`${name} · ${model}`);
@@ -140,11 +194,12 @@ export default function App() {
 
   const selectProviderModel = useCallback((provider: string, model: string) => {
     lastModelUseRef.current = Date.now();
+    clearPendingLocalModel();
     try {
       localStorage.setItem(activeProviderStorageKey, provider);
     } catch { /* noop */ }
     setProviderModel(provider, model);
-    const name = API_PROVIDERS.find((p) => p.id === provider)?.name ?? provider;
+    const name = connectionName(provider);
     setActiveProviderId(provider);
     setActiveModel(model);
     setActiveModelLabel(`${name} · ${model}`);
@@ -156,8 +211,18 @@ export default function App() {
       useLocalEndpoint(providerForBase(served), served, file.model);
       return;
     }
-    const result = await serveLocalModel(file.id, file.path);
-    useLocalEndpoint('managed', result.baseUrl, result.model);
+    // Motoru SEÇİM ANINDA başlatma: ilk istek gelene kadar bekle.
+    lastModelUseRef.current = Date.now();
+    setPendingLocalModel({
+      id: file.id,
+      path: file.path,
+      model: file.model,
+      label: file.label,
+    });
+    const name = connectionName('managed');
+    setActiveProviderId('managed');
+    setActiveModel(file.model);
+    setActiveModelLabel(`${name} — ${file.model}`);
   }, [useLocalEndpoint]);
 
   /**
@@ -302,15 +367,91 @@ export default function App() {
   
   // 🎯 Active file tracking on the project screen (synced with Header)
   const [activeTab, setActiveTab] = useState<string>('');
+  const projectContextRef = useRef<{ activeFile: string; code: string; cursorLine: number; selection: string }>({
+    activeFile: '',
+    code: '',
+    cursorLine: 0,
+    selection: '',
+  });
+  const handleProjectContext = useCallback((context: { activeFile: string; code: string; cursorLine: number; selection: string }) => {
+    projectContextRef.current = context;
+  }, []);
 
   // Oturum tasarrufu (görünür kılınır): planlayıcının yeniden göndermediği içerik.
   const [sessionSave, setSessionSave] = useState<SessionSavings>({ avoidedChars: 0, files: 0, turns: 0 });
 
-  // 🎯 Live data state for DiffView
-  const [selectedDiffData, setSelectedDiffData] = useState<DiffCodeData | null>(null);
-  
   // ⚙️ Ayarlar paneli state'i
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
+
+  // Uygulama geneli Nucleus komut yüzeyi (Siri benzeri global çağrı).
+  const [isNucleusOpen, setIsNucleusOpen] = useState<boolean>(false);
+  const [isPaletteOpen, setIsPaletteOpen] = useState<boolean>(false);
+
+  /**
+   * Projects görünümünde Nucleus kalıcı bir panel değil, yüzen bir penceredir.
+   * Global çağrılar (Alt+N, başlık, palet) proje ekranında o pencereyi açar;
+   * diğer görünümlerde mevcut komut overlay'i kullanılır.
+   */
+  const openNucleus = useCallback(() => {
+    if (currentView === 'project') {
+      setIsNucleusOpen(false);
+      window.dispatchEvent(new Event('tlm:nucleus-open'));
+    } else {
+      setIsNucleusOpen(true);
+    }
+  }, [currentView]);
+
+  const toggleNucleus = useCallback(() => {
+    setIsPaletteOpen(false);
+    if (currentView === 'project') {
+      setIsNucleusOpen(false);
+      window.dispatchEvent(new Event('tlm:nucleus-toggle'));
+    } else {
+      setIsNucleusOpen((open) => !open);
+    }
+  }, [currentView]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const altN = event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && event.code === 'KeyN';
+      const chord = (event.ctrlKey || event.metaKey) && event.shiftKey && (event.code === 'Space' || event.key === ' ');
+      const palette = (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'k';
+      if (!event.repeat && (altN || chord)) {
+        event.preventDefault();
+        toggleNucleus();
+      } else if (!event.repeat && palette) {
+        event.preventDefault();
+        setIsNucleusOpen(false);
+        setIsPaletteOpen((open) => !open);
+      } else if (event.key === 'Escape' && isNucleusOpen) {
+        setIsNucleusOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isNucleusOpen, toggleNucleus]);
+
+  /**
+   * Dış bağlantılar: Tauri webview'de `target="_blank"` yeni pencere izni
+   * olmadığı için sessizce ölüyordu. Tüm http(s)/mailto tıklamalarını yakalayıp
+   * sistem tarayıcısına veririz (tarayıcı önizlemesinde window.open'a düşer).
+   */
+  useEffect(() => {
+    const onClick = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      const anchor = target?.closest?.('a[href]') as HTMLAnchorElement | null;
+      if (!anchor) return;
+      const href = anchor.getAttribute('href') || '';
+      if (!/^(https?:\/\/|mailto:)/i.test(href)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      invoke('open_external', { url: href }).catch(() => {
+        window.open(href, '_blank', 'noopener,noreferrer');
+      });
+    };
+    document.addEventListener('click', onClick, true);
+    return () => document.removeEventListener('click', onClick, true);
+  }, []);
   
   // 🔑 User session state (read from localStorage — corrupt data must never crash the app)
   const [user, setUser] = useState<User | null>(() => {
@@ -350,11 +491,6 @@ export default function App() {
     return () => window.removeEventListener('thalamus_config_changed', syncSettings);
   }, []);
 
-  // 💰 Fiyat listesi: yerleşik referans + (açıksa) LiteLLM kataloğu; anahtar
-  // gerçek model id'sidir (pazarlama adı değil).
-  const modelPricing = usePriceMap(onlinePricing);
-  const activePrice = priceForModel(modelPricing, activeModel);
-
   const { isLoading: engineLoading, checkHealth } = useThalamus();
 
   /** Welcome card 4: a real engine health check (HTTP + latency). */
@@ -373,6 +509,16 @@ export default function App() {
     }
   };
   const [loading, setLoading] = useState<boolean>(false);
+  // İlk mesajda yerel model yüklenirken "Yerel model yükleniyor · X" göster.
+  const [localLoadingLabel, setLocalLoadingLabel] = useState<string>('');
+  useEffect(() => {
+    const onLoading = (e: Event) => {
+      const detail = (e as CustomEvent<string>).detail;
+      setLocalLoadingLabel(typeof detail === 'string' ? detail : '');
+    };
+    window.addEventListener(LOCAL_LOADING_EVENT, onLoading);
+    return () => window.removeEventListener(LOCAL_LOADING_EVENT, onLoading);
+  }, []);
   const chatEndRef = useRef<HTMLDivElement>(null);
   // T2: süren AI isteğini iptal etmek için (Stop düğmesi).
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -392,7 +538,7 @@ export default function App() {
         try {
           const servers = await listServing();
           if (servers.length === 0) return;
-          await Promise.all(servers.map((s) => stopLocalModel(s.id)));
+          await Promise.all(servers.map((s) => stopLocalModel(s.id, true)));
           window.dispatchEvent(new Event(LOCAL_MODELS_EVENT));
         } catch { /* noop */ }
       })();
@@ -442,6 +588,12 @@ export default function App() {
   const streamPersistAtRef = useRef(0);
   /** Şu an akışı süren sohbet: sohbetten çıkıp dönersek akış devam eder. */
   const streamingChatIdRef = useRef<string | null>(null);
+  /** Başka sohbetteyken akış kopyasını en fazla saniyede 1 yazar. */
+  const ownerPersistAtRef = useRef(0);
+  /** Kota uyarısını sohbet başına yalnız bir kez gösterir. */
+  const ownerQuotaWarnedRef = useRef<string | null>(null);
+  /** 200 mesaj sınırı uyarısını sohbet başına yalnız bir kez gösterir. */
+  const historyTrimWarnedRef = useRef<string | null>(null);
 
   // Load messages whenever activeChatId changes
   useEffect(() => {
@@ -504,6 +656,14 @@ export default function App() {
         const now = Date.now();
         if (now - streamPersistAtRef.current < 1000) return;
         streamPersistAtRef.current = now;
+      }
+      if (messages.length > MAX_STORED_MESSAGES && historyTrimWarnedRef.current !== activeChatId) {
+        historyTrimWarnedRef.current = activeChatId;
+        showToast(
+          t('toast.historyTrimmed'),
+          t('toast.historyTrimmedMsg', { n: MAX_STORED_MESSAGES }),
+          'info'
+        );
       }
       const capped = messages.length > MAX_STORED_MESSAGES ? messages.slice(-MAX_STORED_MESSAGES) : messages;
       // Görseller (data URL'ler) kalıcı depoya gitmez — 5 MB kota rekoru
@@ -584,6 +744,11 @@ export default function App() {
     showToast(t('toast.chatRenamed'), t('toast.chatRenamedMsg'), 'success');
   };
 
+  /** Sabitleme sohbet listesiyle birlikte kalıcılaşır (thalamus_chats). */
+  const handlePinChat = useCallback((chatId: string, pinned: boolean) => {
+    setChats(prev => prev.map(c => c.id === chatId ? { ...c, pinned } : c));
+  }, []);
+
 // Optimized scroll: only in 'chat' view, with instant (auto) scrolling
   // Otomatik scroll: nur yukarıda okurken her yeni mesaj kullanıcıyı alta
   // fırlatmayı durdurur — yalnızca alt bölgeye (±140px) yakınsak kaydırırız.
@@ -624,7 +789,8 @@ export default function App() {
         : 'stop';
     };
 
-    if (!currentId || chats.length === 0) {
+    const isNewChat = !currentId || chats.length === 0;
+    if (isNewChat) {
       currentId = 'chat_' + Date.now();
       const generatedTitle = userText.length > 22 ? userText.slice(0, 22) + '...' : userText;
       const newChat: ChatItem = {
@@ -663,6 +829,11 @@ export default function App() {
     };
 
     if (!isRegenerate) {
+      if (isNewChat) {
+        try {
+          localStorage.setItem(`thalamus_chat_messages_${currentId}`, JSON.stringify([userMsg]));
+        } catch { /* yok say */ }
+      }
       setMessages(prev => [...prev, userMsg]);
     }
     setLoading(true);
@@ -673,16 +844,34 @@ export default function App() {
     // dönmeli: hâlâ aynı sohbetteysek ekrana, değilsek o sohbetin kalıcı
     // kopyasına yazılır (dönünce localStorage'dan yüklenecek).
     const ownerChatId = currentId;
-    const applyMessages = (fn: (prev: Message[]) => Message[]) => {
+    /**
+     * Akış sürerken kullanıcı başka sohbete geçerse cevap sahibi sohbetin
+     * kalıcı kopyasına yazılır. `throttled` yalnız 40 ms'lik boyama
+     * çağrılarında true olur: senkron localStorage'ı saniyede 25 kez
+     * yazmayız. Görseller ve 200 mesaj sınırı normal kayıt yoluyla aynıdır
+     * (data URL'ler 5 MB kotasını patlatmasın).
+     */
+    const applyMessages = (fn: (prev: Message[]) => Message[], throttled = false) => {
       if (activeChatIdRef.current === ownerChatId) {
         setMessages(fn);
         return;
       }
+      const now = Date.now();
+      if (throttled && now - ownerPersistAtRef.current < 1000) return;
+      ownerPersistAtRef.current = now;
       try {
         const key = `thalamus_chat_messages_${ownerChatId}`;
         const stored = JSON.parse(localStorage.getItem(key) || '[]') as Message[];
-        localStorage.setItem(key, JSON.stringify(fn(stored)));
-      } catch {}
+        const next = fn(stored);
+        const capped = next.length > MAX_STORED_MESSAGES ? next.slice(-MAX_STORED_MESSAGES) : next;
+        const dropImages = (k: string, value: unknown) => (k === 'images' ? undefined : value);
+        localStorage.setItem(key, JSON.stringify(capped, dropImages));
+      } catch {
+        if (ownerQuotaWarnedRef.current !== ownerChatId) {
+          ownerQuotaWarnedRef.current = ownerChatId;
+          showToast(t('toast.storageFull'), t('toast.storageFullMsg'), 'error', undefined, '[507] localStorage quota exceeded');
+        }
+      }
     };
 
     // Images attached → a single vision call. This is the only branch that uses
@@ -711,21 +900,27 @@ export default function App() {
             if (lastUserIdx !== -1) historySrc = messages.slice(0, lastUserIdx);
           }
           const history = cacheAwareHistory(
-            historySrc.filter(m => typeof m.content === 'string' && m.content.trim().length > 0),
+            historySrc
+              .map(m => ({ role: m.role, content: askQuestionHistoryText(m) }))
+              .filter(m => m.content.trim().length > 0),
             ownerChatId
-          ).map(m => ({ role: m.role, content: m.content as string }));
+          );
           const visionStartedAt = performance.now();
           const res = await aiChat([
             ...history,
             userMessage(userText.trim() || t('app.describeImage'), images.map((i) => ({ url: i.url, detail: i.detail }))),
-          ], [], null, signal);
+          ], [], null, signal, { closeAfter: true });
+          const parsed = parseAskQuestion(expandCompactDiff(res.content));
+          const hasAnswer = parsed.content.trim().length > 0 || !!parsed.question;
           applyMessages(prev => [...prev, {
             role: 'assistant',
-            content: expandCompactDiff(res.content),
+            content: hasAnswer ? parsed.content : res.reasoning ? t('chat.emptyReasoning') : t('chat.emptyResponse'),
+            question: parsed.question,
             // Düşünme metni (destekleyen sağlayıcılarda) ayrı gösterilir.
             reasoning: res.reasoning || undefined,
             timestamp: ts(),
             latencyMs: Math.round(performance.now() - visionStartedAt),
+            usage: res.usage,
             // D1: gercekten cagrilan saglayici + model yazilir.
             modelName: `${provider.name} · ${provider.model}`,
           }]);
@@ -746,7 +941,7 @@ export default function App() {
           // ilk cumle atilir, yalniz aksiyon/aciklama satiri kalir.
           applyMessages(prev => [...prev, {
             role: 'assistant',
-            content: `**[${x.code}] ${x.title}**\n\n${splitExplanation(x.explanation).rest ?? x.explanation}\n\n*${t('toast.wiki')}*`,
+            content: chatErrorContent(x),
             timestamp: ts(),
             modelName: t('app.visionFailed'),
           }]);
@@ -779,13 +974,11 @@ export default function App() {
           if (lastUserIdx !== -1) historySrc = messages.slice(0, lastUserIdx);
         }
         const history = cacheAwareHistory(
-          historySrc.filter(m =>
-            typeof m.content === 'string' &&
-            m.content.trim().length > 0 &&
-            !m.content.startsWith('**[')
-          ),
+          historySrc
+            .map(m => ({ role: m.role, content: askQuestionHistoryText(m) }))
+            .filter(m => m.content.trim().length > 0 && !m.content.startsWith('**[')),
           ownerChatId
-        ).map(m => ({ role: m.role, content: m.content as string }));
+        );
         // OTURUM PLANLAYICI (lab'da ölçülmüş, kayıpsız): değişmeyen ve hâlâ
         // bağlamda olan dosyalar referansa dönüşür — içerik yeniden gönderilmez.
         const ctxPlan = planFileContext(ownerChatId, messages.length + 1, fileContext ?? []);
@@ -872,7 +1065,10 @@ export default function App() {
             }));
           } catch { /* yok say */ }
         }
-        const policyMsgs = directive ? [{ role: 'system' as const, content: directive }] : [];
+        // Yerel modeller (1–3B) uzun politika ve @T talimatlarında kaybolur;
+        // onlara kısa, doğrudan bir sistem istemi gönderilir.
+        const localActive = isLocalProvider(provider.id);
+        const policyMsgs = directive && !localActive ? [{ role: 'system' as const, content: directive }] : [];
         // Akış: balon hemen görünür, parçalar ~40 ms'de bir boyanır. ChatView
         // metni her zaman biçimli çizer (dondurulmuş bloklar + canlı kuyruk).
         streamingChatIdRef.current = ownerChatId;
@@ -886,6 +1082,7 @@ export default function App() {
 
         let streamed = '';
         let reasoningAcc = '';
+        let engineMeta: Message['engine'];
         let flushTimer: number | undefined;
         const paint = () => {
           flushTimer = undefined;
@@ -900,7 +1097,7 @@ export default function App() {
               }
             }
             return copy;
-          });
+          }, true);
         };
         const schedulePaint = () => {
           if (flushTimer !== undefined) return;
@@ -932,11 +1129,18 @@ export default function App() {
           const res = await aiChatStream([
             {
               role: 'system',
-              content:
-                'You are Thalamus, a helpful desktop assistant for coding. Always answer in the same language the user writes in (Turkish user → Turkish answer). ' +
+              content: localActive
+                ? 'You are Thalamus, a helpful desktop assistant. Answer in the same language the user writes in. Lead with the direct answer; keep it short unless the user asks for detail. Never claim to see files or context you were not given.'
+                : 'You are Thalamus, a helpful desktop assistant for coding. Always answer in the same language the user writes in (Turkish user → Turkish answer). ' +
                 'Keep prose minimal: at most two short sentences unless the user asks for more detail. ' +
                 // Sözcükten bağımsız güvenlik ağı: kullanıcı tercihi her zaman varsayılanı ezer.
-                'EXCEPTION: whenever the user asks for more detail, a complete file, or exact/original text — however they phrase it — honor that request; never let the brevity or diff default override an explicit user preference. If unsure, ask one short clarifying question. ' +
+                'EXCEPTION: whenever the user asks for more detail, a complete file, or exact/original text — however they phrase it — honor that request; never let the brevity or diff default override an explicit user preference. ' +
+                'If the request is genuinely ambiguous and guessing could waste work, ask one short clarifying question instead of guessing. ' +
+                'QUESTION PROTOCOL: output ONLY a fenced code block tagged question, containing JSON shaped like ' +
+                '{"question":"...","header":"...","options":[{"label":"...","description":"..."}],"multiple":false,"allowOther":true}. ' +
+                'Write the question and options in the user’s language. Give 2–4 concrete, mutually exclusive options; ' +
+                'use multiple:true only when several apply. Never ask for details already present in the conversation or attached files. ' +
+                'If the request is clear enough, answer normally — do not ask a question just to be safe. ' +
                 // Kod yanıtı biçimi (ölçülmüş karar, lab TRIALS-014): dosyayı baştan
                 // yazmak yerine yalnız değişen satırları `git diff` biçiminde yaz.
                 // Çıktı token'ı ~%82 azalıyor; anlama farkı ölçülemedi.
@@ -961,14 +1165,33 @@ export default function App() {
               reasoningAcc += chunk;
               schedulePaint();
             },
+            onMeta: (meta) => {
+              if (meta.engine) {
+                engineMeta = {
+                  originalTokens: meta.engine.original_tokens ?? 0,
+                  compressedTokens: meta.engine.compressed_tokens ?? 0,
+                  compressedMessages: meta.engine.compressed_messages,
+                };
+              }
+            },
           });
           if (res.content) streamed = res.content;
           if (res.reasoning) reasoningAcc = res.reasoning;
+          const parsed = parseAskQuestion(expandCompactDiff(streamed));
+          const hasAnswer = parsed.content.trim().length > 0 || !!parsed.question;
+          const hitLimit = res.finishReason === 'length';
+          const emptyReply = !hasAnswer
+            ? (hitLimit ? t('chat.lengthEmpty') : reasoningAcc.trim() ? t('chat.emptyReasoning') : t('chat.emptyResponse'))
+            : '';
           settle({
-            content: expandCompactDiff(streamed),
+            content: hasAnswer ? parsed.content : emptyReply,
+            question: parsed.question,
             reasoning: reasoningAcc || undefined,
             latencyMs: Math.round(performance.now() - textStartedAt),
             streamed: true,
+            usage: res.usage,
+            engine: engineMeta,
+            stopped: hitLimit && hasAnswer ? 'length' : undefined,
           });
         } catch (streamErr) {
           const timedOut = String((streamErr as Error)?.message ?? '').includes('TIMEOUT');
@@ -984,8 +1207,10 @@ export default function App() {
             throw streamErr;
           }
           // Karar: yazılan kısım KALIR; sebebi küçük bir not olarak gösterilir.
+          const partial = parseAskQuestion(expandCompactDiff(streamed));
           settle({
-            content: expandCompactDiff(streamed),
+            content: partial.content,
+            question: partial.question,
             reasoning: reasoningAcc || undefined,
             latencyMs: Math.round(performance.now() - textStartedAt),
             stopped: kind ?? 'error',
@@ -1008,7 +1233,7 @@ export default function App() {
         // mesaj olurdu. Baslik + aksiyon; tekrar eden ilk cumle atilir.
         applyMessages(prev => [...prev, {
           role: 'assistant',
-          content: `**[${x.code}] ${x.title}**\n\n${splitExplanation(x.explanation).rest ?? x.explanation}\n\n*${t('toast.wiki')}*`,
+          content: chatErrorContent(x),
           timestamp: ts(),
           modelName: localEngineStamp(),
         }]);
@@ -1059,24 +1284,20 @@ export default function App() {
   const handleOpenProjectView = useCallback(() => setCurrentView('project'), []);
   const handleOpenSettings = useCallback(() => setIsSettingsOpen(true), []);
 
-  const handleInspectDiff = useCallback((msg: Message) => {
-    // Silinen/olmayan sohbetten gelen eski mesajda İncele artık ölü veriyle
-    // diff açmaz — dürüst mesaj görüntülenir.
-    if (!chats.some(c => c.id === activeChatId)) {
-      showToast(t('chat.noChat'), t('chat.noChatMsg'), 'info');
-      return;
+  const handleNucleusAction = (action: NucleusAction) => {
+    if (action.type === 'navigate') {
+      setCurrentView(action.view);
+    } else if (action.type === 'new_chat') {
+      handleNewChat();
+      setCurrentView('chat');
+    } else if (action.type === 'open_settings') {
+      setIsSettingsOpen(true);
+    } else if (action.type === 'toggle_sidebar') {
+      setIsSidebarOpen((open) => !open);
+    } else if (action.type === 'stop_generation') {
+      handleStopRequest();
     }
-    setSelectedDiffData({
-      originalCode: msg.originalCodeSnippet || msg.content,
-      optimizedCode: msg.compressedCodeSnippet || '',
-      originalTokens: msg.metrics?.originalTokens,
-      compressedTokens: msg.metrics?.compressedTokens,
-      savingsPercentage: msg.metrics?.savingsPercentage,
-      engineTimeMs: msg.metrics?.executionTimeMs,
-      losslessVerified: msg.metrics?.losslessVerified
-    });
-    setCurrentView('diff');
-  }, [chats, activeChatId, showToast]);
+  };
 
   const handleSend = async (e: FormEvent, files?: { name: string; body: string }[]) => {
     e.preventDefault();
@@ -1087,6 +1308,16 @@ export default function App() {
     const userText = input.trim();
     setInput('');
     await handleSendMessage(userText, false, undefined, files);
+  };
+
+  const handleAnswerQuestion = async (idx: number, answer: string) => {
+    if (loading || engineLoading) return;
+    const text = answer.trim();
+    if (!text) return;
+    setMessages(prev => prev.map((message, i) => (
+      i === idx && message.question ? { ...message, questionAnswer: text } : message
+    )));
+    await handleSendMessage(text);
   };
 
   const handleRegenerate = async (assistantIdx: number) => {
@@ -1108,6 +1339,48 @@ export default function App() {
     }
     setMessages(prev => prev.slice(0, assistantIdx));
     await handleSendMessage(userText, true, userImages);
+  };
+
+  const handleExportChat = (chatId: string, format: 'md' | 'json') => {
+    const chat = chats.find((item) => item.id === chatId);
+    if (!chat) {
+      showToast(t('chat.noChat'), t('chat.noChatMsg'), 'info');
+      return;
+    }
+    let exported = messages;
+    if (chatId !== activeChatId) {
+      try {
+        const raw = localStorage.getItem(`thalamus_chat_messages_${chatId}`);
+        exported = raw ? (JSON.parse(raw) as Message[]) : [];
+      } catch {
+        exported = [];
+      }
+    }
+    if (exported.length === 0) {
+      showToast(t('chat.noChat'), t('chat.noChatMsg'), 'info');
+      return;
+    }
+    const text = format === 'json'
+      ? chatToJson(chat.title, exported)
+      : chatToMarkdown(chat.title, exported);
+    const filename = `${safeFilename(chat.title)}.${format === 'json' ? 'json' : 'md'}`;
+    const mime = format === 'json' ? 'application/json' : 'text/markdown';
+    if (!downloadText(filename, text, mime)) {
+      showToast(t('toast.exportFailed'), t('toast.exportFailedMsg'), 'error', undefined, '[500] blob download unavailable');
+      return;
+    }
+    showToast(t('toast.chatExported'), t('toast.chatExportedMsg', { name: filename }), 'success');
+  };
+
+  const handleCopyChat = () => {
+    if (messages.length === 0) {
+      showToast(t('chat.noChat'), t('chat.noChatMsg'), 'info');
+      return;
+    }
+    navigator.clipboard
+      .writeText(chatToMarkdown(activeChat.title, messages))
+      .then(() => showToast(t('chat.copied'), undefined, 'success'))
+      .catch(() => showToast(t('chat.copyFailed'), t('chat.copyFailedMsg'), 'error', undefined, '[500] clipboard unavailable'));
   };
 
   // Remember the configured workspace so it shows up in the projects list.
@@ -1152,6 +1425,88 @@ export default function App() {
     ? `projects / ${projectName} / ${activeTab}` 
     : `chats / ${activeChat.title}`;
 
+  const nucleusTranscript = messages
+    .slice(-NUCLEUS_LIMITS.transcriptMessages)
+    .map((message) => {
+      const content = askQuestionHistoryText(message).trim();
+      if (!content) return '';
+      return `${message.role === 'user' ? 'User' : 'Assistant'}: ${content}`;
+    })
+    .filter(Boolean)
+    .join('\n\n')
+    .slice(-NUCLEUS_LIMITS.transcriptChars);
+
+  const paletteActions: PaletteAction[] = [
+    {
+      id: 'palette:new-chat',
+      label: t('palette.newChat'),
+      run: () => {
+        handleNewChat();
+        setCurrentView('chat');
+      },
+    },
+    {
+      id: 'palette:settings',
+      label: t('palette.settings'),
+      run: handleOpenSettings,
+    },
+    {
+      id: 'palette:sidebar',
+      label: t('palette.toggleSidebar'),
+      run: () => setIsSidebarOpen((open) => !open),
+    },
+    {
+      id: 'palette:project',
+      label: t('palette.openProject'),
+      run: handleOpenProjectView,
+    },
+    {
+      id: 'palette:chat',
+      label: t('palette.chatView'),
+      run: () => setCurrentView('chat'),
+    },
+    {
+      id: 'palette:nucleus',
+      label: t('nucleus.title'),
+      hint: 'Alt+N',
+      keywords: 'ai assistant command overlay',
+      run: openNucleus,
+    },
+    {
+      id: 'palette:export-md',
+      label: t('palette.exportMd'),
+      run: () => handleExportChat(activeChatId, 'md'),
+    },
+    {
+      id: 'palette:export-json',
+      label: t('palette.exportJson'),
+      run: () => handleExportChat(activeChatId, 'json'),
+    },
+    {
+      id: 'palette:copy-chat',
+      label: t('palette.copyChat'),
+      run: handleCopyChat,
+    },
+    ...(loading
+      ? [{
+          id: 'palette:stop',
+          label: t('palette.stop'),
+          run: handleStopRequest,
+        }]
+      : []),
+    ...chats.slice(0, 12).map((chat) => ({
+      id: `palette:chat:${chat.id}`,
+      label: chat.title,
+      hint: t('palette.chat'),
+      keywords: chat.title,
+      run: () => {
+        markSwitchStart();
+        setActiveChatId(chat.id);
+        setCurrentView('chat');
+      },
+    })),
+  ];
+
   if (!user) {
     return <AuthScreen onLogin={(u) => setUser(u)} />;
   }
@@ -1159,7 +1514,11 @@ export default function App() {
   return (
     <div className="app-container">
       <div className="header-wrapper">
-        <Header activePath={activePath} />
+        <Header
+          activePath={activePath}
+          onOpenNucleus={toggleNucleus}
+          onOpenPalette={() => setIsPaletteOpen(true)}
+        />
       </div>
 
       <div className="body-container">
@@ -1185,6 +1544,8 @@ export default function App() {
           }}
           onDeleteChat={handleDeleteChat}
           onRenameChat={handleRenameChat}
+          onPinChat={handlePinChat}
+          onExportChat={handleExportChat}
           onOpenProject={handleOpenProject}
           projectsVersion={workspaceVersion}
         />
@@ -1200,6 +1561,7 @@ export default function App() {
                 <ChatView
                   messages={messages}
                   loading={loading}
+                  loadingLabel={localLoadingLabel ? t('local.loadingModel', { model: localLoadingLabel }) : undefined}
                   userName={user?.name?.trim()?.toLowerCase() === 'guest user' ? '' : (user?.name?.trim() || '')}
                   targetModel={activeModel}
                   onlinePricing={onlinePricing}
@@ -1211,8 +1573,8 @@ export default function App() {
                   onOpenSettings={handleOpenSettings}
                   onEngineDiagnostic={handleEngineDiagnostic}
                   onRegenerate={handleRegenerate}
-                  onInspectDiff={handleInspectDiff}
                   onEditMessage={handleEditMessage}
+                  onAnswerQuestion={handleAnswerQuestion}
                   hasProvider={!!activeProviderId}
                 />
               </div>
@@ -1278,26 +1640,64 @@ export default function App() {
             </div>
           )}
 
-          {currentView === 'diff' && (
-            <DiffView 
-              onCloseDiff={() => setCurrentView('chat')} 
-              diffData={selectedDiffData ?? undefined}
-              title={activeChat.title}
-              modelName={activeModel || activeModelLabel}
-              pricePerToken={activePrice}
-            />
-          )}
-
-          {currentView === 'project' && (
-            <ProjectDashboard 
-              key={workspaceVersion}
-              activeTab={activeTab} 
-              setActiveTab={setActiveTab} 
-              onOpenPreview={openPreview}
-            />
+          {/* Proje paneli bir kez açıldıktan sonra unmount EDİLMEZ: görünüm
+              değişince yalnız gizlenir. Böylece terminal PTY oturumu ve açık
+              sekmeler sohbete geçip dönünce yaşamaya devam eder. */}
+          {projectMounted && (
+            <div
+              style={{
+                display: currentView === 'project' ? 'flex' : 'none',
+                flexDirection: 'column',
+                flex: 1,
+                minWidth: 0,
+                minHeight: 0,
+                height: '100%',
+              }}
+            >
+              <ProjectDashboard
+                key={workspaceVersion}
+                activeTab={activeTab}
+                setActiveTab={setActiveTab}
+                onOpenPreview={openPreview}
+                onContextChange={handleProjectContext}
+                onOpenProject={handleOpenProject}
+                previewItem={currentView === 'project' ? previewItem : null}
+                onClosePreview={() => setPreviewItem(null)}
+              />
+            </div>
           )}
         </main>
       </div>
+      <CommandPalette
+        open={isPaletteOpen}
+        onClose={() => setIsPaletteOpen(false)}
+        actions={paletteActions}
+      />
+      <NucleusCommand
+        open={isNucleusOpen}
+        onClose={() => setIsNucleusOpen(false)}
+        context={{
+          view: currentView,
+          projectName,
+          chatTitle: activeChat.title,
+          modelLabel: activeModelLabel || activeModel,
+          hasProvider: !!activeProviderId,
+          messageCount: messages.length,
+          activeFile: currentView === 'project' ? (projectContextRef.current.activeFile || activeTab || undefined) : undefined,
+          activeFileCode: currentView === 'project' && projectContextRef.current.activeFile === activeTab
+            ? projectContextRef.current.code
+            : undefined,
+          activeFileLine: currentView === 'project' && projectContextRef.current.activeFile === activeTab
+            ? projectContextRef.current.cursorLine
+            : undefined,
+          activeFileSelection: currentView === 'project' && projectContextRef.current.activeFile === activeTab && projectContextRef.current.selection
+            ? projectContextRef.current.selection
+            : undefined,
+          sidebarOpen: isSidebarOpen,
+          transcript: nucleusTranscript,
+        }}
+        onAction={handleNucleusAction}
+      />
       <SettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}

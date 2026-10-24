@@ -7,10 +7,18 @@ import {
   Volume2, VolumeX, Repeat, FlipHorizontal2, FlipVertical2, ZoomIn, ZoomOut, Maximize2, Pencil,
   Eye, Save, WrapText, ListOrdered, Copy, Grid3x3, Check,
 } from 'lucide-react';
-import { FileViewer, type FileViewerHandle } from '@file-viewer/react-full';
+// `react-full` yerine taban paket: `react-full` varsayılan olarak `preset-all`
+// ithal ediyor; o da CAD (AGPL), 3D/OCCT (LGPL) ve eski PPT (proprietary)
+// runtime'larını pakete sokuyordu. Preset'i aşağıda açıkça veriyoruz.
+import { FileViewer, type FileViewerHandle } from '@file-viewer/react';
 import { findFileViewerZoomProvider, resolveFileViewerScrollContainer } from '@file-viewer/core';
+import { FILE_VIEWER_OPTIONS } from '../lib/fileViewerSetup';
 import { useT } from '../lib/i18n';
 import { useFloatingPanel, useAutoMinWidth, FloatResizeHandle, FLOATING_CHROME } from './floating';
+
+/** Masaüstünde yeni pencere izni yok; blob'u sistem tarayıcısına vermek de
+ *  mümkün değil. Bu yüzden "pencerede aç" yalnız tarayıcı önizlemesinde var. */
+const IS_TAURI = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
 /** Standart zoom basamakları (tarayıcı/PDF görüntüleyici alışkanlığı). */
 const ZOOM_STEPS = [0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3];
@@ -460,7 +468,9 @@ export function FilePreviewDrawer({ item, onClose, inline = false, contentWidth 
   // Hangi dalın çizileceğini tek yerde belirle: viewer kendi içinde kaydırır,
   // native dallar ise dış kapsayıcıda. Böylece gereksiz (yeşil) dış
   // scrollbar oluşmaz.
-  const viewMode = useMemo<'image' | 'video' | 'audio' | 'text' | 'viewer' | 'none'>(() => {
+  const viewMode = useMemo<'image' | 'video' | 'audio' | 'text' | 'viewer' | 'heic' | 'none'>(() => {
+    // HEIC/HEIF: libheif (LGPL) paketlenmiyor. Net bir mesaj + İndir sunuyoruz.
+    if (/\.(heic|heif)$/i.test(item.name) || /^image\/hei[cf]/i.test(item.mime ?? '')) return 'heic';
     if (item.kind === 'image' && item.url) return 'image';
     if (item.kind === 'video' && item.url) return 'video';
     if (item.kind === 'audio' && item.url) return 'audio';
@@ -1066,6 +1076,8 @@ export function FilePreviewDrawer({ item, onClose, inline = false, contentWidth 
   // @file-viewer `update()` çağırıp PDF'i yeniden yükleyip zoom'u fit
   // ölçeğine (%63) geri döndürüyordu.
   const viewerOptions = useMemo(() => ({
+    // preset-standard + asset kökü (yalnız Apache-2.0 renderer'lar).
+    ...FILE_VIEWER_OPTIONS,
     theme: 'dark' as const,
     // Ctrl/⌘ + tekerlek (ve pinch) ile yakınlaştırma; düz tekerlek kaydırır.
     zoomGestures: { wheel: true, pinch: true },
@@ -1135,14 +1147,16 @@ export function FilePreviewDrawer({ item, onClose, inline = false, contentWidth 
           >
             <Download size={12} /> {t('preview.download')}
           </button>
-          <button
-            type="button"
-            onClick={() => openInWindow(item)}
-            className="p-1 rounded cursor-pointer text-obsidian-muted hover:text-obsidian-text transition-colors"
-            title={t('preview.openExternal')}
-          >
-            <ExternalLink size={15} />
-          </button>
+          {!IS_TAURI && (
+            <button
+              type="button"
+              onClick={() => openInWindow(item)}
+              className="p-1 rounded cursor-pointer text-obsidian-muted hover:text-obsidian-text transition-colors"
+              title={t('preview.openExternal')}
+            >
+              <ExternalLink size={15} />
+            </button>
+          )}
           <button
             type="button"
             onClick={fv.toggle}
@@ -1263,6 +1277,10 @@ export function FilePreviewDrawer({ item, onClose, inline = false, contentWidth 
               />
             </div>
           </div>
+        ) : viewMode === 'heic' ? (
+          <p className="p-4 text-[12px] leading-relaxed text-obsidian-muted">
+            {t('preview.heicUnsupported')}
+          </p>
         ) : viewMode === 'video' ? (
           <div className="p-3">
             <video
@@ -1426,7 +1444,7 @@ export function FilePreviewDrawer({ item, onClose, inline = false, contentWidth 
       <MenuItem label={t('preview.copyText')} disabled={!menu.canCopy} onClick={() => { closeMenu(); copySelection(); }} />
       <div className="my-1 h-px bg-obsidian-border" />
       <MenuItem label={t('preview.download')} onClick={() => { closeMenu(); triggerDownload(item.name, item.url, item.buffer, edit.on ? edit.draft : item.body); }} />
-      <MenuItem label={t('preview.openExternal')} onClick={() => { closeMenu(); openInWindow(item); }} />
+      {!IS_TAURI && <MenuItem label={t('preview.openExternal')} onClick={() => { closeMenu(); openInWindow(item); }} />}
     </div>,
     document.body,
   ) : null;

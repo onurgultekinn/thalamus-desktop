@@ -28,6 +28,17 @@ tauri-plugin-dialog = "~2.7.3"
 # Thalamus local compression engine (pure Rust — no external crate/model)
 tiktoken-rs = "0.5"
 
+# Segment analizini cekirdeklere dagitmak icin (kayipsiz: yalnizca zamanlama degisir)
+rayon = "1"
+# Ince tokenizer katmani: lookahead'siz regex (tiktoken'in fancy_regex'ine gore
+# ~3x hizli tarama) + public byte_pair_encode. Cikti tiktoken ile birebir ayni.
+regex = "1"
+base64 = "0.22"
+# tiktoken'in cl100k deseni (lookahead'li) birebir ayni kullanilir.
+fancy-regex = "0.12"
+# tiktoken-rs'in rank tablosuyla ayni hasher (byte_pair_encode imzasi bunu ister).
+rustc-hash = "1"
+
 # HTTP backend — a local axum server for browser preview and desktop
 axum = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "net"] }

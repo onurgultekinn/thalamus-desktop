@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useT } from '../lib/i18n';
 
 export interface PixelAgent {
@@ -11,6 +12,8 @@ interface Props {
   agents: PixelAgent[];
   selected: string | null;
   onSelect: (id: string | null) => void;
+  /** Seçili ajanı plan/hiyerarşi görünümünde açar (çift tık veya düğme). */
+  onActivate?: (id: string) => void;
 }
 
 const TILE = 16;
@@ -223,67 +226,172 @@ const COL = {
   w: '#f2ede4',
 };
 
-const HAIRS: [string, string][] = [
+/* Saç renkleri yaş grubuna göre ayrılır: doğal renkler her yaştan,
+   kırışıklar yaşlılarda, radikal (boyalı) renkler ağırlıkla gençlerde. */
+const NATURAL_HAIRS: [string, string][] = [
   ['#2f2117', '#4a3624'],
   ['#4a3320', '#6b4c2e'],
   ['#15161a', '#2c2e36'],
   ['#6b4a22', '#8a6636'],
   ['#7a2f2f', '#9a4a42'],
-  ['#4a4a55', '#666774'],
+  ['#9a6b3f', '#bd8a58'],
+  ['#8a4a2a', '#a86a45'],
+  ['#3a241a', '#5a3a28'],
   ['#a8894f', '#c8a96c'],
 ];
-const SHIRTS = ['#4385BE', '#3AA99F', '#D0A215', '#D14D41', '#8a7be0', '#d98a5a', '#5aa7d9', '#c46bab'];
+const GRAY_HAIRS: [string, string][] = [
+  ['#c8c2b4', '#e2dccd'],
+  ['#8a8a94', '#a8a8b2'],
+  ['#6a6a74', '#8a8a94'],
+];
+const DYED_HAIRS: [string, string][] = [
+  ['#5a3a5f', '#7a5a80'],
+  ['#3a2a4a', '#5a4a6a'],
+  ['#2a4a3a', '#4a6a55'],
+  ['#8a2a3a', '#aa4a55'],
+];
+const SHIRTS = [
+  '#4385BE', '#3AA99F', '#D0A215', '#D14D41', '#8a7be0', '#d98a5a', '#5aa7d9',
+  '#c46bab', '#7a5f3a', '#5a6a4a', '#a84a3a', '#4a5a7a', '#6b4a6e', '#3a7a8c',
+];
+const PANTS = ['#33384a', '#3d3a30', '#4a3a2e', '#2b3038', '#4a4248', '#3a3f34', '#443850', '#2f3a4a'];
 const SKINS: [string, string][] = [
   ['#f2cca8', '#d6a478'],
   ['#e6b184', '#c68f63'],
   ['#cf9464', '#aa7046'],
   ['#a96f45', '#845230'],
   ['#7f4f2e', '#5f3a22'],
+  ['#f0d5b8', '#dcb896'],
+  ['#b87848', '#8f5832'],
+  ['#9a5c38', '#73422a'],
 ];
 const HATS = ['#c0504d', '#3a6ea5', '#3f8f5a', '#d0a215', '#5a5f68'];
 const TIES = ['#c0504d', '#3a6ea5', '#d0a215', '#7a2f2f'];
 
+/** Rengi f kat çarpıp hex'e döndürür (f<1 gölge, f>1 parlaklık; 255'te kısılır).
+ *  Gömlek/pantolonun yaka, yelek, kemer tonları böylece otomatik uyumlu türetilir. */
+function shadeHex(hex: string, f: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  const r = Math.min(255, Math.round(((n >> 16) & 255) * f));
+  const g = Math.min(255, Math.round(((n >> 8) & 255) * f));
+  const b = Math.min(255, Math.round((n & 255) * f));
+  return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`;
+}
+
 function hash(str: string): number {
-  let h = 0;
-  for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) >>> 0;
-  return h;
+  /* FNV-1a + murmur3 finalizer: zayıf polinom hash'te ardışık id'lerin
+     bit alanları korele oluyordu (ör. >>>14 alanı hiç küçük değer almıyordu). */
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  h ^= h >>> 16;
+  h = Math.imul(h, 2246822507);
+  h ^= h >>> 13;
+  h = Math.imul(h, 3266489909);
+  h ^= h >>> 16;
+  return h >>> 0;
 }
 
 function paletteFor(id: string) {
   const k = hash(id);
-  const [hair, hairHi] = HAIRS[k % HAIRS.length];
+  /* Yaş dağılımı lookFor ile aynı bitlerden okunur: senior %15, genç %35, orta %50. */
+  const ageR = (k >>> 6) % 100;
+  const hairSet = ageR < 15 ? GRAY_HAIRS : ageR < 50 ? [...DYED_HAIRS, ...NATURAL_HAIRS] : NATURAL_HAIRS;
+  const [hair, hairHi] = hairSet[k % hairSet.length];
   const [skin, skinShade] = SKINS[(k >>> 3) % SKINS.length];
+  const shirt = SHIRTS[(k >>> 5) % SHIRTS.length];
+  const pants = PANTS[(k >>> 8) % PANTS.length];
   return {
     ...COL,
     h: hair,
     H: hairHi,
     s: skin,
     S: skinShade,
-    b: SHIRTS[k % SHIRTS.length],
+    b: shirt,
+    B: shadeHex(shirt, 0.55),
+    c: shadeHex(shirt, 1.4),
+    p: pants,
     g: hair,
   };
 }
 
+type HairStyle = 'short' | 'long' | 'bun' | 'cap' | 'ponytail' | 'curly' | 'bald' | 'mohawk';
+type ShirtStyle = 'plain' | 'tie' | 'vest' | 'jacket' | 'hoodie' | 'stripes';
+type BeardStyle = 'none' | 'stubble' | 'mustache' | 'full';
+
+/** Sakal doğal renklerden seçilir; saç radikal bir renkte olsa bile
+ *  (yeşil/mor) sakal gerçekçi kalır. */
+const BEARD_COLORS = ['#2f2117', '#4a3320', '#15161a', '#6b4a22', '#7a2f2f', '#8a6636'];
+const GRAY_BEARDS = ['#c8c2b4', '#a8a8b2', '#8a8a94'];
+
+/** Ağırlıklı seçim: r [0..total) aralığında kürsüyle ilerler. */
+function weighted<T>(entries: [T, number][], r: number): T {
+  const total = entries.reduce((s, [, w]) => s + w, 0);
+  let v = ((r % total) + total) % total;
+  for (const [item, w] of entries) {
+    if (v < w) return item;
+    v -= w;
+  }
+  return entries[entries.length - 1][0];
+}
+
+/** cinsiyet sunumu: %45 kadın, %55 erkek */
+function genderOf(id: string): 'f' | 'm' {
+  return (hash(id) >>> 2) % 100 < 45 ? 'f' : 'm';
+}
+
+/** yaş grubu: senior %15, genç %35, orta %50 — paletteFor ile aynı bitler */
+function ageOf(id: string): 'young' | 'mid' | 'senior' {
+  const r = (hash(id) >>> 6) % 100;
+  return r < 15 ? 'senior' : r < 50 ? 'young' : 'mid';
+}
+
 interface Look {
-  hairStyle: 'short' | 'long' | 'bun' | 'cap' | 'ponytail';
+  hairStyle: HairStyle;
+  shirtStyle: ShirtStyle;
+  beard: BeardStyle;
   glasses: boolean;
-  beard: boolean;
   headphones: boolean;
-  tie: boolean;
+  earring: boolean;
   hatColor: string;
   tieColor: string;
 }
 
 function lookFor(id: string): Look {
   const h = hash(id);
+  const female = genderOf(id) === 'f';
+  const senior = ageOf(id) === 'senior';
+  /* Kelse/mohawk seyrek; kadında uzun/topuz/kuyruk baskın, erkekte kısa/kıvırcık.
+     Yaşlı erkekte kellik ve kısa saç artar, mohawk görülmez. */
+  const hairStyle = female
+    ? weighted<HairStyle>(
+        [['long', 24], ['ponytail', 18], ['bun', 16], ['short', 16], ['curly', 14], ['cap', 7], ['bald', 2], ['mohawk', 3]],
+        h % 97
+      )
+    : senior
+      ? weighted<HairStyle>(
+          [['short', 34], ['bald', 14], ['curly', 12], ['cap', 10], ['long', 8], ['bun', 6], ['ponytail', 6], ['mohawk', 2]],
+          h % 97
+        )
+      : weighted<HairStyle>(
+          [['short', 28], ['curly', 16], ['cap', 12], ['mohawk', 8], ['bald', 5], ['long', 8], ['bun', 5], ['ponytail', 10]],
+          h % 97
+        );
+  const shirtStyle = weighted<ShirtStyle>(
+    [['plain', 28], ['tie', female ? 10 : 22], ['vest', 12], ['jacket', 14], ['hoodie', 15], ['stripes', 11]],
+    (h >>> 4) % 97
+  );
   return {
-    hairStyle: (['short', 'long', 'bun', 'cap', 'ponytail'] as const)[h % 5],
-    glasses: ((h >> 5) & 3) === 0,
-    beard: ((h >> 7) & 3) === 0,
-    headphones: ((h >> 9) & 3) === 0,
-    tie: ((h >> 11) & 1) === 1,
-    hatColor: HATS[(h >>> 13) % HATS.length],
-    tieColor: TIES[(h >>> 15) % TIES.length],
+    hairStyle,
+    shirtStyle,
+    beard: female ? 'none' : weighted<BeardStyle>([['none', 42], ['stubble', 18], ['mustache', 16], ['full', 24]], (h >>> 7) % 97),
+    glasses: (h >>> 10) % 100 < (senior ? 24 : 12),
+    headphones: (h >>> 12) % 100 < 10,
+    earring: (h >>> 14) % 100 < (female ? 18 : 5),
+    hatColor: HATS[(h >>> 16) % HATS.length],
+    tieColor: TIES[(h >>> 18) % TIES.length],
   };
 }
 
@@ -305,11 +413,11 @@ const ROLE_COLORS: Record<RoleKind, string> = {
 
 function roleFor(role: string): RoleKind {
   const r = (role || '').toLowerCase();
-  if (/(design|ui|ux|brand|art|creative)/.test(r)) return 'design';
-  if (/(test|qa|quality|review|audit)/.test(r)) return 'qa';
-  if (/(ops|infra|devops|sre|security|platform|deploy)/.test(r)) return 'ops';
-  if (/(data|analy|ml|science|research|brain|model)/.test(r)) return 'data';
-  if (/(lead|manager|head|chief|ceo|cto|founder|architect|director)/.test(r)) return 'lead';
+  if (/(design|ui|ux|brand|art|creative|tasarım|tasarim)/.test(r)) return 'design';
+  if (/(test|qa|quality|review|audit|kalite)/.test(r)) return 'qa';
+  if (/(ops|infra|devops|sre|security|platform|deploy|operasyon|güvenlik)/.test(r)) return 'ops';
+  if (/(data|analy|ml|science|research|brain|model|veri|ar-ge)/.test(r)) return 'data';
+  if (/(lead|manager|head|chief|ceo|cto|founder|architect|director|product|owner|kurucu|lider|yönetici|müdür|ürün|urun|strateji|strategy)/.test(r)) return 'lead';
   return 'dev';
 }
 
@@ -379,13 +487,20 @@ function drawRoleGlyph(c: C2D, kind: RoleKind, cx: number, cy: number, r: number
 function drawLook(c: C2D, id: string, dir: Dir, pal: Record<string, string>) {
   const L = lookFor(id);
   const ink = '#1b1e26';
-  if (L.hairStyle !== 'cap') {
+  const metal = '#e0b64d';
+  /* Sakal rengi saçtan değil doğal paletten; yaşlılarda kır renkler. */
+  const beardCol = ageOf(id) === 'senior'
+    ? GRAY_BEARDS[(hash(id) >>> 20) % GRAY_BEARDS.length]
+    : BEARD_COLORS[(hash(id) >>> 20) % BEARD_COLORS.length];
+  const hairless = L.hairStyle === 'bald' || L.hairStyle === 'mohawk' || L.hairStyle === 'cap';
+  if (!hairless) {
     dr(c, 5, 3, 1, 1, 'rgba(255,255,255,0.18)');
     dr(c, 6, 2, 2, 1, 'rgba(255,255,255,0.10)');
   }
   if (dir === 'front') {
     if (L.hairStyle === 'short') {
       dr(c, 2, 9, 1, 2, pal.S); dr(c, 13, 9, 1, 2, pal.S);
+      dr(c, 3, 4, 1, 3, pal.h); dr(c, 12, 4, 1, 3, pal.h);
     }
     if (L.hairStyle === 'long') {
       dr(c, 2, 7, 1, 10, pal.h); dr(c, 13, 7, 1, 10, pal.h);
@@ -397,6 +512,22 @@ function drawLook(c: C2D, id: string, dir: Dir, pal: Record<string, string>) {
       dr(c, 2, 7, 1, 4, pal.h);
     }
     if (L.hairStyle === 'bun') { dr(c, 6, 0, 4, 2, pal.h); dr(c, 7, 0, 2, 1, pal.H); }
+    if (L.hairStyle === 'curly') {
+      dr(c, 1, 3, 2, 5, pal.h); dr(c, 13, 3, 2, 5, pal.h);
+      dr(c, 2, 2, 2, 2, pal.h); dr(c, 12, 2, 2, 2, pal.h);
+      dr(c, 4, 1, 2, 1, pal.h); dr(c, 10, 1, 2, 1, pal.h);
+      dr(c, 2, 5, 1, 1, pal.H); dr(c, 13, 5, 1, 1, pal.H);
+      dr(c, 3, 3, 1, 1, pal.H); dr(c, 12, 3, 1, 1, pal.H);
+      dr(c, 2, 9, 1, 2, pal.S); dr(c, 13, 9, 1, 2, pal.S);
+    }
+    if (L.hairStyle === 'mohawk') {
+      dr(c, 6, 0, 1, 1, pal.h); dr(c, 8, 0, 1, 1, pal.h); dr(c, 7, 0, 1, 1, pal.H);
+      dr(c, 6, 1, 4, 1, pal.H);
+    }
+    if (L.hairStyle === 'bald') {
+      dr(c, 6, 1, 2, 1, 'rgba(255,255,255,0.22)');
+      dr(c, 5, 2, 1, 1, 'rgba(255,255,255,0.12)');
+    }
     if (L.hairStyle === 'cap') {
       dr(c, 4, 1, 8, 4, L.hatColor); dr(c, 4, 1, 8, 1, 'rgba(255,255,255,0.18)');
       dr(c, 3, 5, 10, 1, L.hatColor);
@@ -404,11 +535,6 @@ function drawLook(c: C2D, id: string, dir: Dir, pal: Record<string, string>) {
     }
     dr(c, 6, 7, 1, 1, pal.h); dr(c, 11, 7, 1, 1, pal.h);
     if (L.glasses) { dr(c, 4, 8, 1, 1, ink); dr(c, 12, 8, 1, 1, ink); dr(c, 8, 8, 1, 1, ink); }
-    if (L.beard) {
-      dr(c, 4, 10, 1, 3, pal.h); dr(c, 11, 10, 1, 3, pal.h);
-      dr(c, 5, 12, 6, 1, pal.h);
-      dr(c, 8, 10, 2, 1, pal.h);
-    }
     if (L.headphones) {
       dr(c, 4, 4, 8, 1, ink);
       dr(c, 1, 7, 2, 5, ink); dr(c, 13, 7, 2, 5, ink);
@@ -418,18 +544,49 @@ function drawLook(c: C2D, id: string, dir: Dir, pal: Record<string, string>) {
     dr(c, 11, 10, 1, 1, 'rgba(190,80,60,0.22)');
     dr(c, 8, 10, 1, 1, 'rgba(255,255,255,0.10)');
     dr(c, 6, 13, 4, 1, 'rgba(0,0,0,0.07)');
+    if (L.beard === 'stubble') {
+      dr(c, 4, 11, 8, 1, 'rgba(27,30,38,0.16)');
+      dr(c, 5, 12, 6, 1, 'rgba(27,30,38,0.10)');
+    } else if (L.beard === 'mustache') {
+      dr(c, 6, 10, 4, 1, beardCol);
+    } else if (L.beard === 'full') {
+      dr(c, 4, 10, 1, 3, beardCol); dr(c, 11, 10, 1, 3, beardCol);
+      dr(c, 5, 11, 1, 2, beardCol); dr(c, 10, 11, 1, 2, beardCol);
+      dr(c, 5, 12, 6, 1, beardCol);
+      dr(c, 8, 10, 2, 1, beardCol);
+    }
+    if (L.earring) { dr(c, 2, 11, 1, 1, metal); dr(c, 13, 11, 1, 1, metal); }
     dr(c, 5, 2, 1, 5, 'rgba(255,255,255,0.05)');
-    if (L.tie) {
+
+    if (L.shirtStyle === 'plain') {
+      dr(c, 6, 14, 4, 1, pal.c);
+      dr(c, 6, 15, 1, 4, pal.B); dr(c, 9, 15, 1, 4, pal.B);
+      dr(c, 8, 16, 1, 1, '#e8eef2'); dr(c, 8, 18, 1, 1, '#e8eef2');
+    } else if (L.shirtStyle === 'tie') {
+      dr(c, 6, 14, 4, 1, pal.c);
       dr(c, 7, 14, 2, 3, L.tieColor); dr(c, 7, 17, 2, 4, L.tieColor);
       dr(c, 7, 15, 1, 5, 'rgba(255,255,255,0.16)');
+    } else if (L.shirtStyle === 'vest') {
+      dr(c, 4, 14, 2, 7, pal.B); dr(c, 10, 14, 2, 7, pal.B);
+      dr(c, 6, 14, 4, 1, pal.c);
+      dr(c, 7, 16, 1, 1, '#cfc8ba'); dr(c, 7, 18, 1, 1, '#cfc8ba');
+    } else if (L.shirtStyle === 'jacket') {
+      dr(c, 6, 14, 4, 1, '#e8eef2'); dr(c, 7, 15, 2, 2, '#e8eef2');
+      dr(c, 5, 14, 1, 5, pal.B); dr(c, 10, 14, 1, 5, pal.B);
+      dr(c, 6, 15, 1, 3, pal.B); dr(c, 9, 15, 1, 3, pal.B);
+      dr(c, 5, 18, 1, 1, '#cfc8ba'); dr(c, 5, 20, 1, 1, '#cfc8ba');
+    } else if (L.shirtStyle === 'hoodie') {
+      dr(c, 4, 13, 8, 1, pal.B);
+      dr(c, 4, 14, 1, 1, pal.B); dr(c, 11, 14, 1, 1, pal.B);
+      dr(c, 6, 15, 1, 2, '#d8dde6'); dr(c, 9, 15, 1, 2, '#d8dde6');
+      dr(c, 5, 19, 6, 1, pal.B);
     } else {
       dr(c, 6, 14, 4, 1, pal.c);
-      dr(c, 6, 15, 1, 4, '#2b303a');
-      dr(c, 9, 15, 1, 4, '#2b303a');
-      dr(c, 7, 15, 2, 1, '#2b303a');
-      dr(c, 7, 17, 2, 2, '#e8eef2');
-      dr(c, 7, 17, 2, 1, L.tieColor);
+      dr(c, 3, 15, 10, 1, 'rgba(255,255,255,0.30)');
+      dr(c, 3, 18, 10, 1, 'rgba(255,255,255,0.30)');
     }
+    dr(c, 4, 21, 8, 1, '#20242e');
+    dr(c, 8, 21, 1, 1, '#c9a44a');
     dr(c, 4, 31, 2, 1, '#3a4150');
     dr(c, 10, 31, 2, 1, '#3a4150');
   } else if (dir === 'back') {
@@ -441,53 +598,114 @@ function drawLook(c: C2D, id: string, dir: Dir, pal: Record<string, string>) {
       dr(c, 12, 8, 3, 9, pal.h); dr(c, 13, 9, 1, 7, pal.H);
     }
     if (L.hairStyle === 'bun') { dr(c, 6, 0, 4, 2, pal.h); dr(c, 7, 0, 2, 1, pal.H); }
+    if (L.hairStyle === 'curly') {
+      dr(c, 2, 3, 2, 7, pal.h); dr(c, 12, 3, 2, 7, pal.h);
+      dr(c, 4, 2, 2, 2, pal.h); dr(c, 10, 2, 2, 2, pal.h);
+      dr(c, 2, 5, 1, 1, pal.H); dr(c, 13, 5, 1, 1, pal.H);
+    }
+    if (L.hairStyle === 'mohawk') {
+      dr(c, 6, 0, 1, 1, pal.h); dr(c, 8, 0, 1, 1, pal.h); dr(c, 7, 0, 1, 1, pal.H);
+      dr(c, 7, 1, 1, 5, pal.H);
+    }
+    if (L.hairStyle === 'bald') {
+      dr(c, 6, 2, 2, 1, 'rgba(255,255,255,0.12)');
+    }
     if (L.hairStyle === 'cap') {
       dr(c, 4, 1, 8, 4, L.hatColor); dr(c, 4, 1, 8, 1, 'rgba(255,255,255,0.18)');
       dr(c, 3, 5, 10, 1, L.hatColor);
+    }
+    if (!hairless) {
+      dr(c, 7, 2, 1, 9, pal.H);
+      dr(c, 4, 8, 1, 3, 'rgba(255,255,255,0.06)');
+      dr(c, 5, 4, 1, 6, 'rgba(255,255,255,0.04)');
+      dr(c, 10, 4, 1, 6, 'rgba(0,0,0,0.10)');
+      dr(c, 4, 13, 1, 4, 'rgba(0,0,0,0.08)');
+      dr(c, 11, 13, 1, 4, 'rgba(0,0,0,0.08)');
     }
     if (L.headphones) {
       dr(c, 4, 4, 8, 1, ink);
       dr(c, 1, 7, 2, 5, ink); dr(c, 13, 7, 2, 5, ink);
       dr(c, 2, 7, 1, 5, '#4a4a55'); dr(c, 13, 7, 1, 5, '#4a4a55');
     }
-    dr(c, 7, 2, 1, 9, pal.H);
-    dr(c, 4, 8, 1, 3, 'rgba(255,255,255,0.06)');
-    dr(c, 5, 4, 1, 6, 'rgba(255,255,255,0.04)');
-    dr(c, 10, 4, 1, 6, 'rgba(0,0,0,0.10)');
-    dr(c, 4, 13, 1, 4, 'rgba(0,0,0,0.08)');
-    dr(c, 11, 13, 1, 4, 'rgba(0,0,0,0.08)');
     dr(c, 4, 22, 8, 1, 'rgba(0,0,0,0.18)');
-    dr(c, 6, 13, 4, 1, pal.c);
-    dr(c, 6, 14, 1, 4, '#2b303a');
-    dr(c, 9, 14, 1, 4, '#2b303a');
+    if (L.shirtStyle === 'vest') {
+      dr(c, 4, 14, 2, 7, pal.B); dr(c, 10, 14, 2, 7, pal.B);
+      dr(c, 7, 14, 1, 7, pal.B);
+    } else if (L.shirtStyle === 'jacket') {
+      dr(c, 7, 14, 2, 6, pal.B);
+      dr(c, 5, 18, 1, 1, '#cfc8ba');
+    } else if (L.shirtStyle === 'hoodie') {
+      dr(c, 4, 13, 8, 3, pal.B);
+      dr(c, 5, 14, 6, 1, 'rgba(0,0,0,0.14)');
+    } else if (L.shirtStyle === 'stripes') {
+      dr(c, 3, 15, 10, 1, 'rgba(255,255,255,0.30)');
+      dr(c, 3, 18, 10, 1, 'rgba(255,255,255,0.30)');
+    } else {
+      dr(c, 6, 13, 4, 1, pal.c);
+      dr(c, 6, 14, 1, 4, pal.B);
+      dr(c, 9, 14, 1, 4, pal.B);
+    }
+    dr(c, 4, 21, 8, 1, '#20242e');
     dr(c, 4, 31, 2, 1, '#3a4150');
     dr(c, 10, 31, 2, 1, '#3a4150');
   } else {
     if (L.hairStyle === 'long') { dr(c, 2, 7, 2, 10, pal.h); dr(c, 1, 8, 1, 7, pal.h); }
     if (L.hairStyle === 'ponytail') { dr(c, 2, 9, 3, 8, pal.h); dr(c, 3, 10, 1, 6, pal.H); }
     if (L.hairStyle === 'bun') { dr(c, 6, 0, 4, 2, pal.h); dr(c, 7, 0, 2, 1, pal.H); }
+    if (L.hairStyle === 'curly') {
+      dr(c, 1, 3, 2, 5, pal.h); dr(c, 2, 2, 2, 2, pal.h);
+      dr(c, 3, 6, 1, 3, pal.h);
+      dr(c, 1, 5, 1, 1, pal.H); dr(c, 2, 3, 1, 1, pal.H);
+    }
+    if (L.hairStyle === 'mohawk') {
+      dr(c, 6, 0, 2, 1, pal.h); dr(c, 6, 1, 1, 4, pal.H);
+    }
+    if (L.hairStyle === 'bald') {
+      dr(c, 6, 1, 2, 1, 'rgba(255,255,255,0.16)');
+    }
     if (L.hairStyle === 'cap') {
       dr(c, 3, 1, 8, 4, L.hatColor); dr(c, 3, 1, 8, 1, 'rgba(255,255,255,0.18)');
       dr(c, 8, 5, 5, 1, L.hatColor);
     }
     if (L.glasses) dr(c, 6, 8, 3, 1, ink);
-    if (L.beard) { dr(c, 6, 10, 1, 2, pal.h); dr(c, 7, 12, 4, 1, pal.h); }
+    if (L.beard === 'stubble') {
+      dr(c, 7, 12, 4, 1, 'rgba(27,30,38,0.14)');
+    } else if (L.beard === 'mustache') {
+      dr(c, 8, 10, 3, 1, beardCol);
+    } else if (L.beard === 'full') {
+      dr(c, 6, 10, 1, 2, beardCol); dr(c, 7, 12, 4, 1, beardCol);
+    }
     if (L.headphones) {
       dr(c, 4, 4, 7, 1, ink);
       dr(c, 9, 7, 3, 4, ink); dr(c, 9, 8, 2, 2, '#4a4a55');
     }
     dr(c, 8, 7, 1, 1, 'rgba(255,255,255,0.50)');
     dr(c, 7, 13, 3, 1, 'rgba(0,0,0,0.07)');
-    dr(c, 5, 2, 1, 6, 'rgba(255,255,255,0.05)');
+    if (!hairless) dr(c, 5, 2, 1, 6, 'rgba(255,255,255,0.05)');
     dr(c, 7, 22, 4, 1, 'rgba(0,0,0,0.18)');
     dr(c, 12, 9, 1, 1, pal.s);
-    if (L.tie) { dr(c, 6, 14, 2, 3, L.tieColor); dr(c, 6, 17, 2, 4, L.tieColor); }
-    else {
+    if (L.earring) dr(c, 12, 11, 1, 1, metal);
+    if (L.shirtStyle === 'vest') {
+      dr(c, 9, 14, 2, 7, pal.B);
+      dr(c, 7, 16, 1, 1, '#cfc8ba');
+    } else if (L.shirtStyle === 'jacket') {
+      dr(c, 9, 14, 2, 5, pal.B);
+      dr(c, 7, 14, 2, 1, '#e8eef2');
+      dr(c, 9, 18, 1, 1, '#cfc8ba');
+    } else if (L.shirtStyle === 'hoodie') {
+      dr(c, 5, 13, 5, 1, pal.B);
+      dr(c, 8, 15, 1, 2, '#d8dde6');
+      dr(c, 5, 19, 5, 1, pal.B);
+    } else if (L.shirtStyle === 'stripes') {
+      dr(c, 5, 15, 6, 1, 'rgba(255,255,255,0.30)');
+      dr(c, 5, 18, 6, 1, 'rgba(255,255,255,0.30)');
+    } else if (L.shirtStyle === 'tie') {
+      dr(c, 6, 14, 2, 3, L.tieColor); dr(c, 6, 17, 2, 4, L.tieColor);
+    } else {
       dr(c, 7, 14, 3, 1, pal.c);
-      dr(c, 7, 15, 1, 4, '#2b303a');
-      dr(c, 8, 17, 2, 2, '#e8eef2');
-      dr(c, 8, 17, 2, 1, L.tieColor);
+      dr(c, 8, 16, 1, 1, '#e8eef2');
     }
+    dr(c, 5, 21, 5, 1, '#20242e');
     dr(c, 8, 21, 1, 1, pal.s);
     dr(c, 4, 31, 3, 1, '#3a4150');
     dr(c, 9, 31, 3, 1, '#3a4150');
@@ -495,6 +713,23 @@ function drawLook(c: C2D, id: string, dir: Dir, pal: Record<string, string>) {
 }
 
 const spriteCache = new Map<string, HTMLCanvasElement>();
+
+/** Kel/mohawk saçlar için kafa bölgesindeki saç piksellerini tenle değiştirir
+ *  (mohawk'ta üst-orta şerit x6..9 korunur); taban grid üç yön için ortaktır. */
+function scalpGrid(grid: Grid, dir: Dir, mohawk: boolean): Grid {
+  const maxRow = dir === 'back' ? 10 : 6;
+  return grid.map((row, y) => {
+    if (y > maxRow) return row;
+    return row
+      .split('')
+      .map((ch, x) => {
+        if (ch !== 'h' && ch !== 'H') return ch;
+        if (mohawk && x >= 6 && x <= 9) return ch;
+        return ch === 'h' ? 's' : 'S';
+      })
+      .join('');
+  });
+}
 
 function bakeSprite(id: string, dir: Dir, frame: number): HTMLCanvasElement {
   const key = `${id}|${dir}|${frame}`;
@@ -505,14 +740,30 @@ function bakeSprite(id: string, dir: Dir, frame: number): HTMLCanvasElement {
   cv.height = SH;
   const c = cv.getContext('2d')!;
   const pal: Record<string, string> = paletteFor(id);
-  const base = SP[dir];
+  const L = lookFor(id);
+  let base = SP[dir];
+  if (L.hairStyle === 'bald' || L.hairStyle === 'mohawk') {
+    base = scalpGrid(base, dir, L.hairStyle === 'mohawk');
+  }
   const grid = walkGrid(base, dir, frame);
   for (let y = 0; y < grid.length; y++) {
     const row = grid[y];
     for (let x = 0; x < row.length; x++) {
       const ch = row[x];
       if (ch === '.') continue;
-      c.fillStyle = pal[ch] || '#f0f';
+      let col = pal[ch] || '#f0f';
+      /* Piksel-art hacimlandırma: silüetin sol kenarına ışık, sağ ve alt
+         kenarına gölge. Piksel bazında uygulandığı için yürüyüş kareleriyle
+         birlikte hareket eder; kontur ('o') her zaman sabit kalır. */
+      if (ch !== 'o') {
+        const left = x > 0 ? row[x - 1] : '.';
+        const right = x + 1 < row.length ? row[x + 1] : '.';
+        const below = y + 1 < grid.length ? grid[y + 1][x] : '.';
+        if (left === '.') col = shadeHex(col, 1.18);
+        if (right === '.') col = shadeHex(col, 0.86);
+        if (below === '.') col = shadeHex(col, 0.8);
+      }
+      c.fillStyle = col;
       c.fillRect(x, y, 1, 1);
     }
   }
@@ -524,6 +775,51 @@ function bakeSprite(id: string, dir: Dir, frame: number): HTMLCanvasElement {
 function frameFor(phase: number, moving: boolean): number {
   if (!moving) return 0;
   return Math.max(-1, Math.min(1, Math.round(Math.sin(phase))));
+}
+
+/** Ajanın OFİS KİMLİĞİNİN başı (sprite'ın üst 16 pikseli: kafa + omuz) —
+ *  data URL. Flow kişi kartları da bu yüzü kullanır: aynı ajan = aynı yüz. */
+export function agentHeadDataUrl(id: string): string {
+  const sprite = bakeSprite(id, 'front', 0);
+  const c = document.createElement('canvas');
+  c.width = 16;
+  c.height = 16;
+  const ctx = c.getContext('2d');
+  if (ctx) {
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(sprite, 0, 0, 16, 16, 0, 0, 16, 16);
+  }
+  return c.toDataURL('image/png');
+}
+
+const headUrlCache = new Map<string, string>();
+/** Aktivite çubuğu ve kartlar için önbellekli kafa veri adresi. */
+function headUrl(id: string): string {
+  const hit = headUrlCache.get(id);
+  if (hit) return hit;
+  const url = agentHeadDataUrl(id);
+  headUrlCache.set(id, url);
+  return url;
+}
+
+/* Aktivite çubuğu: durum → renk. Palet obsidian temasıyla uyumlu:
+   hareket amber, toplantı marka teal'i, görev mavi, mola mercan. */
+const ACT_COLORS = {
+  work: '#8C877B',
+  seated: '#6F6C66',
+  route: '#E0B64D',
+  meet: '#5AD4C8',
+  task: '#8AB4F8',
+  break: '#C48A6A',
+} as const;
+
+/** Sim durumunu aktivite çubuğu kategorisine indirger. */
+function actKey(s?: Sim): keyof typeof ACT_COLORS {
+  if (!s) return 'work';
+  if (s.path.length > 0) return 'route';
+  if (s.dest === 'meet') return 'meet';
+  if (s.dest === 'seat') return s.wait > 0 ? 'work' : 'seated';
+  return s.kind === 'board' || s.kind === 'server' || s.kind === 'printer' ? 'task' : 'break';
 }
 
 function drawFloor(c: C2D) {
@@ -1290,6 +1586,150 @@ const SERVER_RACKS = [
   { x: 604, y: 278 },
 ];
 
+/* ---- Hareket motoru: noktalar, kapılar ve rota bulma ----
+   Ofis dört bölge; bölmeler yalnız kapı boşluklarından geçilir:
+   - dikey bölme kapısı: y 112-144 (x ≈ 406-418)
+   - yatay bölme kapıları: x 150-182 ve 520-552 (y ≈ 232-244) */
+const LANE = 6 * TILE;
+const DOOR_V_Y = 128;
+const DOOR_H_L = { x: 166, y: 238 };
+const DOOR_H_R = { x: 536, y: 238 };
+
+type ZoneName = 'work' | 'meet' | 'bottom';
+
+const MEET_SPOTS: Pt[] = [
+  { x: 513, y: 102 },
+  { x: 546, y: 100 },
+  { x: 579, y: 102 },
+  { x: 520, y: 172 },
+  { x: 572, y: 172 },
+];
+
+const POIS: { p: Pt; zone: ZoneName; kind: string }[] = [
+  // çalışma alanı — otomat (kahve makinesi + su sebili)
+  { p: { x: 366, y: 102 }, zone: 'work', kind: 'vend' },
+  { p: { x: 344, y: 100 }, zone: 'work', kind: 'vend' },
+  { p: { x: 368, y: 196 }, zone: 'work', kind: 'printer' },
+  { p: { x: 150, y: 50 }, zone: 'work', kind: 'board' },
+  // dinlenme köşesi (kısa mola)
+  { p: { x: 80, y: 292 }, zone: 'bottom', kind: 'lounge' },
+  { p: { x: 148, y: 296 }, zone: 'bottom', kind: 'lounge' },
+  { p: { x: 244, y: 292 }, zone: 'bottom', kind: 'lounge' },
+  // sunucu odası (deploy / kontrol)
+  { p: { x: 560, y: 336 }, zone: 'bottom', kind: 'server' },
+  { p: { x: 606, y: 336 }, zone: 'bottom', kind: 'server' },
+  // toplantı odasındaki duvar TV'si (işsiz anlarda izlemeye giderler)
+  { p: { x: 534, y: 58 }, zone: 'meet', kind: 'tv' },
+];
+
+const POI_BUBBLES: Record<string, string> = {
+  vend: 'snack run',
+  printer: 'printing specs',
+  board: 'whiteboarding',
+  lounge: 'taking five',
+  server: 'checking cluster',
+  tv: 'tv break',
+};
+
+/** Planlama toplantısı konuşma baloncukları. */
+const PLAN_BUBBLES = ['planning', 'sprint plan', 'roadmap', 'task split', 'architecture', 'priorities', 'kickoff', 'scope check'];
+
+/**
+ * İş akışı kararı: masa çalışması bir aşamaya gelince ajan ne yapacak?
+ * null → işi sürüyor, masada kalmaya devam. Çalışan ajan çoğunlukla çalışır;
+ * işi olmadığında otomata/TV/kanepeye takılır, planlama gerekince toplantı.
+ */
+function nextActivity(role: RoleKind): { kind: string; zone: ZoneName } | null {
+  const r = Math.random();
+  if (role === 'lead') {
+    if (r < 0.35) return { kind: 'planMeet', zone: 'meet' };
+    if (r < 0.5) return { kind: 'board', zone: 'work' };
+    if (r < 0.6) return { kind: 'vend', zone: 'work' };
+    if (r < 0.68) return { kind: 'tv', zone: 'meet' };
+    return null;
+  }
+  if (role === 'design') {
+    if (r < 0.22) return { kind: 'board', zone: 'work' };
+    if (r < 0.34) return { kind: 'lounge', zone: 'bottom' };
+    if (r < 0.44) return { kind: 'vend', zone: 'work' };
+    if (r < 0.5) return { kind: 'tv', zone: 'meet' };
+    return null;
+  }
+  if (role === 'ops' || role === 'data') {
+    if (r < 0.3) return { kind: 'server', zone: 'bottom' };
+    if (r < 0.42) return { kind: 'vend', zone: 'work' };
+    if (r < 0.5) return { kind: 'printer', zone: 'work' };
+    if (r < 0.56) return { kind: 'tv', zone: 'meet' };
+    return null;
+  }
+  if (role === 'qa') {
+    if (r < 0.22) return { kind: 'server', zone: 'bottom' };
+    if (r < 0.34) return { kind: 'board', zone: 'work' };
+    if (r < 0.44) return { kind: 'tv', zone: 'meet' };
+    return null;
+  }
+  if (r < 0.12) return { kind: 'vend', zone: 'work' };
+  if (r < 0.2) return { kind: 'board', zone: 'work' };
+  if (r < 0.28) return { kind: 'tv', zone: 'meet' };
+  return null;
+}
+
+/** from → target arası bölge rotası; bölmelerden yalnız kapılardan geçer. */
+function routeTo(from: Pt, target: Pt, zone: ZoneName): Pt[] {
+  if (zone === 'meet') {
+    return [
+      { x: from.x, y: LANE },
+      { x: 396, y: LANE },
+      { x: 396, y: DOOR_V_Y },
+      { x: target.x, y: DOOR_V_Y },
+      { x: target.x, y: target.y },
+    ];
+  }
+  if (zone === 'bottom') {
+    const d = target.x < 420 ? DOOR_H_L : DOOR_H_R;
+    return [
+      { x: from.x, y: LANE },
+      { x: d.x, y: LANE },
+      { x: d.x, y: d.y },
+      { x: target.x, y: d.y },
+      { x: target.x, y: target.y },
+    ];
+  }
+  return [
+    { x: from.x, y: LANE },
+    { x: target.x, y: LANE },
+    { x: target.x, y: target.y },
+  ];
+}
+
+/** Bulunduğu noktadan masa koltuğuna dönüş rotası. */
+function routeBack(st: Sim, sx: number, sy: number): Pt[] {
+  if (st.zone === 'meet') {
+    return [
+      { x: st.x, y: DOOR_V_Y },
+      { x: 396, y: DOOR_V_Y },
+      { x: 396, y: LANE },
+      { x: sx, y: LANE },
+      { x: sx, y: sy },
+    ];
+  }
+  if (st.zone === 'bottom') {
+    const d = st.x < 420 ? DOOR_H_L : DOOR_H_R;
+    return [
+      { x: st.x, y: d.y },
+      { x: d.x, y: d.y },
+      { x: d.x, y: LANE },
+      { x: sx, y: LANE },
+      { x: sx, y: sy },
+    ];
+  }
+  return [
+    { x: st.x, y: LANE },
+    { x: sx, y: LANE },
+    { x: sx, y: sy },
+  ];
+}
+
 function drawRackLeds(c: C2D, t: number) {
   const cols = ['#5ad46a', '#e0b64d', '#5aa7d9'];
   const racks = [RACK, ...SERVER_RACKS];
@@ -1448,13 +1888,21 @@ interface Sim {
   flip: boolean;
   path: Pt[];
   wait: number;
-  dest: 'seat' | 'poi';
+  dest: 'seat' | 'poi' | 'meet';
+  kind?: string;
+  zone?: 'work' | 'meet' | 'bottom';
   tagW: number;
   bubbleText: string;
   bubbleUntil: number;
   bubbleNext: number;
   blinkUntil: number;
   blinkNext: number;
+  chatUntil: number;
+  /** Ajana özgü yürüyüş temposu (0.85-1.15). */
+  pace: number;
+  /** Waypoint takılma koruması: aynı noktada çok süre geçtiyse ışınlanır. */
+  wpKey: string;
+  wpSince: number;
 }
 
 const BUBBLES = [
@@ -1484,7 +1932,7 @@ const ROLE_BUBBLES: Record<RoleKind, string[]> = {
   lead: ['standup 10:00', '1:1 meeting', 'sync soon', 'roadmap review', 'need review'],
 };
 
-export function PixelOffice({ agents, selected, onSelect }: Props) {
+export function PixelOffice({ agents, selected, onSelect, onActivate }: Props) {
   const t = useT();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const layoutRef = useRef<{ id: string; x: number; y: number }[]>([]);
@@ -1499,7 +1947,18 @@ export function PixelOffice({ agents, selected, onSelect }: Props) {
   const [tick, setTick] = useState(0);
   const [gliding, setGliding] = useState(false);
   const [zone, setZone] = useState('work');
+  const [hoverId, setHoverId] = useState<string | null>(null);
+  const [activityOpen, setActivityOpen] = useState(false);
+  const lastPickRef = useRef<{ id: string; at: number } | null>(null);
   const glideTimer = useRef<number | null>(null);
+  /* Toplantı koordinatörü: toplantı yalnız biri (genelde lead) işi planlama
+     aşamasına gelince kurulur; bitince soğuma süresi işler. */
+  const meetRef = useRef<{ active: boolean; until: number; cooldown: number; members: Map<string, number> }>({
+    active: false,
+    until: 0,
+    cooldown: 8,
+    members: new Map(),
+  });
 
   useEffect(() => {
     const id = setInterval(() => setTick(t => t + 1), 500);
@@ -1516,15 +1975,6 @@ export function PixelOffice({ agents, selected, onSelect }: Props) {
     ctx.imageSmoothingEnabled = false;
 
     const seats = computeSeats(agents.length);
-    const laneY = 6 * TILE;
-    const pois: Pt[] = [
-      { x: 376, y: 6 * TILE + 2 },
-      { x: 360, y: 6 * TILE + 2 },
-      { x: 8 * TILE + 10, y: 11 * TILE },
-      { x: 150, y: 6 * TILE },
-      { x: 3 * TILE, y: 6 * TILE },
-      { x: 19 * TILE, y: 6 * TILE },
-    ];
 
     const bg = document.createElement('canvas');
     bg.width = W * S;
@@ -1624,12 +2074,18 @@ export function PixelOffice({ agents, selected, onSelect }: Props) {
           path: [],
           wait: 2 + (hash(a.id) % 8),
           dest: 'seat',
+          kind: '',
+          zone: 'work',
           tagW: measure.measureText(a.name.slice(0, 14)).width,
           bubbleText: '',
           bubbleUntil: 0,
           bubbleNext: 2 + (hash(a.id) % 9),
           blinkUntil: 0,
           blinkNext: 1 + (hash(a.id) % 5),
+          chatUntil: 0,
+          pace: 0.85 + (hash(a.id) % 31) / 100,
+          wpKey: '',
+          wpSince: 0,
         });
       }
     });
@@ -1650,6 +2106,38 @@ export function PixelOffice({ agents, selected, onSelect }: Props) {
       last = t;
       const time = (t - start) / 1000;
 
+      /* --- Toplantı: planlama aşamasına gelen lead tarafından kurulur --- */
+      const meet = meetRef.current;
+      const startMeeting = (initiatorId: string, now: number): boolean => {
+        const initiator = stateRef.current.get(initiatorId);
+        if (!initiator) return false;
+        const others = agents.filter((a) => {
+          if (a.id === initiatorId) return false;
+          const s = stateRef.current.get(a.id);
+          return s && s.path.length === 0;
+        });
+        if (others.length < 1) return false;
+        const count = Math.min(others.length, 1 + Math.floor(Math.random() * 3));
+        meet.active = true;
+        meet.until = now + 12 + Math.random() * 8;
+        meet.members.clear();
+        meet.members.set(initiatorId, 0);
+        [...others]
+          .sort(() => Math.random() - 0.5)
+          .slice(0, count)
+          .forEach((a, k) => meet.members.set(a.id, (k + 1) % MEET_SPOTS.length));
+        for (const id of meet.members.keys()) {
+          const s = stateRef.current.get(id);
+          if (s) s.bubbleNext = Math.min(s.bubbleNext, now + 1 + Math.random() * 2.5);
+        }
+        return true;
+      };
+      if (meet.active && time > meet.until) {
+        meet.active = false;
+        meet.cooldown = time + 45 + Math.random() * 60;
+        meet.members.clear();
+      }
+
       for (let i = 0; i < agents.length; i++) {
         const a = agents[i];
         const st = stateRef.current.get(a.id);
@@ -1658,22 +2146,54 @@ export function PixelOffice({ agents, selected, onSelect }: Props) {
         const sx = (seat.tx + 1) * TILE;
         const sy = (seat.ty + 1) * TILE - 2;
 
+        /* Mevcut aktivitenin kalan süresi (çalışma patlaması / mola / toplantı). */
+        if (st.path.length === 0 && st.wait > 0) st.wait -= dt;
+
+        /* Toplantıya çağrılan (kurucu dahil) ajan henüz yola çıkmadıysa masaya yönlendir. */
+        if (meet.active && meet.members.has(a.id) && st.dest !== 'meet') {
+          const spot = MEET_SPOTS[(meet.members.get(a.id) ?? 0) % MEET_SPOTS.length];
+          st.path = routeTo(st, spot, 'meet');
+          st.dest = 'meet';
+          st.zone = 'meet';
+        }
+
         if (st.path.length === 0 && st.wait <= 0) {
-          if (st.dest === 'seat') {
-            const poi = pois[Math.floor(Math.random() * pois.length)];
-            st.path = [
-              { x: st.x, y: laneY },
-              { x: poi.x, y: laneY },
-              { x: poi.x, y: poi.y },
-            ];
-            st.dest = 'poi';
+          if (st.dest === 'meet') {
+            if (meet.active) {
+              st.wait = 1.2 + Math.random() * 1.5;
+            } else {
+              st.path = routeBack(st, sx, sy);
+              st.dest = 'seat';
+              st.zone = 'work';
+            }
+          } else if (st.dest === 'seat') {
+            /* Masa çalışması tamamlandı → iş akışı kararı */
+            const next = nextActivity(roleFor(a.role));
+            if (!next) {
+              /* İşi sürüyor: oturup çalışmaya devam eder. */
+              st.wait = 10 + Math.random() * 16;
+            } else if (next.kind === 'planMeet') {
+              if (!meet.active && time > meet.cooldown && startMeeting(a.id, time)) {
+                /* Üye çağrısı bir sonraki karede rotayı kurar. */
+              } else {
+                const board = POIS.find(p => p.kind === 'board')!;
+                st.path = routeTo(st, board.p, board.zone);
+                st.dest = 'poi';
+                st.kind = 'board';
+                st.zone = 'work';
+              }
+            } else {
+              const candidates = POIS.filter(p => p.kind === next.kind);
+              const poi = candidates[Math.floor(Math.random() * candidates.length)] ?? POIS[0];
+              st.path = routeTo(st, poi.p, poi.zone);
+              st.dest = 'poi';
+              st.kind = poi.kind;
+              st.zone = poi.zone;
+            }
           } else {
-            st.path = [
-              { x: st.x, y: laneY },
-              { x: sx, y: laneY },
-              { x: sx, y: sy },
-            ];
+            st.path = routeBack(st, sx, sy);
             st.dest = 'seat';
+            st.zone = 'work';
           }
         }
 
@@ -1686,13 +2206,36 @@ export function PixelOffice({ agents, selected, onSelect }: Props) {
           const dx = wp.x - st.x;
           const dy = wp.y - st.y;
           const dist = Math.hypot(dx, dy);
-          if (dist < 3) {
+          /* Takılma koruması: ayrım itmesiyle waypoint çevresinde dönen ajan,
+             6 saniyede hedefe giremediyse doğrudan yakalanır. */
+          const wpKey = `${Math.round(wp.x)},${Math.round(wp.y)}`;
+          if (wpKey !== st.wpKey) {
+            st.wpKey = wpKey;
+            st.wpSince = time;
+          }
+          if (dist < 3 || time - st.wpSince > 6) {
             st.x = wp.x;
             st.y = wp.y;
             st.path.shift();
-            if (st.path.length === 0) st.wait = st.dest === 'seat' ? 7 + Math.random() * 7 : 2 + Math.random() * 3;
+            st.wpKey = '';
+            if (st.path.length === 0) {
+              if (st.dest === 'seat') {
+                st.wait = 5 + Math.random() * 6;
+              } else if (st.dest === 'meet') {
+                st.wait = 1.2 + Math.random() * 1.5;
+              } else {
+                st.wait = st.kind === 'lounge' || st.kind === 'server' ? 4 + Math.random() * 4 : 2.5 + Math.random() * 3;
+                /* Varışta noktaya uygun baloncuk: kahve, sunucu, tahta... */
+                const msg = st.kind ? POI_BUBBLES[st.kind] : undefined;
+                if (msg && Math.random() < 0.7 && time > st.bubbleUntil) {
+                  st.bubbleText = msg;
+                  st.bubbleUntil = time + 3;
+                  st.bubbleNext = time + 8 + Math.random() * 8;
+                }
+              }
+            }
           } else {
-            const sp = Math.min(MAXV, dist * 5);
+            const sp = Math.min(MAXV, dist * 5) * st.pace;
             dvx = (dx / dist) * sp;
             dvy = (dy / dist) * sp;
             movingTarget = true;
@@ -1733,17 +2276,67 @@ export function PixelOffice({ agents, selected, onSelect }: Props) {
         } else {
           st.vx = 0;
           st.vy = 0;
-          if (st.path.length === 0) st.dir = 'front';
+          if (st.path.length === 0) {
+            if (st.dest === 'meet') {
+              /* Masada toplantı: masaya dönük bekle. */
+              const dxT = 546 - st.x;
+              if (Math.abs(dxT) > 4) {
+                st.dir = 'side';
+                st.flip = dxT < 0;
+              } else {
+                st.dir = 'front';
+              }
+            } else if (time < st.chatUntil) {
+              /* Sohbet ediyor: partnerine dönük kal. */
+            } else if (st.dest === 'seat') {
+              st.dir = 'front';
+            } else if (st.wait > 0) {
+              /* Aynı noktada bekleyen biriyle karşılaşınca birbirine dönüp
+                 sohbet başlatır; baloncuklar öne çekilir. */
+              let partner = false;
+              for (const other of stateRef.current.values()) {
+                if (other === st || other.path.length > 0 || other.wait <= 0 || other.dest === 'seat') continue;
+                const d = Math.hypot(other.x - st.x, other.y - st.y);
+                if (d > 30) continue;
+                const dx = other.x - st.x;
+                const dy = other.y - st.y;
+                if (Math.abs(dx) > Math.abs(dy)) {
+                  st.dir = 'side';
+                  st.flip = dx < 0;
+                  other.dir = 'side';
+                  other.flip = dx > 0;
+                } else {
+                  st.dir = dy < 0 ? 'back' : 'front';
+                  other.dir = dy < 0 ? 'front' : 'back';
+                }
+                st.chatUntil = time + 3.5;
+                other.chatUntil = time + 3.5;
+                st.bubbleNext = Math.min(st.bubbleNext, time + 0.4);
+                other.bubbleNext = Math.min(other.bubbleNext, time + 1.6);
+                partner = true;
+                break;
+              }
+              /* Partner yoksa ajan kullandığı şeye dönük durur:
+                 TV/otomat/sunucu/tahta duvardadır (sırtı kameraya),
+                 kanepeye karşı öne bakar. */
+              if (!partner && st.dest === 'poi') {
+                st.dir = st.kind === 'lounge' ? 'front' : 'back';
+              }
+            }
+          }
         }
 
         st.x = sat(st.x, TILE + 6, (COLS - 1) * TILE - 6);
         st.y = sat(st.y, 2 * TILE + 10, ROWS * TILE - 4);
 
         if (time > st.bubbleNext) {
-          const pool = Math.random() < 0.75 ? ROLE_BUBBLES[roleFor(a.role)] : BUBBLES;
+          /* Toplantıdaysa planlama havuzundan, değilse rol/iş baloncuğu. */
+          const pool = st.dest === 'meet'
+            ? PLAN_BUBBLES
+            : Math.random() < 0.75 ? ROLE_BUBBLES[roleFor(a.role)] : BUBBLES;
           st.bubbleText = pool[Math.floor(Math.random() * pool.length)];
           st.bubbleUntil = time + 3.2;
-          st.bubbleNext = time + 9 + Math.random() * 10;
+          st.bubbleNext = time + (st.dest === 'meet' ? 4 + Math.random() * 4 : 9 + Math.random() * 10);
         }
         if (time > st.blinkNext) {
           st.blinkUntil = time + 0.14;
@@ -1777,7 +2370,9 @@ export function PixelOffice({ agents, selected, onSelect }: Props) {
           : sitting
             ? Math.sin(time * 7 + idx) > 0 ? 0 : 1
             : 0;
-        const ox = Math.round(st.x * S - (SW * S) / 2);
+        /* Postür: ayakta beklerken arada kilo devri (1 px ağırlık kayması). */
+        const sway = !moving && !sitting && st.wait > 0 && Math.sin(time * 0.9 + idx * 2.3) > 0.88 ? 1 : 0;
+        const ox = Math.round(st.x * S - (SW * S) / 2) + sway * S;
         const oy = Math.round(st.y * S - SH * S + (sitting ? 8 : 0) * S) - bob * S;
 
         items.push({
@@ -1991,9 +2586,9 @@ export function PixelOffice({ agents, selected, onSelect }: Props) {
     return () => el.removeEventListener('wheel', onWheel);
   }, []);
 
-  const pick = (clientX: number, clientY: number) => {
+  const findAt = (clientX: number, clientY: number): string | null => {
     const wrap = wrapRef.current;
-    if (!wrap) return;
+    if (!wrap) return null;
     const r = wrap.getBoundingClientRect();
     const cw = W * S;
     const ch = H * S;
@@ -2009,7 +2604,25 @@ export function PixelOffice({ agents, selected, onSelect }: Props) {
       const d = Math.hypot(l.x - ix, l.y - 19 * S - iy);
       if (d < 12 * S && (!best || d < best.d)) best = { id: l.id, d };
     }
-    onSelect(best ? best.id : null);
+    return best?.id ?? null;
+  };
+
+  const pick = (clientX: number, clientY: number) => {
+    const id = findAt(clientX, clientY);
+    onSelect(id);
+    if (!id || !onActivate) {
+      lastPickRef.current = null;
+      return;
+    }
+    // Çift tık: aynı ajana 420 ms içinde ikinci kez → plan görünümünde aç.
+    const now = Date.now();
+    const last = lastPickRef.current;
+    if (last && last.id === id && now - last.at < 420) {
+      lastPickRef.current = null;
+      onActivate(id);
+    } else {
+      lastPickRef.current = { id, at: now };
+    }
   };
 
   const handlePointerDown = (e: React.PointerEvent) => {
@@ -2021,7 +2634,11 @@ export function PixelOffice({ agents, selected, onSelect }: Props) {
 
   const handlePointerMove = (e: React.PointerEvent) => {
     const d = dragRef.current;
-    if (!d) return;
+    if (!d) {
+      const id = findAt(e.clientX, e.clientY);
+      setHoverId((prev) => (prev === id ? prev : id));
+      return;
+    }
     const dx = e.clientX - d.sx;
     const dy = e.clientY - d.sy;
     if (!d.moved && Math.hypot(dx, dy) > 4) {
@@ -2040,15 +2657,29 @@ export function PixelOffice({ agents, selected, onSelect }: Props) {
 
   const selAgent = selected ? agents.find(a => a.id === selected) : null;
   const sim = selected ? stateRef.current.get(selected) : null;
+  /* Aktivite çubuğu özeti: her kategorideki ajan sayısı (500ms tick ile tazelenir). */
+  const actCounts = { work: 0, seated: 0, route: 0, meet: 0, task: 0, break: 0 };
+  for (const a of agents) actCounts[actKey(stateRef.current.get(a.id))]++;
+  /* COMPACT: yalnız istisnalar (çalışmayanlar); FULL: tüm ajanlar. */
+  const chipAgents = activityOpen
+    ? agents
+    : agents.filter((a) => {
+        const k = actKey(stateRef.current.get(a.id));
+        return k !== 'work' && k !== 'seated';
+      });
   const status = !sim
     ? ''
     : sim.path.length > 0
       ? t('office.statusRoute')
-      : sim.dest === 'seat'
-        ? sim.wait > 0
-          ? t('office.statusWorking')
-          : t('office.statusSeated')
-        : t('office.statusBreak');
+      : sim.dest === 'meet'
+        ? t('office.statusMeeting')
+        : sim.dest === 'seat'
+          ? sim.wait > 0
+            ? t('office.statusWorking')
+            : t('office.statusSeated')
+          : sim.kind === 'board' || sim.kind === 'server' || sim.kind === 'printer'
+            ? t('office.statusTask')
+            : t('office.statusBreak');
   const accent = selAgent ? SHIRTS[hash(selAgent.id) % SHIRTS.length] : '#3AA99F';
   const initials = selAgent
     ? selAgent.name.split(/\s+/).map(w => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase()
@@ -2062,6 +2693,7 @@ export function PixelOffice({ agents, selected, onSelect }: Props) {
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={() => { dragRef.current = null; setPanning(false); }}
+        onPointerLeave={() => { if (!dragRef.current) setHoverId(null); }}
         className="w-full h-full block"
         style={{
           objectFit: 'contain',
@@ -2069,7 +2701,7 @@ export function PixelOffice({ agents, selected, onSelect }: Props) {
           transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})`,
           transformOrigin: '0 0',
           transition: panning ? 'none' : gliding ? 'transform 640ms cubic-bezier(0.22,0.85,0.2,1)' : 'transform 140ms ease-out',
-          cursor: panning ? 'grabbing' : 'grab',
+          cursor: panning ? 'grabbing' : hoverId ? 'pointer' : 'grab',
           touchAction: 'none',
         }}
       />
@@ -2112,17 +2744,98 @@ export function PixelOffice({ agents, selected, onSelect }: Props) {
             <span className="w-1.5 h-1.5 rounded-full" style={{ background: accent }} />
             <span className="text-[10px] text-[#CECDC3]">{status}</span>
           </div>
+          {onActivate && selAgent && (
+            <button
+              type="button"
+              onClick={() => onActivate(selAgent.id)}
+              className="mt-2 w-full rounded border border-[#3AA99F]/35 bg-[#3AA99F]/10 px-2 py-1 text-[10px] text-[#3AA99F] transition-colors hover:bg-[#3AA99F]/20 cursor-pointer"
+            >
+              {t('company.openPlan')}
+            </button>
+          )}
         </div>
       )}
 
-      <div className="absolute bottom-2 right-2 flex items-center gap-1 rounded-md border border-[#34332F] bg-[#1C1B1A]/90 p-1 select-none">
-        <button type="button" onClick={() => zoomAt(1 / 1.25, (wrapRef.current?.clientWidth || 0) / 2, (wrapRef.current?.clientHeight || 0) / 2)} className="w-6 h-6 rounded text-[13px] leading-none bg-[#34332F] text-[#CECDC3] hover:bg-[#3d3c37] cursor-pointer">−</button>
-        <button type="button" onClick={() => zoomAt(1.25, (wrapRef.current?.clientWidth || 0) / 2, (wrapRef.current?.clientHeight || 0) / 2)} className="w-6 h-6 rounded text-[13px] leading-none bg-[#34332F] text-[#CECDC3] hover:bg-[#3d3c37] cursor-pointer">+</button>
-        <button type="button" onClick={() => { setView({ zoom: 1, x: 0, y: 0 }); setZone(''); setGliding(false); }} className="px-1.5 h-6 rounded text-[10px] bg-[#34332F] text-[#CECDC3] hover:bg-[#3d3c37] cursor-pointer">{t('office.zoneAll')}</button>
-      </div>
-
-      <div className="absolute bottom-2 left-2 text-[10px] text-[#87857F]/80 select-none pointer-events-none">
-        {t('office.panHint')}
+      {/* Canlı aktivite çubuğu: ofisin altında tek sıra. Varsayılan COMPACT:
+          yalnız istisnalar (yolda / toplantıda / görevde / molada) çip olarak
+          görünür, çalışanlar özet sayar — 20 ajanla bile taşmaz. Chevron FULL:
+          tüm ajanlar sarmal ızgarada. Sağda zoom ayrılmış segmentte. */}
+      <div
+        className="absolute bottom-2 left-2 right-2 flex items-start gap-1 rounded-md border border-[#34332F] bg-[#1C1B1A]/92 p-1 select-none"
+        data-tick={tick}
+        onPointerDown={e => e.stopPropagation()}
+        onPointerMove={e => e.stopPropagation()}
+        onPointerUp={e => e.stopPropagation()}
+        onWheel={e => e.stopPropagation()}
+      >
+        <button
+          type="button"
+          onClick={() => setActivityOpen(o => !o)}
+          title={t('office.activityTitle')}
+          className="mt-0.5 flex shrink-0 items-center gap-1 rounded px-1 py-1 text-[#A8A397] hover:bg-white/[0.05] cursor-pointer"
+        >
+          <span className={`h-1.5 w-1.5 rounded-full bg-[#3AA99F] ${activityOpen ? 'animate-pulse' : ''}`} />
+          {activityOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+        </button>
+        <div className="mt-1 flex shrink-0 items-center gap-2 border-r border-[#2A2825] px-1.5 text-[9px] leading-none">
+          {(['route', 'meet', 'task', 'break'] as const).map(k =>
+            actCounts[k] > 0 ? (
+              <span key={k} className="flex items-center gap-1" style={{ color: ACT_COLORS[k] }}>
+                <span className="h-1.5 w-1.5 rounded-full" style={{ background: ACT_COLORS[k] }} />
+                {actCounts[k]}
+              </span>
+            ) : null
+          )}
+          <span className="text-[#87857F]">{actCounts.work + actCounts.seated} × {t('office.actWorking')}</span>
+        </div>
+        {activityOpen && chipAgents.length > 0 && (
+          <div
+            className="flex min-w-0 flex-1 flex-wrap items-center content-start gap-0.5 self-start overflow-y-auto py-0.5"
+            style={{ maxHeight: 108, scrollbarWidth: 'thin' }}
+          >
+            {chipAgents.map((a) => {
+              const s = stateRef.current.get(a.id);
+              const key = actKey(s);
+              const label =
+                key === 'route' ? t('office.actRoute')
+                : key === 'meet' ? t('office.actMeeting')
+                : key === 'task' ? t('office.actTask')
+                : key === 'break' ? t('office.actBreak')
+                : key === 'seated' ? t('office.actSeated')
+                : t('office.actWorking');
+              return (
+                <button
+                  key={a.id}
+                  type="button"
+                  onClick={() => onSelect(a.id)}
+                  title={`${a.name} · ${label}`}
+                  className={`flex shrink-0 items-center gap-1.5 rounded border px-1 py-0.5 transition-colors cursor-pointer ${
+                    selected === a.id ? 'border-[#3AA99F]/60 bg-[#3AA99F]/10' : 'border-transparent hover:bg-white/[0.04]'
+                  }`}
+                >
+                  <img
+                    src={headUrl(a.id)}
+                    alt=""
+                    width={16}
+                    height={16}
+                    className="h-4 w-4 rounded-[3px] border border-black/40"
+                    style={{ imageRendering: 'pixelated' }}
+                  />
+                  <span className="max-w-[76px] truncate text-[10px] leading-none text-[#E8E4DA]">{a.name}</span>
+                  <span className="text-[9px] leading-none" style={{ color: ACT_COLORS[key as keyof typeof ACT_COLORS] }}>
+                    {label}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+        {/* Zoom: çubuğun sağında, net çizgiyle ayrık kendi segmenti */}
+        <div className="ml-auto flex shrink-0 items-center gap-1.5 self-center border-l border-[#2A2825] pl-1.5">
+          <button type="button" onClick={() => zoomAt(1 / 1.25, (wrapRef.current?.clientWidth || 0) / 2, (wrapRef.current?.clientHeight || 0) / 2)} className="w-6 h-6 rounded text-[13px] leading-none bg-[#34332F] text-[#CECDC3] hover:bg-[#3d3c37] cursor-pointer">−</button>
+          <button type="button" onClick={() => zoomAt(1.25, (wrapRef.current?.clientWidth || 0) / 2, (wrapRef.current?.clientHeight || 0) / 2)} className="w-6 h-6 rounded text-[13px] leading-none bg-[#34332F] text-[#CECDC3] hover:bg-[#3d3c37] cursor-pointer">+</button>
+          <button type="button" onClick={() => { setView({ zoom: 1, x: 0, y: 0 }); setZone(''); setGliding(false); }} className="px-1.5 h-6 rounded text-[10px] bg-[#34332F] text-[#CECDC3] hover:bg-[#3d3c37] cursor-pointer">{t('office.zoneAll')}</button>
+        </div>
       </div>
     </div>
   );

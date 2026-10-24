@@ -60,6 +60,8 @@ interface ThalamusCopilotProps {
   floating?: boolean;
   /** Toggle between docked and floating. */
   onToggleFloat?: () => void;
+  /** Close the floating window. */
+  onClose?: () => void;
   /** Drag handler for the header while floating. */
   onHeaderPointerDown?: React.PointerEventHandler<HTMLDivElement>;
   /** Ref to the header row (used to measure the unbreakable minimum width). */
@@ -170,6 +172,7 @@ export function ThalamusCopilot({
   onOpenTerminal,
   floating = false,
   onToggleFloat,
+  onClose,
   onHeaderPointerDown,
   headerRef,
 }: ThalamusCopilotProps) {
@@ -345,11 +348,24 @@ export function ThalamusCopilot({
   };
 
   const executeAgentAction = async (msgId: string, action: ActionPayload) => {
+    const perm = effectivePerm(permRef.current);
+    // Salt-okunur modda model yine de bir eylem bloğu üretirse çalıştırma:
+    // yazma/komut düğmeleri tıklanabilir görünse bile kapı burada.
+    if (perm === 'readonly') {
+      setMessages(prev => [...prev, {
+        id: newId(),
+        sender: 'ai',
+        text: t('cop.readonlyBlocked'),
+        timestamp: ts(),
+        modeUsed: 'chat',
+      }]);
+      return;
+    }
     try {
       if (action.type === 'RUN_TERMINAL' && action.command) {
         await runCommand(action.command);
       } else if (action.type === 'APPLY_PATCH' && action.targetFile && action.codeSnippet) {
-        if (effectivePerm(permRef.current) === 'ask') {
+        if (perm === 'ask') {
           // 'Confirm' modu TÜM yazma yollarını kapsar: bu "Apply" düğmesi de
           // dosyaya doğrudan yazmaz — bekleyen edit olarak onaya düşer.
           setPendingEdits([{ file: action.targetFile, applied: true, message: '', new_body: action.codeSnippet }]);
@@ -679,7 +695,7 @@ export function ThalamusCopilot({
         onPointerDown={floating ? onHeaderPointerDown : undefined}
         className={`h-10 px-2 bg-[#282726] border-b border-[#34332F] flex items-center gap-2 overflow-hidden whitespace-nowrap flex-shrink-0 ${floating ? 'cursor-move' : ''}`}
       >
-        <span className="font-mono text-xs font-bold tracking-tight text-[#3AA99F] flex-shrink-0">Nucleus</span>
+        <span className="flex-shrink-0 text-[12.5px] font-medium tracking-tight text-[#CECDC3]">Nucleus</span>
 
         <div className="flex items-center bg-[#1C1B1A] p-[3px] rounded-md border border-[#34332F] flex-shrink-0 whitespace-nowrap">
           <button
@@ -790,6 +806,13 @@ export function ThalamusCopilot({
               onClick={onToggleFloat}
               active={floating}
               activeClassName="bg-[#4385BE]/20 text-[#4385BE]"
+            />
+          )}
+          {onClose && (
+            <HeaderAction
+              icon={X}
+              label={t('common.close')}
+              onClick={onClose}
             />
           )}
         </div>

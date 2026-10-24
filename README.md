@@ -41,3 +41,7 @@ npm run tauri:build
 ## Product principle (agreed)
 - **Compression is fully lossless**: only JSON segments are converted to the `@T` table (round-trip verified); code blocks and text are carried over word for word; the order does not change.
 - **Translation (TR→EN) was rejected** (2026-10): although it would pay off, it breaks the lossless principle — no lossy transformation (summarization, paraphrase, translation) will be performed.
+
+## Third-party notices
+See [ATTRIBUTIONS.md](ATTRIBUTIONS.md) for the full list of runtime
+dependencies, licenses and design credits.

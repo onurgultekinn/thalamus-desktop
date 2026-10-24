@@ -135,12 +135,14 @@ fn router(state: BackendState) -> Router {
         .route("/api/compress", post(compress))
         .route("/api/ai/chat", post(ai::ai_chat))
         .route("/api/ai/chat/stream", post(ai::ai_chat_stream))
+        .route("/api/ai/test", post(ai::ai_test))
         .route("/api/ai/models", post(local_models::local_models))
         .route(
             "/api/ai/serve",
             post(serve::serve_model).get(serve::list_serving),
         )
         .route("/api/ai/serve/stop", post(serve::stop_model))
+        .route("/api/ai/serve/unload", post(serve::unload_model))
         .route("/api/repo/map", post(repo::repo_map))
         .route("/api/agent/run", post(agent::agent_run))
         .route("/api/agent/state", get(agent::agent_state))
@@ -182,6 +184,9 @@ pub fn serve(bpe: Arc<CoreBPE>, workspace_root: Arc<RwLock<String>>) -> BackendS
             .map_err(|e| format!("tokio runtime oluşturulamadı: {}", e))
             .and_then(|rt| {
                 rt.block_on(async move {
+                    // Boşta kalan yerel modelleri arka planda kapat: model
+                    // yalnızca çağrıldığında çalışsın, açık kalmasın.
+                    drop(tokio::spawn(crate::backend::serve::idle_monitor()));
                     let listener = tokio::net::TcpListener::bind(&addr)
                         .await
                         .map_err(|e| format!("backend {} bağlanamadı: {}", addr, e))?;
@@ -299,6 +304,58 @@ mod tests {
             // Yabancı origin: allow-origin başlığı YOK — tarayıcı isteği engeller.
             let res = preflight(router(test_state()), "https://evil.example.com").await;
             assert!(res.headers().get(ACCESS_CONTROL_ALLOW_ORIGIN).is_none());
+        });
+    }
+
+    #[test]
+    fn ai_test_rejects_non_http_url() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let app = router(test_state());
+            let res = app
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/ai/test")
+                        .header("host", "127.0.0.1:8277")
+                        .header("Content-Type", "application/json")
+                        .body(Body::from(
+                            r#"{"base_url":"file:///etc/passwd","api_key":""}"#,
+                        ))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(res.status(), axum::http::StatusCode::BAD_REQUEST);
+        });
+    }
+
+    #[test]
+    fn ai_test_requires_key_for_cloud_endpoint() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let app = router(test_state());
+            let res = app
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/ai/test")
+                        .header("host", "127.0.0.1:8277")
+                        .header("Content-Type", "application/json")
+                        .body(Body::from(
+                            r#"{"base_url":"https://api.openai.com/v1","api_key":""}"#,
+                        ))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(res.status(), axum::http::StatusCode::BAD_REQUEST);
         });
     }
 

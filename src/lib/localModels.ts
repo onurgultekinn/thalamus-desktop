@@ -7,6 +7,7 @@
  * Ayarlar'daki yönetici bu önbellekten beslenir.
  */
 import { API_BASE } from '../services/ThalamusClient';
+import { getConnection, isLocalBaseUrl } from './connections';
 
 export interface LocalEndpoint {
   /** Sağlayıcı kimliği: ollama | lmstudio | custom (providers.ts ile aynı). */
@@ -66,10 +67,20 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 /** Keşif listesi değiştiğinde yayılır (arayüz yeniden çizilir). */
 export const LOCAL_MODELS_EVENT = 'tlm_local_models_changed';
 
+/** İlk mesajda yerel model yüklenirken yayılır; detail model etiketi (boş = bitti). */
+export const LOCAL_LOADING_EVENT = 'tlm_local_loading';
+
+/** Bilinen yerel motor kimlikleri (bağlantı yoksa yedek eşik). */
 const LOCAL_PROVIDERS = new Set(['ollama', 'lmstudio', 'custom', 'managed']);
 
-/** Sağlayıcı bu bilgisayarda çalışan bir sunucu mu (Ollama, LM Studio…)? */
+/**
+ * Sağlayıcı bu bilgisayarda çalışan bir sunucu mu? Bağlantı kaydı varsa
+ * URL'in kendisi karar verir (loopback/private → yerel); kayıt yoksa bilinen
+ * yerel motor kimliklerine bakılır.
+ */
 export function isLocalProvider(providerId: string): boolean {
+  const conn = getConnection(providerId);
+  if (conn) return isLocalBaseUrl(conn.baseUrl);
   return LOCAL_PROVIDERS.has(providerId);
 }
 
@@ -259,21 +270,134 @@ export async function serveLocalModel(id: string, path?: string): Promise<ServeR
   try {
     window.dispatchEvent(new Event(LOCAL_MODELS_EVENT));
   } catch { /* noop */ }
+  setLastLocalModel({
+    id,
+    path,
+    model: data.model,
+    label: data.server?.label || data.model,
+  });
   return { baseUrl: data.base_url, model: data.model, server: data.server };
 }
 
 /** Yönetilen bir sunucuyu durdurur. */
-export async function stopLocalModel(id: string): Promise<boolean> {
+export interface StopServeResult {
+  /** Süreç gerçekten kapatıldı. */
+  stopped: boolean;
+  /** Süren istek vardı; son istek bitince kapatılacak. */
+  queued: boolean;
+}
+
+export async function stopLocalModel(id: string, whenIdle = false): Promise<StopServeResult> {
   const res = await fetch(`${API_BASE}/api/ai/serve/stop`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id }),
+    body: JSON.stringify({ id, when_idle: whenIdle }),
   });
-  if (!res.ok) return false;
+  if (!res.ok) return { stopped: false, queued: false };
+  const data = (await res.json().catch(() => ({}))) as {
+    stopped?: boolean;
+    queued?: boolean;
+  };
   try {
     window.dispatchEvent(new Event(LOCAL_MODELS_EVENT));
   } catch { /* noop */ }
-  return true;
+  return { stopped: data.stopped === true, queued: data.queued === true };
+}
+
+/** Ollama modelini servisi kapatmadan VRAM'den boşaltır. */
+export async function unloadLocalModel(baseUrl: string, model: string): Promise<boolean> {
+  if (!baseUrl || !model) return false;
+  try {
+    const res = await fetch(`${API_BASE}/api/ai/serve/unload`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ base_url: baseUrl, model }),
+    });
+    if (!res.ok) return false;
+    try {
+      window.dispatchEvent(new Event(LOCAL_MODELS_EVENT));
+    } catch { /* noop */ }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Kullanıcının seçtiği ama HENÜZ başlatılmamış yerel model.
+ *
+ * Seçim anında motoru başlatmak RAM/CPU'yu meşgul ediyor ve model listesinde
+ * gezinmeyi zorlaştırıyordu; bu yüzden seçim yalnızca burada tutulur ve model
+ * ilk istek gönderilirken (`aiClient`) yüklenir.
+ */
+export interface PendingLocalModel {
+  id: string;
+  path?: string;
+  model: string;
+  label: string;
+}
+
+const PENDING_LOCAL_KEY = 'tlm_pending_local_v1';
+
+export function getPendingLocalModel(): PendingLocalModel | null {
+  try {
+    const raw = localStorage.getItem(PENDING_LOCAL_KEY);
+    if (!raw) return null;
+    const v = JSON.parse(raw) as Partial<PendingLocalModel>;
+    if (!v?.id || !v?.model) return null;
+    return {
+      id: String(v.id),
+      path: v.path ? String(v.path) : undefined,
+      model: String(v.model),
+      label: String(v.label || v.model),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function setPendingLocalModel(value: PendingLocalModel): void {
+  try {
+    localStorage.setItem(PENDING_LOCAL_KEY, JSON.stringify(value));
+  } catch { /* noop */ }
+  try {
+    window.dispatchEvent(new Event(LOCAL_MODELS_EVENT));
+  } catch { /* noop */ }
+}
+
+export function clearPendingLocalModel(): void {
+  try {
+    localStorage.removeItem(PENDING_LOCAL_KEY);
+  } catch { /* noop */ }
+  try {
+    window.dispatchEvent(new Event(LOCAL_MODELS_EVENT));
+  } catch { /* noop */ }
+}
+
+/** Son yüklenen yerel model; sunucu uykuya/kapalıya geçince geri getirmek için. */
+const LAST_LOCAL_KEY = 'tlm_last_local_v1';
+
+export function getLastLocalModel(): PendingLocalModel | null {
+  try {
+    const raw = localStorage.getItem(LAST_LOCAL_KEY);
+    if (!raw) return null;
+    const v = JSON.parse(raw) as Partial<PendingLocalModel>;
+    if (!v?.id || !v?.model) return null;
+    return {
+      id: String(v.id),
+      path: v.path ? String(v.path) : undefined,
+      model: String(v.model),
+      label: String(v.label || v.model),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function setLastLocalModel(value: PendingLocalModel): void {
+  try {
+    localStorage.setItem(LAST_LOCAL_KEY, JSON.stringify(value));
+  } catch { /* noop */ }
 }
 
 /** Şu an çalışan (bu uygulamanın başlattığı) sunucular. */

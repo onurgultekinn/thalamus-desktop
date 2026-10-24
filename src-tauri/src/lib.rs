@@ -17,6 +17,31 @@ mod secrets;
 
 pub use engine::{CompressionMetrics, JsonCompressor};
 
+/// İki kapatma isteği bu aralıkta gelirse ikincisi zorla kapatır. Böylece
+/// webview dinleyicisi hazır değilse (açılış yarışı / JS hatası) uygulama
+/// X düğmesiyle kilitli kalmaz.
+static LAST_CLOSE_REQUEST: AtomicU64 = AtomicU64::new(0);
+const FORCE_CLOSE_AFTER_MS: u64 = 2_500;
+
+/// Aynı dizinde geçici dosya + rename. Yazma sırasında çökme/kapanma eski
+/// dosyayı bozmaz; yarım içerik diske hiç düşmez.
+fn write_atomic(path: &Path, content: &str) -> std::io::Result<()> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let file_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("file");
+    let tmp = parent.join(format!(".{}.tmp-{}", file_name, std::process::id()));
+    fs::write(&tmp, content)?;
+    match fs::rename(&tmp, path) {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            let _ = fs::remove_file(&tmp);
+            Err(err)
+        }
+    }
+}
+
 /// Aktif terminal oturumu: PTY master + writer + alt süreç.
 pub struct TerminalSession {
     /// Bu oturumu üreten `start_terminal` çağrısının kimliği. Eski bir React
@@ -353,7 +378,7 @@ fn thalamus_write_file(
     if let Some(parent) = safe_path.parent() {
         let _ = fs::create_dir_all(parent);
     }
-    fs::write(safe_path, content).map_err(|e| format!("Could not write file: {}", e))
+    write_atomic(&safe_path, &content).map_err(|e| format!("Could not write file: {}", e))
 }
 
 #[tauri::command]
@@ -588,9 +613,9 @@ fn set_workspace_root(path: String, state: State<'_, AppState>) -> Result<Worksp
         }
     }
     config_val["workspace_root"] = serde_json::Value::String(root_str.clone());
-    let _ = fs::write(
+    let _ = write_atomic(
         &config_path,
-        serde_json::to_string_pretty(&config_val).unwrap_or_default(),
+        &serde_json::to_string_pretty(&config_val).unwrap_or_default(),
     );
 
     Ok(build_workspace_info(Path::new(&root_str)))
@@ -839,7 +864,38 @@ fn close_terminal(session_id: Option<u64>, state: State<'_, AppState>) -> Result
 #[tauri::command]
 fn thalamus_save_config(config_json: String) -> Result<(), String> {
     let config_path = config_path();
-    fs::write(config_path, config_json).map_err(|e| format!("Ayarlar kaydedilemedi: {}", e))
+    write_atomic(&config_path, &config_json).map_err(|e| format!("Ayarlar kaydedilemedi: {}", e))
+}
+
+/// Dış bağlantıyı sistem tarayıcısında açar. WebView'de `target="_blank"`
+/// yeni pencere izni olmadığı için hiçbir şey yapmıyordu; bu komut tek yol.
+/// Yalnız http(s)/mailto kabul edilir (komut enjeksiyonu değil, URL şeması
+/// doğrulaması — `cmd start` argümanı yine tırnaklanmadan geçmez).
+#[tauri::command]
+fn open_external(url: String) -> Result<(), String> {
+    let target = url.trim();
+    if !(target.starts_with("https://") || target.starts_with("http://") || target.starts_with("mailto:")) {
+        return Err("Only http(s) and mailto links can be opened.".to_string());
+    }
+    #[cfg(target_os = "windows")]
+    {
+        // `cmd /C start` KULLANILMAZ: URL içindeki `&` cmd tarafından komut
+        // ayırıcı olarak yorumlanıp komut çalıştırmaya yol açabiliyordu.
+        // rundll32 argümanları doğrudan CreateProcess'e verir; kabuk yok.
+        std::process::Command::new("rundll32.exe")
+            .args(["url.dll,FileProtocolHandler", target])
+            .spawn()
+            .map_err(|e| format!("Could not open the link: {e}"))?;
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+        std::process::Command::new(opener)
+            .arg(target)
+            .spawn()
+            .map_err(|e| format!("Could not open the link: {e}"))?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -919,6 +975,16 @@ pub fn run() {
         // webview'daki kirli-editör kontrolü destroy() ile asıl kapanışı yapar.
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0);
+                let last = LAST_CLOSE_REQUEST.swap(now, Ordering::Relaxed);
+                // İkinci tık: webview yanıt vermese bile pencereyi kapat.
+                if now.saturating_sub(last) < FORCE_CLOSE_AFTER_MS {
+                    let _ = window.destroy();
+                    return;
+                }
                 api.prevent_close();
                 let _ = window.emit("close-requested", ());
             }
@@ -942,6 +1008,7 @@ pub fn run() {
             reset_app_config,
             thalamus_save_config,
             thalamus_load_config,
+            open_external,
             secret_set,
             secret_get,
             secret_delete,

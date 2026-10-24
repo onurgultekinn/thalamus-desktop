@@ -62,8 +62,12 @@ export const StreamingMessage: React.FC<{ content: string }> = ({ content }) => 
       {frozen.map((block, index) => (
         <FrozenBlock key={index} content={block} />
       ))}
+      {/* İmleç yalnız canlı kuyrukta: donmuş blokların sonunda dik çizgi
+          birikmesin diye kuyruk ayrı sarmalanır (.tlm-stream-tail). */}
       {tail.trim() ? (
-        <MarkdownMessage content={tail} streaming />
+        <div className="tlm-stream-tail">
+          <MarkdownMessage content={tail} streaming />
+        </div>
       ) : (
         <span className="tlm-stream-dots" aria-hidden="true" />
       )}

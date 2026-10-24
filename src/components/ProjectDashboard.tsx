@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   FileCode, 
   Folder, 
-  FolderOpen, 
+  FolderOpen,
+  PanelLeft, 
   Terminal as TerminalIcon, 
   Plus, 
   FolderPlus, 
@@ -12,15 +13,14 @@ import {
   X,
   Play,
   AlertTriangle,
-  ChevronLeft,
-  MessageSquare,
   Save,
   Trash2,
   Pencil,
   Search as SearchIcon,
   PictureInPicture2,
   Building2,
-  Eye
+  Eye,
+  RefreshCw
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { SyntaxHighlighter, vscDarkPlus } from '../lib/codeHighlight';
@@ -29,10 +29,12 @@ import { API_BASE } from '../services/ThalamusClient';
 import { RealTerminal } from './RealTerminal';
 import { ThalamusCopilot } from './ThalamusCopilot';
 import { AgentCompany } from './AgentCompany';
+import { FilePreviewDrawer } from './FilePreviewDrawer';
 import { useToast } from './Toast';
-import { fetchWorkspaceInfo, getWorkspaceName, getWorkspaceRoot, saveWorkspaceRoot } from '../lib/workspace';
+import { fetchWorkspaceInfo, getWorkspaceName, getWorkspaceRoot, pickFolder, saveWorkspaceRoot } from '../lib/workspace';
 import { useFloatingPanel, useAutoMinWidth, FloatResizeHandle, FLOATING_CHROME } from './floating';
 import { useT } from '../lib/i18n';
+import { NUCLEUS_LIMITS, editorExcerpt } from '../lib/nucleusPolicy';
 import type { PreviewItem } from './FilePreviewDrawer';
 
 export interface FileNode {
@@ -102,6 +104,11 @@ interface ProjectDashboardProps {
   setActiveTab: (tab: string) => void;
   /** Dosyayı mini önizleme/düzenleyici çekmecesinde açar (yol bilgisiyle). */
   onOpenPreview?: (item: PreviewItem) => void;
+  onContextChange?: (context: { activeFile: string; code: string; cursorLine: number; selection: string }) => void;
+  onOpenProject?: (root: string) => void;
+  /** Proje görünümünde sağ panelde gösterilecek önizleme (bkz. App). */
+  previewItem?: PreviewItem | null;
+  onClosePreview?: () => void;
 }
 
 interface PendingMove {
@@ -111,12 +118,13 @@ interface PendingMove {
   targetFolderName: string;
 }
 
-export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview }: ProjectDashboardProps) {
+export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview, onContextChange, onOpenProject, previewItem, onClosePreview }: ProjectDashboardProps) {
   const { showToast } = useToast();
 
   /** Ayarlarla canlı senkron: localStorage config'ini okur. */
   const readAppearance = () => {
     let fz = '13px', tab = 4;
+    let lines = true, autosave = false;
     try {
       const configStr = localStorage.getItem('thalamus_config');
       if (configStr) {
@@ -124,21 +132,27 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview }: Pro
         if (config.appearance) {
           if (config.appearance.fontSize) fz = config.appearance.fontSize;
           if (config.appearance.tabSize) tab = config.appearance.tabSize;
+          if (typeof config.appearance.showLineNumbers === 'boolean') lines = config.appearance.showLineNumbers;
+          if (typeof config.appearance.autosave === 'boolean') autosave = config.appearance.autosave;
         }
       }
     } catch {}
-    return { fontSize: fz, tabSize: tab };
+    return { fontSize: fz, tabSize: tab, showLineNumbers: lines, autosave };
   };
 
   // Editör görünüm ayarları state'tedir; Settings kaydettiğinde
   // 'thalamus_config_changed' olayıyla 20 sn / remount beklemeden uygulanır.
   const [fontSize, setFontSize] = useState<string>(() => readAppearance().fontSize);
   const [tabSize, setTabSize] = useState<number>(() => readAppearance().tabSize);
+  const [showLineNumbers, setShowLineNumbers] = useState<boolean>(() => readAppearance().showLineNumbers);
+  const [autosave, setAutosave] = useState<boolean>(() => readAppearance().autosave);
   useEffect(() => {
     const sync = () => {
       const a = readAppearance();
       setFontSize(a.fontSize);
       setTabSize(a.tabSize);
+      setShowLineNumbers(a.showLineNumbers);
+      setAutosave(a.autosave);
     };
     window.addEventListener('thalamus_config_changed', sync);
     return () => window.removeEventListener('thalamus_config_changed', sync);
@@ -192,6 +206,7 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview }: Pro
   const lineNumbersRef = useRef<HTMLDivElement>(null);
   const editorTextareaRef = useRef<HTMLTextAreaElement>(null);
   const editorHighlightRef = useRef<HTMLPreElement>(null);
+  const editorRangeRef = useRef({ start: 0, end: 0 });
 
   // 📂 Loads the real file system tree
   const loadTree = React.useCallback(async () => {
@@ -245,6 +260,34 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview }: Pro
   useEffect(() => {
     loadTree();
   }, [loadTree]);
+
+  // Dışarıdan (başka editör, git, AI) gelen dosya değişiklikleri: pencere
+  // odağa dönünce ağacı sessizce tazele. Açık klasörler korunur.
+  useEffect(() => {
+    let timer: number | null = null;
+    const onFocus = () => {
+      if (timer !== null) window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        timer = null;
+        void loadTree();
+      }, 600);
+    };
+    window.addEventListener('focus', onFocus);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [loadTree]);
+
+  const handleChooseFolder = async () => {
+    try {
+      const selected = await pickFolder(t('sidebar.chooseFolder'));
+      if (selected) onOpenProject?.(selected);
+    } catch (err) {
+      const x = explainError(err, 'Open folder');
+      showToast(t('sidebar.chooseFolder'), x.explanation, 'error', undefined, `[${x.code}] ${x.detail ?? String(err)}]`);
+    }
+  };
 
   // Real engine health: HTTP /api/health every 5 sec
   useEffect(() => {
@@ -359,28 +402,88 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview }: Pro
   };
   const [openTabs, setOpenTabs] = useState<string[]>([]);
   const [isTerminalOpen, setIsTerminalOpen] = useState<boolean>(true);
-  const [isCopilotOpen, setIsCopilotOpen] = useState<boolean>(true);
+  /** Nucleus yalnızca çağrıldığında açılan yüzen pencere. */
+  const [nucleusOpen, setNucleusOpen] = useState<boolean>(false);
 
   // Merkez pano modu: 'code' = editör+terminal, 'agents' = Ajan Ağı.
   // Mod değişince editör/terminal UNMOUNT edilmez (PTY ve tampon yaşasın).
   const [paneMode, setPaneMode] = useState<'code' | 'agents'>(() => {
     try {
       const v = localStorage.getItem('tlm_pane_mode');
-      return v === 'agents' || v === 'company' ? 'agents' : 'code';
+      // Eski 'mesh' tercihi tek ajan yüzeyine taşındı.
+      return v === 'agents' || v === 'company' || v === 'mesh' ? 'agents' : 'code';
     } catch { return 'code'; }
   });
   useEffect(() => {
     try { localStorage.setItem('tlm_pane_mode', paneMode); } catch { /* noop */ }
   }, [paneMode]);
 
+  // Explorer yalnız kod modunda görünür; daraltma tercihi hatırlanır.
+  const [explorerOpen, setExplorerOpen] = useState<boolean>(() => {
+    try { return localStorage.getItem('tlm_explorer_open') !== '0'; } catch { return true; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('tlm_explorer_open', explorerOpen ? '1' : '0'); } catch { /* noop */ }
+  }, [explorerOpen]);
+
+  /**
+   * Ajan panosunu boşta (idle) önceden kur. Geçişte AgentCompany yeniden
+   * mount edilmediği için kod ↔ ajan geçişi anlık olur; ilk kurulum maliyeti
+   * kullanıcı beklemediği anda ödenir.
+   */
+  const [agentsReady, setAgentsReady] = useState(false);
+  useEffect(() => {
+    if (agentsReady) return;
+    if (paneMode === 'agents') {
+      setAgentsReady(true);
+      return;
+    }
+    let idleId: number | undefined;
+    const warm = () => setAgentsReady(true);
+    if (typeof window.requestIdleCallback === 'function') {
+      idleId = window.requestIdleCallback(warm, { timeout: 1500 });
+    } else {
+      idleId = window.setTimeout(warm, 600);
+    }
+    return () => {
+      if (idleId === undefined) return;
+      if (typeof window.cancelIdleCallback === 'function') window.cancelIdleCallback(idleId);
+      window.clearTimeout(idleId);
+    };
+  }, [paneMode, agentsReady]);
+
   // In-app floating windows (draggable, freely resizable, remembered). Content
   // is never CSS-scaled: it stays native (crisp) and reflows to the window,
   // with a minimum size so it stays readable/usable.
   const termFloat = useFloatingPanel('terminal', { def: { x: 140, y: 140, w: 660, h: 200 }, min: { w: 240, h: 110 } });
-  const nucleusFloat = useFloatingPanel('nucleus', { def: { x: 300, y: 110, w: 470, h: 580 }, min: { w: 340, h: 280 } });
+  const nucleusFloat = useFloatingPanel('nucleus', {
+    def: { x: 300, y: 110, w: 470, h: 580 },
+    min: { w: 340, h: 280 },
+    alwaysFloating: true,
+  });
   // Her panelin başlığı kırpılmadan sığabileceği genişliği ölç → altına inilemez.
   useAutoMinWidth(termFloat.headerRef, termFloat.setMinWidth);
   useAutoMinWidth(nucleusFloat.headerRef, nucleusFloat.setMinWidth);
+
+  // Uygulama genelinden (Alt+N, başlık, komut paleti) yüzen Nucleus'u çağır.
+  useEffect(() => {
+    const open = () => setNucleusOpen(true);
+    const toggle = () => setNucleusOpen((v) => !v);
+    window.addEventListener('tlm:nucleus-open', open);
+    window.addEventListener('tlm:nucleus-toggle', toggle);
+    return () => {
+      window.removeEventListener('tlm:nucleus-open', open);
+      window.removeEventListener('tlm:nucleus-toggle', toggle);
+    };
+  }, []);
+  useEffect(() => {
+    if (!nucleusOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setNucleusOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [nucleusOpen]);
 
   // Min / max panel width limits
   const MIN_COPILOT_WIDTH = 340;
@@ -392,11 +495,13 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview }: Pro
 
   const [creationMode, setCreationMode] = useState<'file' | 'folder' | null>(null);
   const [newItemName, setNewItemName] = useState<string>('');
-  // F5: gezgin arama filtresi (boşken tüm ağaç).
+  // F5: gezgin arama filtresi (boşken tüm ağaç). Yazarken gecikmeli uygulanır.
   const [treeSearch, setTreeSearch] = useState<string>('');
   // F7b: oluşturmanın hedef klasörü ("" = kök) + sağ-tık menüsü durumu.
   const [creatingIn, setCreatingIn] = useState<string>('');
   const [ctxMenu, setCtxMenu] = useState<{ node: FileNode; x: number; y: number } | null>(null);
+  // Explorer "+" düğmesinin Dosya/Klasör menüsü.
+  const [newMenuOpen, setNewMenuOpen] = useState(false);
 
   // DRAG STATES
   const [draggedNode, setDraggedNode] = useState<FileNode | null>(null);
@@ -468,6 +573,45 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview }: Pro
   const workspaceFiles = React.useMemo(() => collectFilePaths(fileTree), [fileTree]);
   const noFileOpen = !activeTab || !activeNode;
   const currentCode = activeNode ? (fileContents[activeTab] ?? '') : '';
+  /**
+   * Nucleus bağlamı: `editorExcerpt` tüm dosyayı satırlara böler. Her tuşta
+   * iki kez çalıştırmak büyük dosyalarda yazmayı geciktiriyordu; bu yüzden
+   * yalnız 140 ms hareketsizlikten sonra hesaplanır.
+   */
+  const contextTimerRef = React.useRef<number | null>(null);
+  const emitEditorContext = React.useCallback(() => {
+    const el = editorTextareaRef.current;
+    const value = el?.value ?? currentCode;
+    const { start, end } = editorRangeRef.current;
+    const { text, line } = editorExcerpt(value, start, end);
+    const selection = end > start ? value.slice(start, end).slice(0, NUCLEUS_LIMITS.selectionChars) : '';
+    onContextChange?.({ activeFile: activeTab, code: text, cursorLine: line, selection });
+  }, [activeTab, currentCode, onContextChange]);
+  const scheduleEditorContext = React.useCallback(() => {
+    if (contextTimerRef.current !== null) window.clearTimeout(contextTimerRef.current);
+    contextTimerRef.current = window.setTimeout(() => {
+      contextTimerRef.current = null;
+      emitEditorContext();
+    }, 140);
+  }, [emitEditorContext]);
+  const reportEditorContext = React.useCallback((el: HTMLTextAreaElement) => {
+    const start = el.selectionStart ?? 0;
+    const end = el.selectionEnd ?? start;
+    editorRangeRef.current = { start, end };
+    scheduleEditorContext();
+  }, [scheduleEditorContext]);
+
+  React.useEffect(() => {
+    editorRangeRef.current = { start: 0, end: 0 };
+  }, [activeTab]);
+
+  React.useEffect(() => {
+    scheduleEditorContext();
+  }, [activeTab, currentCode, scheduleEditorContext]);
+
+  React.useEffect(() => () => {
+    if (contextTimerRef.current !== null) window.clearTimeout(contextTimerRef.current);
+  }, []);
   const codeLines = React.useMemo(() => currentCode.split('\n'), [currentCode]);
   const editorLanguage = editorLanguageFor(activeTab);
   // Prism tüm dosyayı her tuşta yeniden renklendiriyor; ölçülen gecikme:
@@ -613,6 +757,16 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview }: Pro
     window.addEventListener('keydown', onKey);
     return () => { window.removeEventListener('click', close); window.removeEventListener('keydown', onKey); };
   }, [ctxMenu]);
+
+  // "+" menüsü dışında tık/Esc kapatır.
+  useEffect(() => {
+    if (!newMenuOpen) return;
+    const close = () => setNewMenuOpen(false);
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setNewMenuOpen(false); };
+    window.addEventListener('mousedown', close);
+    window.addEventListener('keydown', onKey);
+    return () => { window.removeEventListener('mousedown', close); window.removeEventListener('keydown', onKey); };
+  }, [newMenuOpen]);
 
   const handleMouseDown = (e: React.MouseEvent, node: FileNode) => {
     if (e.button !== 0) return;
@@ -816,8 +970,8 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview }: Pro
     }
     const updatedTabs = openTabs.filter(t => t !== fileName);
     setOpenTabs(updatedTabs);
-    if (activeTab === fileName && updatedTabs.length > 0) {
-      setActiveTab(updatedTabs[updatedTabs.length - 1]);
+    if (activeTab === fileName) {
+      setActiveTab(updatedTabs.length > 0 ? updatedTabs[updatedTabs.length - 1] : '');
     }
   };
 
@@ -1011,6 +1165,26 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview }: Pro
     void handleDeleteEntry(activeNode);
   };
 
+  // Otomatik kaydet (Ayarlar > Editör): yazma durduktan ~1.5 sn sonra kirli
+  // aktif dosyayı diske yazar. Hata sessizdir; kullanıcı yine de elle
+  // kaydedebilir.
+  useEffect(() => {
+    if (!autosave || !activeTab || !activeNode) return;
+    if (!isDirty(activeTab)) return;
+    const timer = window.setTimeout(() => {
+      const code = fileContents[activeTab];
+      if (code === undefined || !isDirty(activeTab)) return;
+      void (async () => {
+        try {
+          await invoke('thalamus_write_file', { path: activeTab, content: withOriginalEol(activeTab, code) });
+          setSavedContents(prev => (prev[activeTab] === code ? prev : { ...prev, [activeTab]: code }));
+        } catch { /* sessiz: Kaydet her zaman elle kullanılabilir */ }
+      })();
+    }, 1500);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autosave, fileContents, activeTab, activeNode]);
+
   useEffect(() => {
     const handleKeyDownGlobal = (e: KeyboardEvent) => {
       // T3: focus terminaldeyse Ctrl+S/Ctrl+R editör kısayolu olarak yutulmaz —
@@ -1107,6 +1281,20 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview }: Pro
     });
   };
 
+  // Arama hızı: filtre + satır üretimi her tuşta yeniden çalışmasın.
+  // useDeferredValue yazmayı anında gösterir, ağaç bir kare geriden gelir;
+  // useMemo yalnız ağaç/arama/sekme gerçekten değişince yeniden kurar.
+  const deferredTreeSearch = React.useDeferredValue(treeSearch);
+  const visibleTree = React.useMemo(
+    () => filterTree(fileTree, deferredTreeSearch),
+    [fileTree, deferredTreeSearch]
+  );
+  const treeRows = React.useMemo(
+    () => (rootExpanded ? renderTreeNodes(visibleTree) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rootExpanded, visibleTree, activeTab, fileContents, openTabs]
+  );
+
   return (
     <div className="w-full h-full flex bg-[#1C1B1A] text-[#CECDC3] font-sans overflow-hidden select-none border-t border-[#34332F] relative">
       
@@ -1132,9 +1320,9 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview }: Pro
             className="fixed z-50 w-[176px] bg-[#282726] border border-[#34332F] rounded-md shadow-2xl py-1 animate-in fade-in zoom-in-95 duration-100"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="px-2.5 py-1.5 text-[10px] font-mono text-[#575654] truncate border-b border-[#34332F]/60">
-              {ctxMenu.node.isFolder ? <Folder size={11} className="inline mr-1 text-[#dcb67a]" /> : <FileCode size={11} className="inline mr-1 text-[#3AA99F]" />}
-              {ctxMenu.node.name}
+            <div className="px-2.5 py-1.5 text-[11px] font-sans text-[#A8A49E] truncate border-b border-[#34332F]/60 flex items-center gap-1.5">
+              {ctxMenu.node.isFolder ? <Folder size={11} className="flex-shrink-0 text-[#dcb67a]" /> : <FileCode size={11} className="flex-shrink-0 text-[#3AA99F]" />}
+              <span className="truncate font-medium text-[#CECDC3]">{ctxMenu.node.name}</span>
             </div>
             <button
               type="button"
@@ -1164,14 +1352,14 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview }: Pro
               onClick={() => { setCtxMenu(null); void handleRenameEntry(ctxMenu.node); }}
               className="w-full text-left px-2.5 py-1.5 text-[11.5px] font-sans text-[#CECDC3] hover:bg-[#34332F] hover:text-white cursor-pointer transition-colors"
             >
-              <Pencil size={11} className="mr-1.5 inline text-[#4385BE]" /> Rename…
+              <Pencil size={11} className="mr-1.5 inline text-[#4385BE]" /> {t('ide.rename')}
             </button>
             <button
               type="button"
               onClick={() => { setCtxMenu(null); void handleDeleteEntry(ctxMenu.node); }}
               className="w-full text-left px-2.5 py-1.5 text-[11.5px] font-sans text-[#D14D41] hover:bg-[#34332F] hover:text-[#E0685C] cursor-pointer transition-colors"
             >
-              <Trash2 size={11} className="mr-1.5 inline" /> Delete…
+              <Trash2 size={11} className="mr-1.5 inline" /> {t('ide.delete')}
             </button>
           </div>
         );
@@ -1214,31 +1402,96 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview }: Pro
         </div>
       )}
 
-      {/* SECTION 1: EXPLORER */}
-      <div 
-        data-root-zone="true"
-        className="w-[220px] bg-[#1C1B1A] border-r border-[#34332F] flex flex-col justify-between flex-shrink-0"
-      >
+      {/* SECTION 1: EXPLORER — yalnız kod modunda; daraltılabilir. */}
+      {paneMode === 'code' && (
+        <div
+          data-root-zone="true"
+          style={{ width: explorerOpen ? 220 : 0 }}
+          className={`bg-[#1C1B1A] flex-shrink-0 overflow-hidden transition-[width] duration-200 ease-out ${
+            explorerOpen ? 'border-r border-[#34332F]' : 'border-r border-transparent'
+          }`}
+        >
+        <div className="w-[220px] h-full flex flex-col justify-between">
         <div className="flex flex-col w-full h-full">
           <div className="px-3 py-2 text-[11px] font-bold text-[#87857F] tracking-wider uppercase flex items-center justify-between border-b border-[#34332F]">
             <span>{t('ide.explorer')}</span>
             <div className="flex items-center gap-1 text-[#CECDC3]">
-              <button 
-                title={t('ide.newFileRoot')} 
-                type="button" 
-                onClick={() => startCreate('file', '')}
+              <button
+                title={t('ide.openFolder')}
+                type="button"
+                onClick={handleChooseFolder}
                 className="p-1 hover:bg-[#282726] rounded cursor-pointer text-[#CECDC3] hover:text-white transition-colors"
               >
-                <Plus size={13} />
+                <FolderOpen size={13} />
               </button>
-              <button 
-                title={t('ide.newFolderRoot')} 
-                type="button" 
-                onClick={() => startCreate('folder', '')}
+              <button
+                title={t('ide.refreshTree')}
+                type="button"
+                onClick={() => void loadTree()}
                 className="p-1 hover:bg-[#282726] rounded cursor-pointer text-[#CECDC3] hover:text-white transition-colors"
               >
-                <FolderPlus size={13} />
+                <RefreshCw size={13} />
               </button>
+              {/* Tek "+" düğmesi: tıklayınca Dosya / Klasör'e ayrılır. */}
+              <div className="relative">
+                <button
+                  title={t('ide.newFileRoot')}
+                  type="button"
+                  onClick={() => setNewMenuOpen(v => !v)}
+                  className={`p-1 rounded cursor-pointer transition-colors ${
+                    newMenuOpen ? 'bg-[#282726] text-white' : 'hover:bg-[#282726] text-[#CECDC3] hover:text-white'
+                  }`}
+                >
+                  <Plus size={13} />
+                </button>
+                {newMenuOpen && (
+                  <div className="absolute right-0 top-full mt-1 z-40 w-[150px] rounded-md border border-[#34332F] bg-[#282726] shadow-2xl py-1 animate-in fade-in zoom-in-95 duration-100">
+                    <button
+                      type="button"
+                      onClick={() => { setNewMenuOpen(false); startCreate('file', ''); }}
+                      title={t('ide.newFileRoot')}
+                      className="w-full flex items-center gap-2 px-2.5 py-1.5 text-[11.5px] font-sans text-[#CECDC3] hover:bg-[#34332F] hover:text-white cursor-pointer transition-colors"
+                    >
+                      <FileCode size={12} className="flex-shrink-0 text-[#3AA99F]" /> {t('ide.newFileHere')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setNewMenuOpen(false); startCreate('folder', ''); }}
+                      title={t('ide.newFolderRoot')}
+                      className="w-full flex items-center gap-2 px-2.5 py-1.5 text-[11.5px] font-sans text-[#CECDC3] hover:bg-[#34332F] hover:text-white cursor-pointer transition-colors"
+                    >
+                      <FolderPlus size={12} className="flex-shrink-0 text-[#dcb67a]" /> {t('ide.newFolderHere')}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Arama: doğrudan Explorer başlığının altında; ağaç onun altında
+              başlar. */}
+          <div className="px-2 py-1.5 border-b border-[#34332F]/60">
+            <div className="flex items-center gap-1.5 rounded-md border border-[#34332F] bg-[#100F0F] focus-within:border-[#4385BE]/60 transition-colors px-2 py-1">
+              <SearchIcon size={11} className="text-[#87857F] flex-shrink-0" />
+              <input
+                type="text"
+                value={treeSearch}
+                onChange={(e) => setTreeSearch(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Escape') setTreeSearch(''); }}
+                placeholder={t('ide.searchFiles')}
+                className="w-full bg-transparent text-[#F2F0E5] font-mono text-[11px] outline-none placeholder-[#575654]"
+                spellCheck={false}
+              />
+              {treeSearch && (
+                <button
+                  type="button"
+                  onClick={() => setTreeSearch('')}
+                  className="text-[#575654] hover:text-[#CECDC3] cursor-pointer flex-shrink-0"
+                  title={t('common.cancel')}
+                >
+                  <X size={11} />
+                </button>
+              )}
             </div>
           </div>
 
@@ -1253,34 +1506,32 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview }: Pro
             <span className="truncate">{workspaceName}</span>
           </button>
 
-          <div 
+          <div
             data-root-zone="true"
             className="p-1 flex flex-col gap-0.5 flex-1 overflow-y-auto pretty-scrollbar"
           >
-            <div className="px-1 pb-1 flex items-center gap-1 border-b border-[#34332F]/50 pb-1.5 mb-0.5">
-              <SearchIcon size={11} className="text-[#87857F] flex-shrink-0" />
-              <input
-                type="text"
-                value={treeSearch}
-                onChange={(e) => setTreeSearch(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Escape') setTreeSearch(''); }}
-                placeholder={t('ide.searchFiles')}
-                className="w-full bg-[#100F0F] border border-[#34332F] focus:border-[#4385BE]/60 text-[#F2F0E5] font-mono text-[11px] px-1.5 py-0.5 rounded outline-none placeholder-[#575654]"
-                spellCheck={false}
-              />
-            </div>
             {creationMode && (
-              <form onSubmit={handleCreateItem} className="px-1 py-0.5 flex items-center gap-1">
-                {creationMode === 'folder' ? (
-                  <Folder size={14} className="text-[#dcb67a]" />
-                ) : (
-                  <FileCode size={14} className="text-[#3AA99F]" />
-                )}
-                {/* F7b: hedef klasör düz yazıyla görünür — "aktif sekmenin
-                    klasörüne gizlice yaz" davranışı kalktı. */}
-                <span className="truncate font-mono text-[10px] text-[#575654]" title={creatingIn || 'workspace root'}>
-                  {creatingIn ? `${creatingIn.split('/').pop()}/` : './'}
-                </span>
+              <form onSubmit={handleCreateItem} className="mx-0.5 mb-1 rounded-md border border-[#dcb67a]/40 bg-[#100F0F] p-1.5 flex flex-col gap-1">
+                <div className="flex items-center gap-1.5">
+                  {creationMode === 'folder' ? (
+                    <Folder size={13} className="text-[#dcb67a] flex-shrink-0" />
+                  ) : (
+                    <FileCode size={13} className="text-[#3AA99F] flex-shrink-0" />
+                  )}
+                  {/* F7b: hedef klasör düz yazıyla görünür — "aktif sekmenin
+                      klasörüne gizlice yaz" davranışı kalktı. */}
+                  <span className="truncate font-sans text-[10px] text-[#87857F]" title={creatingIn || 'workspace root'}>
+                    {creatingIn ? `${creatingIn.split('/').pop()}/` : './'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => { setCreationMode(null); setNewItemName(''); }}
+                    className="ml-auto text-[#575654] hover:text-[#CECDC3] cursor-pointer flex-shrink-0"
+                    title={t('common.cancel')}
+                  >
+                    <X size={11} />
+                  </button>
+                </div>
                 <input
                   type="text"
                   autoFocus
@@ -1293,12 +1544,26 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview }: Pro
                     }
                   }}
                   placeholder={creationMode === 'folder' ? 'folder_name' : 'file.py'}
-                  className="w-full bg-[#100F0F] border border-[#4385BE] text-white font-mono text-[11px] px-1.5 py-0.5 rounded outline-none"
+                  className="w-full bg-transparent border-b border-[#dcb67a]/40 focus:border-[#dcb67a] text-[#F2F0E5] font-mono text-[12px] px-0.5 py-1 outline-none transition-colors placeholder:text-[#575654]"
                 />
+                <span className="text-[9.5px] text-[#575654]">{t('ide.createHint')}</span>
               </form>
             )}
 
-            {rootExpanded && renderTreeNodes(filterTree(fileTree, treeSearch))}
+            {rootExpanded && treeRows}
+            {rootExpanded && fileTree.length === 0 && !treeSearch.trim() && !creationMode && (
+              <div className="px-2 py-3 flex flex-col items-start gap-2">
+                <p className="text-[10.5px] leading-relaxed text-[#87857F]">{t('ide.emptyWorkspace')}</p>
+                <button
+                  type="button"
+                  onClick={handleChooseFolder}
+                  className="flex items-center gap-1.5 rounded border border-[#575654] px-2 py-1 text-[10.5px] text-[#CECDC3] hover:bg-[#282726] hover:text-white transition-colors"
+                >
+                  <FolderOpen size={12} />
+                  {t('ide.openFolder')}
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -1313,17 +1578,42 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview }: Pro
                     : 'bg-[#D0A215]'
               }`}
             />
-            {engineOnline === null ? 'Engine check…' : engineOnline ? 'Engine active' : 'Engine offline'}
+            {engineOnline === null
+              ? t('ide.engineCheck')
+              : engineOnline
+                ? t('ide.engineActive')
+                : t('ide.engineOffline')}
           </span>
           <span className="text-[#3AA99F]">{workspaceName}</span>
         </div>
-      </div>
+        </div>
+        </div>
+      )}
 
       {/* SECTION 2: EDITOR AND TERMINAL — M8: dar pencerede editör 0px'e
           ezilmesin; alt sinir sabit (pencere küçülünce taşma tercih edilir). */}
       <div className="flex-1 flex flex-col min-w-[280px] bg-[#282726]">
         {/* Pano seçici: Kod editörü ↔ Ajan Ağı (Projeler bölümünün ajan sistemi). */}
         <div className="h-8 bg-[#1C1B1A] border-b border-[#34332F] flex items-center gap-1 px-2 flex-shrink-0">
+          {paneMode === 'code' && (
+            <>
+              <button
+                type="button"
+                onClick={() => setExplorerOpen(v => !v)}
+                aria-expanded={explorerOpen}
+                aria-label={explorerOpen ? t('ide.hideExplorer') : t('ide.showExplorer')}
+                title={explorerOpen ? t('ide.hideExplorer') : t('ide.showExplorer')}
+                className={`flex h-6 w-6 items-center justify-center rounded transition-colors cursor-pointer ${
+                  explorerOpen
+                    ? 'text-[#CECDC3] hover:bg-[#282726] hover:text-white'
+                    : 'text-[#87857F] hover:bg-[#282726] hover:text-white'
+                }`}
+              >
+                <PanelLeft size={13} />
+              </button>
+              <div className="w-px h-3.5 bg-[#34332F] mr-0.5" />
+            </>
+          )}
           <button
             type="button"
             onClick={() => setPaneMode('code')}
@@ -1341,11 +1631,11 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview }: Pro
             }`}
           >
             <Building2 size={12} />
-            Agents
+            {t('agents.paneAgents')}
           </button>
         </div>
 
-        <div className={`flex flex-col flex-1 min-h-0 ${paneMode !== 'code' ? 'hidden' : ''}`}>
+        <div className={`flex flex-col flex-1 min-h-0 ${paneMode !== 'code' ? 'hidden' : 'animate-in fade-in duration-150'}`}>
         <div className="h-9 bg-[#282726] border-b border-[#34332F] flex items-center px-1 overflow-x-auto gap-0.5 flex-shrink-0">
           {openTabs.map(fileName => {
             const isActive = activeTab === fileName;
@@ -1408,29 +1698,33 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview }: Pro
           )}
         </div>
 
-        <div className="flex-1 overflow-hidden p-2 font-mono leading-[1.6] bg-[#282726] text-[#CECDC3] flex">
+        {/* select-text: kök kapsayıcı select-none olmasına rağmen düzenleyici
+            tıklamaları/seçimleri güvenilir olsun (webview'da caret kayması). */}
+        <div className="flex-1 overflow-hidden p-2 font-mono leading-[1.6] bg-[#282726] text-[#CECDC3] flex select-text">
           {noFileOpen ? (
             <div className="flex-1 flex items-center justify-center text-[12px] text-[#87857F] select-none">
               <span>{t('ide.noFileOpen')}</span>
             </div>
           ) : (
             <>
-            <div 
-              ref={lineNumbersRef}
-              style={{ fontSize }}
-              className="pr-4 border-r border-[#34332F]/50 text-[#87857F] text-right select-none flex flex-col min-w-[32px] overflow-hidden"
-            >
-              {/* Cok satirli dosyada sutun uretilmez: binlerce span yazmayi kilitler. */}
-              {gutterLines ? (
-                gutterLines.map((_, i) => (
-                  <span key={i} className="hover:text-[#CECDC3]">{i + 1}</span>
-                ))
-              ) : (
-                <span className="text-[10px] pr-1 text-[#5F5C57]" title={`Line numbers hidden above ${MAX_GUTTER_LINES} lines for speed`}>
-                  {codeLines.length} ln
-                </span>
-              )}
-            </div>
+            {showLineNumbers && (
+              <div
+                ref={lineNumbersRef}
+                style={{ fontSize }}
+                className="pr-4 border-r border-[#34332F]/50 text-[#87857F] text-right select-none flex flex-col min-w-[32px] overflow-hidden flex-shrink-0"
+              >
+                {/* Cok satirli dosyada sutun uretilmez: binlerce span yazmayi kilitler. */}
+                {gutterLines ? (
+                  gutterLines.map((_, i) => (
+                    <span key={i} className="hover:text-[#CECDC3]">{i + 1}</span>
+                  ))
+                ) : (
+                  <span className="text-[10px] pr-1 text-[#5F5C57]" title={`Line numbers hidden above ${MAX_GUTTER_LINES} lines for speed`}>
+                    {codeLines.length} ln
+                  </span>
+                )}
+              </div>
+            )}
           <div className="relative flex-1 min-w-0">
             {/* Colored layer — the visible text; the textarea on top is transparent. */}
             <pre
@@ -1457,8 +1751,12 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview }: Pro
               ref={editorTextareaRef}
               onScroll={handleTextareaScroll}
               value={currentCode}
-              onChange={(e) => { noteTyping(); handleApplyCode(activeTab, e.target.value); }}
+              onChange={(e) => { noteTyping(); handleApplyCode(activeTab, e.target.value); reportEditorContext(e.currentTarget); }}
               onKeyDown={handleEditorKeyDown}
+              onKeyUp={(e) => reportEditorContext(e.currentTarget)}
+              onClick={(e) => reportEditorContext(e.currentTarget)}
+              onFocus={(e) => reportEditorContext(e.currentTarget)}
+              onSelect={(e) => reportEditorContext(e.currentTarget)}
               wrap="off"
               style={{ fontSize, lineHeight: 1.6, padding: '0 0 0 1rem', boxSizing: 'border-box', tabSize, caretColor: 'rgb(var(--tlm-fg))', color: 'transparent' }}
               className="absolute inset-0 bg-transparent font-mono outline-none border-none resize-none whitespace-pre overflow-auto pretty-scrollbar selection:bg-[#4385BE]/30"
@@ -1552,92 +1850,71 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview }: Pro
         </div>
         </div>{/* /kod panosu (ajan modunda gizli; unmount DEĞİL) */}
 
-        {/* Ajan panosu — yalnız ajan modunda DOM'a girer. */}
-        {paneMode === 'agents' && (
-          <div className="flex-1 min-h-0 flex">
-            <AgentCompany />
+        {/* Tek ajan yüzeyi: plan + hiyerarşi + gerçek çalıştırma + ofis.
+            Boşta önceden kurulur, gizlenir; geçişte yeniden mount edilmez. */}
+        {(agentsReady || paneMode === 'agents') && (
+          <div className={`flex-1 min-h-0 ${
+            paneMode === 'agents' ? 'flex animate-in fade-in duration-150' : 'hidden'
+          }`}>
+            <AgentCompany active={paneMode === 'agents'} />
           </div>
         )}
       </div>
 
-      {/* Nucleus panel (collapsible, resizable, floatable) */}
-<div 
-  ref={nucleusFloat.frameRef}
-  style={nucleusFloat.floating ? nucleusFloat.style : { width: isCopilotOpen ? `${copilotWidth}px` : '36px' }}
-  className={`bg-[#100F0F] ${nucleusFloat.floating
-    ? `relative ${FLOATING_CHROME}`
-    : `flex flex-col flex-shrink-0 relative select-none border-l border-[#282726] ${isResizingCopilot ? '' : 'transition-[width] duration-150 ease-out'}`
-  }`}
->
-  {/* Resizer Handle (docked only) */}
-  {!nucleusFloat.floating && isCopilotOpen && (
-    <div
-      onMouseDown={() => setIsResizingCopilot(true)}
-      onDoubleClick={() => setCopilotWidth(DEFAULT_COPILOT_WIDTH)}
-      className="absolute top-0 -left-1.5 bottom-0 w-3 cursor-col-resize hover:bg-[#4385BE]/40 transition-colors z-20 group flex items-center justify-center"
-      title={t('ide.resizeTitle')}
-    >
-      <div className="w-[2px] h-full bg-transparent group-hover:bg-[#4385BE]" />
-    </div>
-  )}
-
-  {/* Circular collapse/expand toggle (docked only) */}
-  {!nucleusFloat.floating && (
-    <button
-      type="button"
-      onClick={() => setIsCopilotOpen(!isCopilotOpen)}
-      className="absolute top-1/2 -translate-y-1/2 -left-2.5 w-5 h-5 bg-obsidian-panel border border-obsidian-border rounded-full flex items-center justify-center text-obsidian-muted hover:border-obsidian-muted/40 hover:text-obsidian-text cursor-pointer z-50 transition-colors duration-150"
-      title={isCopilotOpen ? t('ide.collapsePanel') : t('ide.expandPanel')}
-    >
-      {isCopilotOpen ? (
-        <ChevronRight size={11} />
-      ) : (
-        <ChevronLeft size={11} />
+      {/* Sağ sütun yalnızca önizleme için açılır. Nucleus artık kalıcı bir
+          panel değil: çağrıldığında açılan yüzen pencere (Alt+N / başlık). */}
+      {previewItem && (
+        <div
+          style={{ width: `${copilotWidth}px` }}
+          className={`flex flex-col flex-shrink-0 relative select-none border-l border-[#282726] ${
+            isResizingCopilot ? '' : 'transition-[width] duration-150 ease-out'
+          }`}
+        >
+          <div
+            onMouseDown={() => setIsResizingCopilot(true)}
+            onDoubleClick={() => setCopilotWidth(DEFAULT_COPILOT_WIDTH)}
+            className="absolute top-0 -left-1.5 bottom-0 w-3 cursor-col-resize hover:bg-[#4385BE]/40 transition-colors z-20 group flex items-center justify-center"
+            title={t('ide.resizeTitle')}
+          >
+            <div className="w-[2px] h-full bg-transparent group-hover:bg-[#4385BE]" />
+          </div>
+          <div className="flex-1 min-h-0">
+            <FilePreviewDrawer
+              item={previewItem}
+              onClose={() => onClosePreview?.()}
+              inline
+              contentWidth={copilotWidth - 8}
+            />
+          </div>
+        </div>
       )}
-    </button>
-  )}
 
-  {/* İçerik native boyutta (keskin) kalır; pencereye göre akar/kaydırılır. */}
-  <div style={nucleusFloat.contentStyle}>
-
-  {/* Collapsed rail (open-state header lives in ThalamusCopilot) */}
-  {!nucleusFloat.floating && !isCopilotOpen && (
-    <div className="h-full w-full flex flex-col items-center pt-2.5 bg-[#1C1B1A]">
-      <button
-        type="button"
-        onClick={() => setIsCopilotOpen(true)}
-        className="p-1 hover:bg-[#282726] rounded text-[#4385BE] hover:text-white transition-colors cursor-pointer"
-        title={t('ide.openNucleus')}
+      {/* Yüzen Nucleus: kapanınca unmount edilmez; sohbet, undo ve bekleyen
+          düzenlemeler korunur. Konum/boyut hatırlanır. */}
+      <div
+        ref={nucleusFloat.frameRef}
+        style={nucleusFloat.style
+          ? { ...nucleusFloat.style, display: nucleusOpen ? 'flex' : 'none' }
+          : { display: 'none' }}
+        className={`bg-[#100F0F] relative ${FLOATING_CHROME}`}
       >
-        <MessageSquare size={15} />
-      </button>
-    </div>
-  )}
-
-  {/* Panel content — M2-tarzı: katlama unmount DEĞİL; sohbet + undo +
-      pending editler katlayıp açarken yaşar kalır; yüzerken de aynı düğüm. */}
-  <div 
-    className="flex-1 flex flex-col min-h-0"
-    style={nucleusFloat.floating
-      ? { display: 'flex' }
-      : { display: isCopilotOpen ? 'flex' : 'none', visibility: isCopilotOpen ? 'visible' : 'hidden' }}
-  >
-    <ThalamusCopilot 
-      activeFile={activeTab}
-      activeFileCode={currentCode}
-                workspaceFiles={workspaceFiles}
-      onApplyCode={handleApplyCode}
-      onOpenTerminal={() => setIsTerminalOpen(true)}
-      floating={nucleusFloat.floating}
-      onToggleFloat={nucleusFloat.toggle}
-      onHeaderPointerDown={nucleusFloat.onDragStart}
-      headerRef={nucleusFloat.headerRef}
-    />
-  </div>
-  </div>
-
-  {nucleusFloat.floating && <FloatResizeHandle onPointerDown={nucleusFloat.onResizeStart} />}
-</div>
+        <div style={nucleusFloat.contentStyle}>
+          <div className="flex-1 flex flex-col min-h-0">
+            <ThalamusCopilot
+              activeFile={activeTab}
+              activeFileCode={currentCode}
+              workspaceFiles={workspaceFiles}
+              onApplyCode={handleApplyCode}
+              onOpenTerminal={() => setIsTerminalOpen(true)}
+              floating
+              onClose={() => setNucleusOpen(false)}
+              onHeaderPointerDown={nucleusFloat.onDragStart}
+              headerRef={nucleusFloat.headerRef}
+            />
+          </div>
+        </div>
+        <FloatResizeHandle onPointerDown={nucleusFloat.onResizeStart} />
+      </div>
 
     </div>
   );

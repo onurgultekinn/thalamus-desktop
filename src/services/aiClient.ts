@@ -3,20 +3,35 @@
  * call are gathered here; the two separate manual fetches in Copilot were removed.
  *
  * Keys are read from the OS keychain via `lib/secrets`; the active provider is
- * selected from the `tlm_active_provider` setting, and if that provider has no
- * key the fallback happens among local-only-picked + cloud providers. Local
- * endpoints (Ollama, LM Studio) are never auto-selected as fallback.
+ * one of the user's saved connections (`lib/connections`). If that connection
+ * has no key the fallback happens among the other key-carrying connections.
+ * Local endpoints (loopback URLs) are never auto-selected as fallback.
  */
 import { API_BASE } from './ThalamusClient';
 import {
-  API_PROVIDERS,
-  providerEndpoint,
   activeProviderStorageKey,
   baseStorageKey,
-  type ApiProvider,
 } from '../lib/providers';
-import { getProviderModel, supportsReasoningEffort } from '../lib/models';
+import {
+  connectionName,
+  ensureConnectionsMigrated,
+  isLocalBaseUrl,
+  listConnections,
+} from '../lib/connections';
+import { getProviderModel, setProviderModel, supportsReasoningEffort } from '../lib/models';
 import { readShowReasoning } from '../lib/reasoning';
+import {
+  clearPendingLocalModel,
+  getLastLocalModel,
+  getPendingLocalModel,
+  listServing,
+  LOCAL_LOADING_EVENT,
+  normalizeBaseUrl,
+  serveLocalModel,
+  stopLocalModel,
+  unloadLocalModel,
+  type ServeResult,
+} from '../lib/localModels';
 import { getStoredKey } from '../lib/secrets';
 
 export interface AiEditResult {
@@ -31,6 +46,7 @@ export interface AiChatResponse {
   /** Destekleyen sağlayıcılarda modelin düşünme metni. */
   reasoning?: string;
   rounds?: number;
+  finishReason?: string;
   edits?: AiEditResult[];
   usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
 }
@@ -71,10 +87,13 @@ function reasoningPreference(
 }
 
 /**
- * Resolves the active provider: first the user's choice, then the registry
- * order. Returns null if no provider has a key.
+ * Resolves the active provider: the user's chosen connection first, then the
+ * other saved connections that can actually serve (key present). Returns null
+ * when nothing is configured. Local connections are only used when explicitly
+ * selected — never as an automatic fallback.
  */
 export async function getActiveProvider(): Promise<ActiveProvider | null> {
+  await ensureConnectionsMigrated();
   const preferred = (() => {
     try {
       return localStorage.getItem(activeProviderStorageKey);
@@ -83,54 +102,170 @@ export async function getActiveProvider(): Promise<ActiveProvider | null> {
     }
   })();
 
-  // A local provider is valid only when the user explicitly picked it.
-  if (preferred) {
-    const picked = API_PROVIDERS.find((p) => p.id === preferred);
-    if (picked && picked.family === 'local') {
-      const customBase = localStorage.getItem(baseStorageKey(picked.id)) || undefined;
-      const model = getProviderModel(picked.id);
+  // `managed`: uygulamanın kendi başlattığı yerel motor; bağlantı listesinde
+  // değil, seçim + taban URL + model localStorage'da tutulur.
+  if (preferred === 'managed') {
+    const model = getProviderModel('managed');
+    if (model) {
+      let base = '';
+      try {
+        base = localStorage.getItem(baseStorageKey('managed')) || '';
+      } catch { /* noop */ }
       return {
-        id: picked.id,
-        name: picked.name,
-        key: (await getStoredKey(picked.id)).trim(),
-        baseUrl: providerEndpoint(picked, customBase || picked.defaultBaseUrl),
+        id: 'managed',
+        name: connectionName('managed'),
+        key: '',
+        baseUrl: base || 'http://127.0.0.1:11500/v1',
         model,
-        reasoningEffort: reasoningPreference(picked.reasoningEffort, picked.id, model),
-        supportsReasoning: !!picked.reasoningEffort,
       };
     }
   }
 
-  const ordered: ApiProvider[] = [
-    ...API_PROVIDERS.filter((p) => p.id === preferred),
-    // Fallback cloud providers only: local endpoints (Ollama/LM Studio) must
-    // never be auto-selected — they are only used when explicitly chosen.
-    ...API_PROVIDERS.filter(
-      (p) =>
-        p.id !== preferred &&
-        p.family !== 'anthropic' &&
-        p.family !== 'local'
-    ),
+  const connections = listConnections();
+  const ordered = [
+    ...connections.filter((c) => c.id === preferred),
+    ...connections.filter((c) => c.id !== preferred),
   ];
 
-  for (const p of ordered) {
-    if (p.family === 'anthropic') continue; // the backend proxy does not speak this format yet
-    const key = (await getStoredKey(p.id)).trim();
-    // Local endpoints are valid without a key; cloud providers are not.
-    if (p.family !== 'local' && !key) continue;
-    const customBase = localStorage.getItem(baseStorageKey(p.id)) || undefined;
-    const model = getProviderModel(p.id);
+  for (const c of ordered) {
+    const local = isLocalBaseUrl(c.baseUrl);
+    const key = (await getStoredKey(c.id)).trim();
+    // Yerel uç noktalar anahtarsız çalışır; uzak bağlantılar anahtarsız ELLENİR.
+    if (!local && !key) continue;
+    // Yerel bağlantılar yalnızca açıkça seçiliyken kullanılır (fallback değil).
+    if (local && c.id !== preferred) continue;
+    const model = getProviderModel(c.id);
     return {
-      id: p.id,
-      name: p.name,
+      id: c.id,
+      name: c.name || connectionName(c.id),
       key,
-      baseUrl: providerEndpoint(p, customBase || p.defaultBaseUrl),
+      baseUrl: c.baseUrl,
       model,
-      reasoningEffort: reasoningPreference(p.reasoningEffort, p.id, model),
-      supportsReasoning: !!p.reasoningEffort,
+      reasoningEffort: reasoningPreference(
+        c.reasoning === 'none' ? 'none' : undefined,
+        c.id,
+        model
+      ),
+      supportsReasoning: c.reasoning === 'none',
     };
   }
   return null;
+}
+
+function announceLocalLoading(label: string) {
+  try {
+    window.dispatchEvent(new CustomEvent(LOCAL_LOADING_EVENT, { detail: label }));
+  } catch { /* noop */ }
+}
+
+/** Hızlı llama-server yolundan önce Ollama'nın VRAM'deki kopyasını bırak. */
+async function freeOllamaBeforeServe(id: string, model: string): Promise<void> {
+  if (!id.startsWith('ollama:')) return;
+  await unloadLocalModel('http://127.0.0.1:11434/v1', model).catch(() => false);
+}
+
+/**
+ * Kullanıcı bir yerel model SEÇTİĞİNDE motoru başlatmayız; seçim "bekleyen"
+ * olarak saklanır. İlk istek burada gelince model yüklenir, `managed` uç
+ * noktası yazılır ve seçim temizlenir. Böylece model seçimi anında RAM/CPU
+ * kilitlenmez; yükleme süresi zaten ilk cevabın içinde kalır.
+ */
+async function beginPendingLocal(): Promise<void> {
+  const pending = getPendingLocalModel();
+  if (!pending) return;
+  announceLocalLoading(pending.label);
+  let served: ServeResult;
+  try {
+    await freeOllamaBeforeServe(pending.id, pending.model);
+    served = await serveLocalModel(pending.id, pending.path);
+  } finally {
+    // Yükleme bitti ya da başarısız: durum yazısını kaldır.
+    announceLocalLoading('');
+  }
+  try {
+    localStorage.setItem(activeProviderStorageKey, 'managed');
+    localStorage.setItem(baseStorageKey('managed'), served.baseUrl);
+  } catch { /* noop */ }
+  setProviderModel('managed', served.model);
+  clearPendingLocalModel();
+}
+
+/**
+ * Uykuya alınmış sunucu listede kalır (istek gelince uyanır). Boşta kapatma
+ * sonrası ise listeden düşer; burada son seçilen modeli yeniden başlatırız.
+ * Böylece boşta kapatılan model sonrası gelen ilk mesaj "sunucu yok" hatası almaz.
+ */
+async function reviveManaged(): Promise<void> {
+  const active = await getActiveProvider();
+  if (!active || active.id !== 'managed' || !active.baseUrl) return;
+  const last = getLastLocalModel();
+  if (!last) return;
+  const target = normalizeBaseUrl(active.baseUrl);
+  const servers = await listServing();
+  if (servers.some((s) => normalizeBaseUrl(s.base_url) === target)) return;
+  announceLocalLoading(last.label);
+  let served: ServeResult;
+  try {
+    await freeOllamaBeforeServe(last.id, last.model);
+    served = await serveLocalModel(last.id, last.path);
+  } finally {
+    announceLocalLoading('');
+  }
+  try {
+    localStorage.setItem(baseStorageKey('managed'), served.baseUrl);
+  } catch { /* noop */ }
+  setProviderModel('managed', served.model);
+}
+
+let closing: Promise<void> = Promise.resolve();
+
+async function providerForRequest(): Promise<ActiveProvider | null> {
+  // Önceki cevabın kapatma işlemi bitmeden yeni model başlatma: aynı portta
+  // öldürme/yeniden yükleme yarışı olmasın.
+  await closing.catch(() => {});
+  await beginPendingLocal();
+  await reviveManaged();
+  return getActiveProvider();
+}
+
+async function waitUntilStopped(target: string, maxMs = 1500): Promise<void> {
+  const deadline = Date.now() + maxMs;
+  while (Date.now() < deadline) {
+    const servers = await listServing().catch(() => []);
+    if (!servers.some((s) => normalizeBaseUrl(s.base_url) === target)) return;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+
+/**
+ * Yanıt bitti: yerel modeli hemen kapat (donanım yalnızca cevap sürerken
+ * kullanılsın). Süren başka istek varsa backend "istek bitince" kuyruğuna alır;
+ * bu durumda gerçekten kapanana kadar kısa süre bekleriz.
+ */
+function closeLocalAfterAnswer(p: ActiveProvider): Promise<void> {
+  // Ollama servisi kalır; yalnızca model VRAM'den boşaltılır. "managed"
+  // sağlayıcısı da Ollama uç noktasına işaret edebilir (bekleyen seçim).
+  const base = p.baseUrl || '';
+  if (p.id === 'ollama' || /:11434(?:\/|$)/.test(base)) {
+    closing = closing.catch(() => {}).then(async () => {
+      await unloadLocalModel(base, p.model);
+    });
+    return closing;
+  }
+  if (p.id !== 'managed') return closing;
+  const target = normalizeBaseUrl(base);
+  closing = closing.catch(() => {}).then(async () => {
+    try {
+      const servers = await listServing();
+      const server = servers.find((s) => normalizeBaseUrl(s.base_url) === target);
+      const last = getLastLocalModel();
+      const id = server?.id ?? (last && !last.id.startsWith('ollama:') ? last.id : undefined);
+      if (!id) return;
+      const res = await stopLocalModel(id, true);
+      if (res.queued) await waitUntilStopped(target);
+    } catch { /* kapanmasa da idle politikası devreye girer */ }
+  });
+  return closing;
 }
 
 /** A single content part for multimodal messages. */
@@ -175,6 +310,51 @@ export interface AiChatOptions {
   preserve?: boolean;
   /** Model yönlendirici bu istek için farklı model seçtiyse. */
   model?: string;
+  /** Yanıt bitince yerel modeli kapat (tek seferlik görsel/araç çağrıları). */
+  closeAfter?: boolean;
+}
+
+function readSetting(key: string): string {
+  try {
+    return (localStorage.getItem(key) || '').trim();
+  } catch {
+    return '';
+  }
+}
+
+/** Ayarlar > Sohbet'teki kullanıcı talimatı; yoksa boş dize. */
+export function readCustomInstructions(): string {
+  return readSetting('tlm_custom_instructions');
+}
+
+/**
+ * Üretim parametreleri (Ayarlar > Sohbet). Boş/geçersiz değer GÖNDERİLMEZ:
+ * sağlayıcı varsayılanı korunur — uydurma bir sıcaklık dayatılmaz.
+ */
+export function readGenerationOptions(): { temperature?: number; maxTokens?: number } {
+  const tempRaw = readSetting('tlm_temperature');
+  const temp = tempRaw === '' ? NaN : Number(tempRaw.replace(',', '.'));
+  const maxRaw = readSetting('tlm_max_tokens');
+  const max = maxRaw === '' ? NaN : Number(maxRaw);
+  return {
+    temperature: Number.isFinite(temp) && temp >= 0 && temp <= 2 ? temp : undefined,
+    maxTokens: Number.isFinite(max) && max >= 1 && max <= 32768 ? Math.round(max) : undefined,
+  };
+}
+
+/**
+ * Kullanıcı talimatını sistem mesajına ekler. Sistem mesajı yoksa (ör. görsel
+ * isteği) başa yeni bir sistem mesajı konur; içerik mesajları değişmez.
+ */
+function withInstructions(messages: AiMessage[]): AiMessage[] {
+  const instructions = readCustomInstructions();
+  if (!instructions) return messages;
+  const block = `USER INSTRUCTIONS (from the user's settings):\n${instructions}`;
+  const first = messages[0];
+  if (first?.role === 'system' && typeof first.content === 'string') {
+    return [{ ...first, content: `${first.content}\n\n${block}` }, ...messages.slice(1)];
+  }
+  return [{ role: 'system', content: block }, ...messages];
 }
 
 export interface AiChatStreamHandlers {
@@ -201,9 +381,14 @@ export async function aiChatStream(
   opts: AiChatOptions,
   handlers: AiChatStreamHandlers
 ): Promise<AiChatResponse> {
-  const p = provider ?? (await getActiveProvider());
+  const p = provider ?? (await providerForRequest());
   if (!p) throw new Error('API_KEY_MISSING');
-
+  // Yalnızca seçili sağlayıcı üzerinden gelen sohbet: cevap bitince kapat.
+  const closeAfter = !provider && (p.id === 'managed' || p.id === 'ollama');
+  // Ollama modeli yanıt sonrası boşaltıldığı için sıradaki istekte yeniden
+  // yüklenir; ilk token'a kadar "model yükleniyor" göster.
+  const ollama = p.id === 'ollama' || /:11434(?:\/|$)/.test(p.baseUrl || '');
+  if (closeAfter && ollama) announceLocalLoading(p.model || p.name);
   // Uzun cevaplar 180 sn'yi aşabilir; akışta üst sınır 10 dk.
   const controller = new AbortController();
   let timedOut = false;
@@ -215,6 +400,7 @@ export async function aiChatStream(
   signal?.addEventListener('abort', relayAbort, { once: true });
 
   try {
+    const gen = readGenerationOptions();
     const res = await fetch(`${API_BASE}/api/ai/chat/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -223,10 +409,12 @@ export async function aiChatStream(
         api_key: p.key,
         model: opts.model || p.model,
         base_url: p.baseUrl || undefined,
-        messages,
+        messages: withInstructions(messages),
         code_blocks: codeBlocks,
         reasoning_effort: p.reasoningEffort || undefined,
         preserve: opts.preserve || undefined,
+        temperature: gen.temperature,
+        max_tokens: gen.maxTokens,
       }),
       signal: controller.signal,
     });
@@ -251,6 +439,7 @@ export async function aiChatStream(
     let reasoning = '';
     let usage: AiChatResponse['usage'];
     let rounds: number | undefined;
+    let finishReason: string | undefined;
 
     for (;;) {
       const { value, done } = await reader.read();
@@ -270,6 +459,7 @@ export async function aiChatStream(
           message?: string;
           usage?: AiChatResponse['usage'];
           rounds?: number;
+          finish_reason?: string;
           engine?: { compressed_messages?: number; original_tokens?: number; compressed_tokens?: number };
         };
         try {
@@ -288,12 +478,13 @@ export async function aiChatStream(
         } else if (event.type === 'done') {
           usage = event.usage;
           rounds = event.rounds;
+          finishReason = event.finish_reason;
         } else if (event.type === 'error') {
           throw new Error(event.message || 'stream error');
         }
       }
     }
-    return { content, reasoning: reasoning || undefined, usage, rounds };
+    return { content, reasoning: reasoning || undefined, usage, rounds, finishReason };
   } catch (err) {
     // Kendi süre aşımımız: çağıran taraf "durduruldu" değil "süre doldu" desin.
     if (timedOut) throw new Error('TIMEOUT_600S');
@@ -301,6 +492,8 @@ export async function aiChatStream(
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener('abort', relayAbort);
+    if (closeAfter && ollama) announceLocalLoading('');
+    if (closeAfter) void closeLocalAfterAnswer(p);
   }
 }
 
@@ -311,7 +504,7 @@ export async function aiChat(
   signal?: AbortSignal,
   opts: AiChatOptions = {}
 ): Promise<AiChatResponse> {
-  const p = provider ?? (await getActiveProvider());
+  const p = provider ?? (await providerForRequest());
   if (!p) throw new Error('API_KEY_MISSING');
 
   // Backend'de 120s transport timeout var; buradaki 180s üst sınır, asılı
@@ -322,6 +515,7 @@ export async function aiChat(
   signal?.addEventListener('abort', relayAbort, { once: true });
 
   try {
+    const gen = readGenerationOptions();
     const res = await fetch(`${API_BASE}/api/ai/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -330,12 +524,14 @@ export async function aiChat(
         api_key: p.key,
         model: opts.model || p.model,
         base_url: p.baseUrl || undefined,
-        messages,
+        messages: withInstructions(messages),
         code_blocks: codeBlocks,
         // Sağlayıcı düşünme modunu kapatmayı gerektiriyorsa (ör. EVREN/vLLM)
         // bu alan gönderilir; yoksa yanıtlar kesilir (ölçüldü).
         reasoning_effort: p.reasoningEffort || undefined,
         preserve: opts.preserve || undefined,
+        temperature: gen.temperature,
+        max_tokens: gen.maxTokens,
       }),
       signal: controller.signal,
     });
@@ -347,5 +543,6 @@ export async function aiChat(
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener('abort', relayAbort);
+    if (opts.closeAfter) void closeLocalAfterAnswer(p);
   }
 }

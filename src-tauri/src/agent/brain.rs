@@ -117,6 +117,8 @@ impl Brain for LlmBrain {
             headers.push(("Authorization".into(), format!("Bearer {}", self.api_key)));
         }
         let body = json!({ "model": self.model, "messages": messages });
+        // Yerel model uykudaysa uyandır ve istek boyunca meşgul tut.
+        let _local_use = crate::backend::serve::begin_use(&self.url);
         let resp = transport.post_json(&self.url, &headers, &body)?;
         let content = resp["choices"][0]["message"]["content"]
             .as_str()

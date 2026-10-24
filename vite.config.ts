@@ -35,6 +35,12 @@ export default defineConfig({
       '@file-viewer/renderer-cad': path.resolve(__dirname, './src/lib/fileViewerCadStub.ts'),
       '@flyfish-dev/cad-viewer': path.resolve(__dirname, './src/lib/fileViewerCadStub.ts'),
       'dwf-viewer': path.resolve(__dirname, './src/lib/fileViewerCadStub.ts'),
+      // Eski binary `.ppt` runtime'ı proprietary (filigran zorunlu). Taban
+      // `@file-viewer/react` + `preset-standard` bunu zaten ithal etmiyor;
+      // alias yalnızca gelecekteki dolaylı ithallere karşı güvenlik ağı.
+      '@file-viewer/ppt': path.resolve(__dirname, './src/lib/fileViewerPptStub.ts'),
+      // heic2any MIT görünür ama içinde libheif (LGPL-3.0) WASM taşır.
+      'heic2any': path.resolve(__dirname, './src/lib/heic2anyStub.ts'),
     },
   },
 

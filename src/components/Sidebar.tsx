@@ -13,18 +13,24 @@ import {
   Check,
   UserRound,
   ChevronUp,
-  X
+  X,
+  Search,
+  Pin,
+  PinOff,
+  Download,
+  MoreHorizontal
 } from 'lucide-react';
 import type { ChatItem, User } from '../types';
 import { getWorkspaceName, getWorkspaceRoot, listRecentProjects, forgetProject, pickFolder } from '../lib/workspace';
+import { searchChats, type ChatSearchHit } from '../lib/chatSearch';
 import { visiblePlanLabel } from '../lib/plan';
 import { useT } from '../lib/i18n';
 import { useToast } from './Toast';
 
 interface SidebarProps {
-  currentView: 'chat' | 'diff' | 'project';
+  currentView: 'chat' | 'project';
   isOpen: boolean;
-  setCurrentView: (view: 'chat' | 'diff' | 'project') => void;
+  setCurrentView: (view: 'chat' | 'project') => void;
   setIsOpen: (open: boolean) => void;
   chats?: ChatItem[];
   activeChatId?: string;
@@ -36,6 +42,8 @@ interface SidebarProps {
   userAvatarUrl?: string;
   onDeleteChat?: (id: string) => void;
   onRenameChat?: (id: string, title: string) => void;
+  onPinChat?: (id: string, pinned: boolean) => void;
+  onExportChat?: (id: string, format: 'md' | 'json') => void;
   onOpenProject?: (root: string) => void;
   projectsVersion?: number;
 }
@@ -55,6 +63,8 @@ export function Sidebar({
   userAvatarUrl,
   onDeleteChat,
   onRenameChat,
+  onPinChat,
+  onExportChat,
   onOpenProject,
   projectsVersion
 }: SidebarProps) {
@@ -80,6 +90,38 @@ export function Sidebar({
 
   const [editingChatId, setEditingChatId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState<string>("");
+  // Sohbet satırının "⋯" menüsü: açıkken hangi sohbete ait olduğu.
+  const [rowMenuId, setRowMenuId] = useState<string | null>(null);
+
+  // Menü açıkken dışarı tık / Escape kapatır.
+  useEffect(() => {
+    if (!rowMenuId) return;
+    const close = () => setRowMenuId(null);
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setRowMenuId(null); };
+    window.addEventListener('mousedown', close);
+    window.addEventListener('keydown', onKey);
+    return () => { window.removeEventListener('mousedown', close); window.removeEventListener('keydown', onKey); };
+  }, [rowMenuId]);
+
+  // Sohbet araması: yazarken kısa bir gecikmeyle tüm sohbetlerin mesajları
+  // taranır (localStorage okuması senkron; her tuşta yapılmaz).
+  const [chatQuery, setChatQuery] = useState('');
+  const [searchHits, setSearchHits] = useState<ChatSearchHit[]>([]);
+
+  useEffect(() => {
+    const q = chatQuery.trim();
+    if (!q) {
+      setSearchHits([]);
+      return;
+    }
+    const id = window.setTimeout(() => setSearchHits(searchChats(q, chats)), 140);
+    return () => window.clearTimeout(id);
+  }, [chatQuery, chats]);
+
+  /** Sabitlenen sohbetler listede önce gelir; kendi içinde sıra korunur. */
+  const orderedChats = [...chats].sort(
+    (a, b) => Number(!!b.pinned) - Number(!!a.pinned)
+  );
 
   // Profile menu: closes on outside click and Escape.
   useEffect(() => {
@@ -232,7 +274,7 @@ export function Sidebar({
         {/* PROJECTS Group — most recently opened first */}
         <div className="flex flex-col gap-0.5 w-full mt-1">
           {isOpen && (
-            <span className="px-1.5 mb-0.5 text-[11px] font-semibold uppercase tracking-widest text-obsidian-muted/50">
+            <span className="px-1.5 mb-2 text-[11px] font-semibold uppercase tracking-widest text-obsidian-muted/50">
               {t('sidebar.projects')}
             </span>
           )}
@@ -244,7 +286,11 @@ export function Sidebar({
               title={projectName}
               className="w-full flex justify-center p-1.5 rounded-md text-obsidian-muted hover:bg-obsidian-panel/30 hover:text-obsidian-text cursor-pointer transition-colors"
             >
-              <FolderOpen size={13} className="opacity-70" />
+              {/* Kapalı kenar çubuğunda da doğru durum: proje gerçekten açıkken
+                  açık klasör, aksi halde kapalı klasör ikonu. */}
+              {currentView === 'project'
+                ? <FolderOpen size={13} className="text-[#dcb67a]" />
+                : <Folder size={13} className="opacity-70" />}
             </button>
           )}
 
@@ -334,9 +380,74 @@ export function Sidebar({
 
         {/* CHATS Group */}
         <div className="flex flex-col gap-0.5 w-full mt-4">
-          {isOpen && <span className="px-1.5 mb-0.5 text-[11px] font-semibold uppercase tracking-widest text-obsidian-muted/50">{t('sidebar.chats')}</span>}
-          
-          {chats.map(chat => {
+          {/* Başlık ile arama arasında dengeli nefes payı: başlık 8px, arama
+              kutusundan sonra da aynı ritim korunur. */}
+          {isOpen && <span className="px-1.5 mb-2 text-[11px] font-semibold uppercase tracking-widest text-obsidian-muted/50">{t('sidebar.chats')}</span>}
+
+          {/* Arama: başlık + mesaj içeriği; sonuçlar aşağıda listelenir.
+              Kutu kompakt: listeye baskın gelmesin. */}
+          {isOpen && (
+            <div className="relative mb-1.5 mx-0.5">
+              <Search size={10} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-obsidian-muted/60" />
+              <input
+                type="text"
+                value={chatQuery}
+                onChange={(e) => setChatQuery(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Escape') setChatQuery(''); }}
+                placeholder={t('sidebar.searchPlaceholder')}
+                spellCheck={false}
+                autoComplete="off"
+                className="w-full rounded-md border border-white/[0.06] bg-white/[0.02] py-[3px] pl-6 pr-5 text-[10.5px] text-obsidian-text outline-none transition-colors placeholder:text-obsidian-muted/45 focus:border-[#dcb67a]/40"
+              />
+              {chatQuery && (
+                <button
+                  type="button"
+                  onClick={() => setChatQuery('')}
+                  title={t('common.cancel')}
+                  className="absolute right-1 top-1/2 -translate-y-1/2 cursor-pointer rounded p-0.5 text-obsidian-muted hover:text-obsidian-text"
+                >
+                  <X size={10} />
+                </button>
+              )}
+            </div>
+          )}
+
+          {isOpen && !!chatQuery.trim() && (
+            <div className="flex flex-col gap-0.5 w-full">
+              <span className="px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-obsidian-muted/40">
+                {t('sidebar.searchResults', { n: searchHits.length })}
+              </span>
+              {searchHits.length === 0 && (
+                <span className="px-2 py-1 text-[11px] text-obsidian-muted/60">{t('sidebar.noSearchResults')}</span>
+              )}
+              {searchHits.map((hit) => (
+                <button
+                  key={`${hit.chatId}-${hit.messageIndex}`}
+                  type="button"
+                  onClick={() => {
+                    onSelectChat?.(hit.chatId);
+                    setChatQuery('');
+                  }}
+                  title={`${hit.chatTitle} · ${hit.snippet}`}
+                  className="w-full rounded-md px-2 py-1 text-left transition-colors hover:bg-obsidian-panel/40"
+                >
+                  <span className="flex items-center gap-1.5 min-w-0">
+                    <MessageSquare size={10} className="flex-shrink-0 text-[#dcb67a]/70" />
+                    <span className="truncate text-[11px] font-medium text-[#CECDC3]">{hit.chatTitle}</span>
+                    {/* Rol rozeti okumaya karışmasın: minik ve soluk. */}
+                    <span className="ml-auto flex-shrink-0 rounded border border-white/[0.06] px-1 py-px text-[8px] uppercase tracking-wide text-obsidian-muted/40">
+                      {hit.role === 'user' ? t('sidebar.you') : t('chat.thalamus')}
+                    </span>
+                  </span>
+                  <span className="mt-0.5 block truncate text-[10px] leading-snug text-obsidian-muted/70">
+                    {hit.snippet}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {!chatQuery.trim() && orderedChats.map(chat => {
             const isActive = currentView === 'chat' && activeChatId === chat.id;
 
             if (editingChatId === chat.id) {
@@ -417,18 +528,18 @@ export function Sidebar({
             return (
               <div
                 key={chat.id}
-                className={`w-full group flex items-center justify-between rounded-md border border-transparent transition-colors duration-150 relative ${
+                className={`w-full group relative flex items-center rounded-md border border-transparent transition-colors duration-150 ${
                   isActive
                     ? 'bg-white/[0.06] text-obsidian-text'
                     : 'text-obsidian-muted hover:bg-obsidian-panel/30 hover:text-obsidian-text'
                 }`}
               >
-                <button 
+                <button
                   type="button"
                   onClick={() => {
                     if (onSelectChat) onSelectChat(chat.id);
-                  }} 
-                  className={`flex-1 flex items-center gap-2 px-2 py-1.5 rounded-md transition-colors duration-150 cursor-pointer min-w-0 ${
+                  }}
+                  className={`flex-1 min-w-0 flex items-center gap-2 px-2 py-1.5 rounded-md transition-colors duration-150 cursor-pointer ${
                     isOpen ? 'justify-start' : 'justify-center'
                   }`}
                   title={chat.title}
@@ -439,33 +550,71 @@ export function Sidebar({
                   ) : (
                     <MessageSquare size={13} className="flex-shrink-0 opacity-50" />
                   )}
+                  {/* Eylem düğmeleri satırın içinden çıkarıldı: başlık artık
+                      tam genişlikte akar, yarıya kadar "…" ile kırpılmaz. */}
                   {isOpen && <span className="truncate text-[11.5px]">{chat.title}</span>}
+                  {isOpen && chat.pinned && (
+                    <Pin size={9} className="ml-auto flex-shrink-0 text-[#dcb67a]/80" aria-label={t('sidebar.pinned')} />
+                  )}
                 </button>
-                
+
+                {/* Eylemler: hover'da yalnız TEK bir "⋯" düğmesi belirir
+                    (satır sağ kenarında, başlığın sonuna oturur). Menüye
+                    tıklayınca Pin/Dışa aktar/Yeniden adlandır/Sil listesi
+                    açılır — ne başlığın yarısı yiten sabit butonlar ne de
+                    alttaki satırı örten bir şerit. */}
                 {isOpen && (
-                  <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1.5 pr-2 flex-shrink-0">
+                  <button
+                    type="button"
+                    aria-label={t('sidebar.chatActions')}
+                    // Dışarı-tık kapatıcısı bu mousedown'u görmesin: aksi halde
+                    // menü kapanıp click ile yeniden açılıyor (kapatılamıyordu).
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setRowMenuId(rowMenuId === chat.id ? null : chat.id);
+                    }}
+                    className={`absolute right-1 top-1/2 z-30 hidden h-6 w-6 -translate-y-1/2 items-center justify-center rounded cursor-pointer text-[#87857F] hover:text-[#F2F0E5] transition-colors group-hover:flex ${
+                      rowMenuId === chat.id ? 'flex text-[#F2F0E5]' : ''
+                    }`}
+                  >
+                    <MoreHorizontal size={12} />
+                  </button>
+                )}
+                {rowMenuId === chat.id && (
+                  <div
+                    className="absolute right-1 top-[calc(100%+2px)] z-40 w-[170px] rounded-md border border-white/[0.08] bg-[#1C1B1A] py-1 shadow-[0_14px_32px_-12px_rgba(0,0,0,0.9)]"
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     <button
                       type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setEditingChatId(chat.id);
-                        setEditTitle(chat.title);
-                      }}
-                      className="text-obsidian-muted hover:text-white p-0.5 rounded cursor-pointer transition-colors"
-                      title={t('sidebar.renameChat')}
+                      onClick={() => { setRowMenuId(null); onPinChat?.(chat.id, !chat.pinned); }}
+                      className="flex w-full items-center gap-2 px-2.5 py-1.5 text-[11.5px] text-[#CECDC3] hover:bg-white/[0.05] hover:text-[#F2F0E5] cursor-pointer transition-colors"
                     >
-                      <Pencil size={11} />
+                      {chat.pinned ? <PinOff size={12} className="text-[#dcb67a]" /> : <Pin size={12} className="text-[#87857F]" />}
+                      {chat.pinned ? t('sidebar.unpin') : t('sidebar.pin')}
                     </button>
                     <button
                       type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setPendingDelete({ kind: 'chat', id: chat.id });
-                      }}
-                      className="text-obsidian-muted hover:text-rose-400 p-0.5 rounded cursor-pointer transition-colors"
-                      title={t('sidebar.deleteChat')}
+                      onClick={() => { setRowMenuId(null); onExportChat?.(chat.id, 'md'); }}
+                      className="flex w-full items-center gap-2 px-2.5 py-1.5 text-[11.5px] text-[#CECDC3] hover:bg-white/[0.05] hover:text-[#F2F0E5] cursor-pointer transition-colors"
                     >
-                      <Trash2 size={11} />
+                      <Download size={12} className="text-[#87857F]" /> {t('sidebar.exportChat')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setRowMenuId(null); setEditingChatId(chat.id); setEditTitle(chat.title); }}
+                      className="flex w-full items-center gap-2 px-2.5 py-1.5 text-[11.5px] text-[#CECDC3] hover:bg-white/[0.05] hover:text-[#F2F0E5] cursor-pointer transition-colors"
+                    >
+                      <Pencil size={12} className="text-[#87857F]" /> {t('sidebar.renameChat')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setRowMenuId(null); setPendingDelete({ kind: 'chat', id: chat.id }); }}
+                      className="flex w-full items-center gap-2 px-2.5 py-1.5 text-[11.5px] text-[#D14D41] hover:bg-rose-500/10 hover:text-[#E0685C] cursor-pointer transition-colors"
+                    >
+                      <Trash2 size={12} /> {t('sidebar.deleteChat')}
                     </button>
                   </div>
                 )}

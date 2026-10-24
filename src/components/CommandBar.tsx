@@ -5,7 +5,13 @@ import {
 } from 'lucide-react';
 import { prepareImageFile, DEFAULT_IMAGE_MODE, type AttachedImage, type ImageMode } from '../lib/imageAttach';
 import { useT } from '../lib/i18n';
-import { API_PROVIDERS, activeProviderStorageKey } from '../lib/providers';
+import { activeProviderStorageKey } from '../lib/providers';
+import {
+  connectionName,
+  ensureConnectionsMigrated,
+  isLocalBaseUrl,
+  listConnections,
+} from '../lib/connections';
 import { modelChoices } from '../lib/models';
 import { classifyTask } from '../lib/modelRouter';
 import { getStoredKey } from '../lib/secrets';
@@ -252,28 +258,26 @@ export function CommandBar({
 
   const loadCloudGroups = async () => {
     try {
-      const list = API_PROVIDERS.filter((p) => p.available !== false && p.family !== 'local');
+      // Kullanıcı tanımlı bağlantılar: anahtarı olan ya da yerel URL'li her kayıt.
+      await ensureConnectionsMigrated();
+      const conns = listConnections().filter((c) => c.id !== 'managed');
       const withKeys = await Promise.all(
-        list.map(async (p) => ({ p, key: (await getStoredKey(p.id)).trim() })),
+        conns.map(async (c) => ({ c, key: (await getStoredKey(c.id)).trim() })),
       );
       const groups = withKeys
-        .filter((x) => x.key)
-        .map(({ p }) => ({ id: p.id, name: p.name, models: modelChoices(p.id) }))
+        .filter((x) => x.key || isLocalBaseUrl(x.c.baseUrl))
+        .map(({ c }) => ({ id: c.id, name: c.name, models: modelChoices(c.id) }))
         .filter((g) => g.models.length > 0);
       setCloudGroups(groups);
-      // Sekme her zaman EN SON SEÇİLEN sağlayıcıyla açılır: durum (async)
+      // Sekme her zaman EN SON SEÇİLEN bağlantıyla açılır: durum (async)
       // çözülmeden önce bile doğru sekme görünsün diye kalıcı değer okunur.
       let lastId = activeProviderId;
       try {
         lastId = localStorage.getItem(activeProviderStorageKey) || activeProviderId;
       } catch { /* noop */ }
-      const activeProvider = API_PROVIDERS.find((p) => p.id === lastId);
-      const preferred =
-        activeProvider?.family === 'local'
-          ? 'local'
-          : groups.some((g) => g.id === lastId)
-            ? lastId
-            : groups[0]?.id || 'local';
+      const preferred = groups.some((g) => g.id === lastId)
+        ? lastId
+        : groups[0]?.id || 'local';
       setActiveTab(preferred);
     } catch {
       setCloudGroups([]);
@@ -318,7 +322,7 @@ export function CommandBar({
     try {
       await onActivateLocalFile(file);
       await refreshServers();
-      showToast(t('settings.localStarted'), file.label, 'success');
+      showToast(t('settings.localSelected'), file.label, 'info');
       setIsModelMenuOpen(false);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -400,8 +404,7 @@ export function CommandBar({
     routerEnabled && deepModel && ((routerMode === 'auto' && task === 'data_analysis') || routerMode === 'deep')
       ? deepModel
       : null;
-  const recommendedProviderName =
-    API_PROVIDERS.find((x) => x.id === activeProviderId)?.name || activeProviderId;
+  const recommendedProviderName = connectionName(activeProviderId);
   const recommendedLabel = recommendedModel
     ? (modelChoices(activeProviderId).find((m) => m.id === recommendedModel)?.label || recommendedModel)
     : '';
