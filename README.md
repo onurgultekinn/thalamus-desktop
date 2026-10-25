@@ -109,5 +109,5 @@ Copyright 2026 Onur Gültekin. Licensed under the
 [Apache License, Version 2.0](LICENSE). In short: you may use, modify, and
 distribute this software, including commercially, as long as the license
 and attribution notices are preserved. The "Thalamus" name and branding
-are not covered by the license.
+are not covered by the license — see [TRADEMARK.md](TRADEMARK.md).
 
