@@ -6,7 +6,7 @@
  * yerel tarafta okunabilir. Sonuç 5 dakika önbelleğe alınır; model seçici ve
  * Ayarlar'daki yönetici bu önbellekten beslenir.
  */
-import { API_BASE } from '../services/ThalamusClient';
+import { API_BASE, localFetch } from '../services/ThalamusClient';
 import { getConnection, isLocalBaseUrl } from './connections';
 
 export interface LocalEndpoint {
@@ -208,7 +208,7 @@ export function scanLocalModels(
 }
 
 async function scanOnce(extraBaseUrls: string[], modelDirs: string[]): Promise<LocalScan> {
-  const res = await fetch(`${API_BASE}/api/ai/models`, {
+  const res = await localFetch(`${API_BASE}/api/ai/models`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -253,7 +253,7 @@ export function localModelsFor(providerId: string, baseUrl: string): string[] {
 
 /** Bir model dosyasını çalıştırır (motoru indirmez; mevcut motoru kullanır). */
 export async function serveLocalModel(id: string, path?: string): Promise<ServeResult> {
-  const res = await fetch(`${API_BASE}/api/ai/serve`, {
+  const res = await localFetch(`${API_BASE}/api/ai/serve`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ id, ...(path ? { path } : {}) }),
@@ -288,7 +288,7 @@ export interface StopServeResult {
 }
 
 export async function stopLocalModel(id: string, whenIdle = false): Promise<StopServeResult> {
-  const res = await fetch(`${API_BASE}/api/ai/serve/stop`, {
+  const res = await localFetch(`${API_BASE}/api/ai/serve/stop`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ id, when_idle: whenIdle }),
@@ -308,7 +308,7 @@ export async function stopLocalModel(id: string, whenIdle = false): Promise<Stop
 export async function unloadLocalModel(baseUrl: string, model: string): Promise<boolean> {
   if (!baseUrl || !model) return false;
   try {
-    const res = await fetch(`${API_BASE}/api/ai/serve/unload`, {
+    const res = await localFetch(`${API_BASE}/api/ai/serve/unload`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ base_url: baseUrl, model }),
@@ -405,7 +405,7 @@ export async function listServing(): Promise<
   { id: string; kind: string; label: string; model: string; base_url: string; port: number; pid: number }[]
 > {
   try {
-    const res = await fetch(`${API_BASE}/api/ai/serve`);
+    const res = await localFetch(`${API_BASE}/api/ai/serve`);
     if (!res.ok) return [];
     const data = (await res.json()) as { servers?: unknown[] };
     return Array.isArray(data.servers)

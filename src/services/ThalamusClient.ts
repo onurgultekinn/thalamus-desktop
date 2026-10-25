@@ -15,6 +15,31 @@ const API_BASE: string =
 
 export { API_BASE };
 
+/**
+ * Yerel API oturum tokeni (backend her açılışta OS entropisiyle üretir).
+ * Token yalnız uygulamanın webview'ına Tauri komutuyla verilir; başka yerel
+ * süreçler portu bulsa bile kimliği doğrulanamayan istekler 401 alır.
+ */
+let cachedToken: string | null = null;
+export async function localApiToken(): Promise<string> {
+  if (cachedToken !== null) return cachedToken;
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    cachedToken = (await invoke<string>('backend_token')) || '';
+  } catch {
+    cachedToken = ''; // tarayıcı önizleme: backend token'sız da health'e izin verir
+  }
+  return cachedToken;
+}
+
+/** fetch() yerine yerel backend çağrıları — token başlığını otomatik ekler. */
+export async function localFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  const token = await localApiToken();
+  const headers = new Headers(init.headers || {});
+  if (token) headers.set('x-thalamus-token', token);
+  return fetch(url, { ...init, headers });
+}
+
 /** fetch + timeout (manual for AbortSignal.timeout TS/WebView compatibility). */
 async function fetchTimeout(url: string, init: RequestInit, ms: number): Promise<Response> {
   const controller = new AbortController();

@@ -111,6 +111,51 @@ async fn compress(
     Ok(Json(metrics))
 }
 
+
+/// Yerel API oturum tokeni: uygulama basina rastgele uretilir. Yerel sunucu
+/// 127.0.0.1'ye bagli olsa bile AYNI makinedeki herhangi bir surec port'u
+/// bulup kullanicinin (kasadaki) anahtarlariyla istek atabilir — token
+/// zorunlulugu bu yolu kapatir: token yalniz uygulamanin kendi webview'ina
+/// Tauri komutuyla verilir.
+static SESSION_TOKEN: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+pub fn session_token() -> &'static str {
+    SESSION_TOKEN.get_or_init(|| {
+        // RandomState hasher'i isletim sistemi entropisiyle tohumlanir
+        // (rand bagimliligi eklemeden guclu rastgelelik standart hilesi).
+        use std::collections::hash_map::RandomState;
+        use std::hash::{BuildHasher, Hasher};
+        let mut out = String::with_capacity(32);
+        for _ in 0..2 {
+            let h = RandomState::new().build_hasher().finish();
+            out.push_str(&format!("{:016x}", h));
+        }
+        out
+    })
+}
+
+/// Middleware: x-thalamus-token dogru degilse 401. /api/health muaf.
+async fn auth_mw(
+    req: axum::http::Request<axum::body::Body>,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::http::StatusCode;
+    let path = req.uri().path();
+    if path == "/api/health" {
+        return next.run(req).await;
+    }
+    let ok = req
+        .headers()
+        .get("x-thalamus-token")
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v == session_token())
+        .unwrap_or(false);
+    if !ok {
+        return (StatusCode::UNAUTHORIZED, "local api token missing or invalid").into_response();
+    }
+    next.run(req).await
+}
+
 fn router(state: BackendState) -> Router {
     // Sunucu API anahtarlarını istek gövdesinde taşıdığı için CORS'u tamamen
     // açık bırakmak, kullanıcının tarayıcısındaki herhangi bir siteye bu
@@ -132,6 +177,7 @@ fn router(state: BackendState) -> Router {
         .allow_headers(AllowHeaders::any());
 
     Router::new()
+        .layer(axum::middleware::from_fn(auth_mw))
         .route("/api/health", get(health))
         .route("/api/compress", post(compress))
         .route("/api/ai/chat", post(ai::ai_chat))

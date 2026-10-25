@@ -46,6 +46,9 @@ export interface Message {
   reasoning?: string;
   /** Cevap hâlâ akıyor: ChatView artımlı (dondurulmuş blok + canlı kuyruk) çizer. */
   streaming?: boolean;
+  /** Ajan koşusu sırasında çağrılan araç adları (read_file, repo_map…).
+   *  Akış sırasında canlı gösterilir; bitince geçmiş olarak kalır. */
+  toolActivity?: string[];
   /** Akış yarıda kaldıysa sebep — cevap silinmez, küçük bir not düşülür. */
   stopped?: 'stop' | 'timeout' | 'error' | 'length';
   /**
@@ -81,6 +84,10 @@ export interface MessageUsage {
   prompt_tokens?: number;
   completion_tokens?: number;
   total_tokens?: number;
+  /** Saglayici prompt cache'inden karsilanan girdi token'i. */
+  cachedTokens?: number;
+  /** EVREN kredi bakiyesi snapshot'i ("1160.0000" gibi). */
+  creditsRemaining?: string;
 }
 
 export interface ChatItem {

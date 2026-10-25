@@ -9,7 +9,7 @@ use tauri::{Emitter, State};
 use tiktoken_rs::cl100k_base;
 
 mod agent;
-mod backend;
+pub mod backend;
 // Sıkıştırma motoru, laboratuvar harness'ı (`examples/lab.rs`) tarafından
 // doğrudan ölçülsün diye public. Üretim yolu değişmez; yalnız görünürlük.
 pub mod engine;
@@ -921,6 +921,11 @@ fn secret_set(provider: String, secret: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn backend_token() -> String {
+    backend::session_token().to_string()
+}
+
+#[tauri::command]
 fn secret_get(provider: String) -> Result<Option<String>, String> {
     secrets::imp::secret_get(provider.trim())
 }
@@ -1010,6 +1015,7 @@ pub fn run() {
             thalamus_load_config,
             open_external,
             secret_set,
+            backend_token,
             secret_get,
             secret_delete,
         ])

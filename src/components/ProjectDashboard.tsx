@@ -25,7 +25,7 @@ import {
 import { invoke } from '@tauri-apps/api/core';
 import { SyntaxHighlighter, vscDarkPlus } from '../lib/codeHighlight';
 import { explainError } from '../lib/errors';
-import { API_BASE } from '../services/ThalamusClient';
+import { API_BASE, localFetch } from '../services/ThalamusClient';
 import { RealTerminal } from './RealTerminal';
 import { ThalamusCopilot } from './ThalamusCopilot';
 import { AgentCompany } from './AgentCompany';
@@ -295,7 +295,7 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview, onCon
     const check = async () => {
       if (document.hidden) return;
       try {
-        const res = await fetch(`${API_BASE}/api/health`, { signal: AbortSignal.timeout(3000), method: 'GET' });
+        const res = await localFetch(`${API_BASE}/api/health`, { signal: AbortSignal.timeout(3000), method: 'GET' });
         if (!cancelled) setEngineOnline(res.ok);
       } catch {
         if (!cancelled) setEngineOnline(false);

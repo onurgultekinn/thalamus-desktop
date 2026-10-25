@@ -903,7 +903,8 @@ export default function App() {
             historySrc
               .map(m => ({ role: m.role, content: askQuestionHistoryText(m) }))
               .filter(m => m.content.trim().length > 0),
-            ownerChatId
+            ownerChatId,
+            m => m.content.length
           );
           const visionStartedAt = performance.now();
           const res = await aiChat([
@@ -977,7 +978,8 @@ export default function App() {
           historySrc
             .map(m => ({ role: m.role, content: askQuestionHistoryText(m) }))
             .filter(m => m.content.trim().length > 0 && !m.content.startsWith('**[')),
-          ownerChatId
+          ownerChatId,
+          m => m.content.length
         );
         // OTURUM PLANLAYICI (lab'da ölçülmüş, kayıpsız): değişmeyen ve hâlâ
         // bağlamda olan dosyalar referansa dönüşür — içerik yeniden gönderilmez.
@@ -1082,17 +1084,24 @@ export default function App() {
 
         let streamed = '';
         let reasoningAcc = '';
+        let toolCalls: string[] = [];
         let engineMeta: Message['engine'];
         let flushTimer: number | undefined;
         const paint = () => {
           flushTimer = undefined;
           const contentSnapshot = streamed;
           const reasoningSnapshot = reasoningAcc;
+          const toolsSnapshot = toolCalls.length ? [...toolCalls] : undefined;
           applyMessages(prev => {
             const copy = [...prev];
             for (let i = copy.length - 1; i >= 0; i--) {
               if (copy[i].streaming) {
-                copy[i] = { ...copy[i], content: contentSnapshot, reasoning: reasoningSnapshot || undefined };
+                copy[i] = {
+                  ...copy[i],
+                  content: contentSnapshot,
+                  reasoning: reasoningSnapshot || undefined,
+                  toolActivity: toolsSnapshot,
+                };
                 break;
               }
             }
@@ -1113,11 +1122,15 @@ export default function App() {
         const settle = (patch: Partial<Message>) => {
           stopPaint();
           streamingChatIdRef.current = null;
+          // Son araç çağrısı 40 ms'lik boyamaya sığmamış olabilir: bitiş
+          // yaması araç geçmişini de kesin taşır.
+          const toolsFinal = toolCalls.length ? [...toolCalls] : undefined;
           applyMessages(prev => {
             const copy = [...prev];
             for (let i = copy.length - 1; i >= 0; i--) {
               if (copy[i].streaming) {
                 copy[i] = { ...copy[i], ...patch, streaming: false };
+                if (toolsFinal) copy[i] = { ...copy[i], toolActivity: toolsFinal };
                 break;
               }
             }
@@ -1174,6 +1187,10 @@ export default function App() {
                 };
               }
             },
+            onToolCall: (name) => {
+              toolCalls = [...toolCalls, name];
+              schedulePaint();
+            },
           });
           if (res.content) streamed = res.content;
           if (res.reasoning) reasoningAcc = res.reasoning;
@@ -1183,8 +1200,21 @@ export default function App() {
           const emptyReply = !hasAnswer
             ? (hitLimit ? t('chat.lengthEmpty') : reasoningAcc.trim() ? t('chat.emptyReasoning') : t('chat.emptyResponse'))
             : '';
+          // Ajan çıktısı görünürlüğü: kaydedilen edit'ler ve adım listesi
+          // akışta geldiyse mesaja dürüstçe yazılır (App sohbeti dosyaya
+          // yazmaz; sessizce yutmak yerine Copilot'a işaret edilir).
+          let finalContent = hasAnswer ? parsed.content : emptyReply;
+          if (res.edits?.some(e => e.applied)) {
+            const files = [...new Set(res.edits!.filter(e => e.applied).map(e => e.file || '?'))];
+            finalContent += `\n\n${t('chat.editsNote')}\n${files.map(f => `- \`${f}\``).join('\n')}`;
+          }
+          if (res.todos?.length) {
+            const done = res.todos!.filter(x => x.status === 'done').length;
+            const marks = res.todos!.map(x => (x.status === 'done' ? '[x]' : x.status === 'in_progress' ? '[>]' : '[ ]') + ' ' + x.content).join('\n');
+            finalContent += `\n\n${t('chat.todoProgress', { done, total: res.todos!.length })}\n${marks}`;
+          }
           settle({
-            content: hasAnswer ? parsed.content : emptyReply,
+            content: finalContent,
             question: parsed.question,
             reasoning: reasoningAcc || undefined,
             latencyMs: Math.round(performance.now() - textStartedAt),

@@ -26,7 +26,8 @@ import {
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { pickFiles } from '../lib/workspace';
-import { aiChat, userMessage, type AiChatResponse, type AiEditResult } from '../services/aiClient';
+import { aiChat, aiChatStream, userMessage, type AiChatResponse, type AiEditResult } from '../services/aiClient';
+import { cacheAwareHistory } from '../lib/contextPlan';
 import { prepareImageFile, IMAGE_MODE_ORDER, DEFAULT_IMAGE_MODE, type AttachedImage, type ImageMode } from '../lib/imageAttach';
 import { MarkdownMessage } from './MarkdownMessage';
 import { CopilotDiffModal } from './CopilotDiffModal';
@@ -290,7 +291,7 @@ export function ThalamusCopilot({
       const data = await aiChat([{
         role: 'user',
         content: `Summarize the following chat comprehensively but with as few tokens as possible; preserve the requests made, decisions taken and edits performed. In the same language:\n\n${history}`,
-      }]);
+      }], [], undefined, undefined, { toolsEnabled: false });
       setMessages([{ id: newId(), sender: 'ai', text: `[SUMMARY]\n${data.content}`, timestamp: ts(), modeUsed: 'chat' }]);
       setPendingEdits(null);
       setPendingPlan(null);
@@ -442,9 +443,7 @@ export function ThalamusCopilot({
         ? 'bg-[#D14D41]/15 text-[#D14D41]'
         : 'bg-[#4385BE]/20 text-[#4385BE]';
 
-  const callRealAI = async (
-    prompt: string
-  ): Promise<AiChatResponse> => {
+    const callRealAI = async (prompt: string, streamMsgId?: string): Promise<AiChatResponse> => {
     // Code context: a SCHEMA is sent instead of the body; the LLM requests the body via get_code_body.
     // No loss — the original code stays in the editor/locally.
     const codeBlocks = activeFileCode.trim()
@@ -452,16 +451,45 @@ export function ThalamusCopilot({
       : [];
     const images = pendingImagesRef.current.map((i) => ({ url: i.url, detail: i.detail }));
     clearPendingImages();
-    // D3: konusma DURUMU gonderilir (son 10 gercek mesaj) — copilot artik
-    // "hafizasiz" degil; "Thinking..." placeholder'i ve bos mesajlar elenir.
-    const history = messages
-      .filter(m => m.text.trim().length > 0 && m.text !== t('cop.thinking'))
-      .slice(-10)
+    const history = cacheAwareHistory(
+      messages.filter(m => m.text.trim().length > 0 && m.text !== t('cop.thinking')),
+      'copilot',
+      m => m.text.length
+    )
       .map(m => ({
         role: (m.sender === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
         content: m.text,
       }));
-    return aiChat([...history, userMessage(prompt, images)], codeBlocks);
+    const msgs = [...history, userMessage(prompt, images)];
+    const opts = { permission: permRef.current };
+    if (!streamMsgId) {
+      return aiChat(msgs, codeBlocks, undefined, undefined, opts);
+    }
+    // AKIŞ: metin canlı boyanır (60 ms throttle); tur hatasında zincir
+    // catch'e düşer, placeholder kaldırılır — akışsız davranışla aynı sözleşme.
+    let acc = '';
+    let paintTimer: number | undefined;
+    const paint = () => {
+      paintTimer = undefined;
+      const snapshot = acc;
+      if (!snapshot) return;
+      setMessages(prev => prev.map(m => (m.id === streamMsgId ? { ...m, text: snapshot } : m)));
+    };
+    try {
+      return await aiChatStream(msgs, codeBlocks, undefined, undefined, opts, {
+        onDelta: (d) => {
+          acc += d;
+          if (paintTimer === undefined) paintTimer = window.setTimeout(paint, 60);
+        },
+        onToolCall: (name) => {
+          if (!acc) {
+            setMessages(prev => prev.map(m => (m.id === streamMsgId ? { ...m, text: '🔧 ' + name } : m)));
+          }
+        },
+      });
+    } finally {
+      if (paintTimer !== undefined) window.clearTimeout(paintTimer);
+    }
   };
 
   const doSend = (raw: string) => {
@@ -546,7 +574,7 @@ export function ThalamusCopilot({
       systemPrompt = `You are Nucleus, Thalamus' coding assistant. Help the user analyze or understand their code. Always answer in the same language the user writes in (Turkish user → answer in Turkish).\nActive file: ${activeFile}${referenceNote}\n\nUser question: ${aiText}`;
     }
 
-    callRealAI(systemPrompt)
+    callRealAI(systemPrompt, placeholderId)
       .then(async res => {
         // Remove "Thinking..." message
         setMessages(prev => prev.filter(m => m.id !== placeholderId));
@@ -601,6 +629,16 @@ export function ThalamusCopilot({
         );
 
         let text = explanation || (isAgent ? "Patch package prepared:" : "");
+        // Ajanın adım listesi (todo_write) — mesajın başında kompakt gösterim.
+        const todos = res.todos || [];
+        if (todos.length > 0) {
+          const doneCount = todos.filter(td => td.status === 'done').length;
+          const lines = todos.map(td => {
+            const mark = td.status === 'done' ? '[x]' : td.status === 'in_progress' ? '[>]' : '[ ]';
+            return `${mark} ${td.content}`;
+          });
+          text = `📋 ${doneCount}/${todos.length}\n${lines.join('\n')}\n\n${text}`;
+        }
         if (applied.length > 0) {
           if (perm === 'readonly') {
             text += `\n\n${t('cop.readOnlyNote')}`;

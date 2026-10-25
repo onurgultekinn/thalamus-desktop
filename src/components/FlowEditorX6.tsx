@@ -12,13 +12,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Graph, Shape, type Edge as X6Edge, type Node as X6Node } from '@antv/x6';
 import { register } from '@antv/x6-react-shape';
 import dagre from '@dagrejs/dagre';
-import { Link2, Maximize2, Minus, Plus } from 'lucide-react';
+import { Link2, Maximize2, Minus, Network, Plus } from 'lucide-react';
 import { useT } from '../lib/i18n';
 import { agentHeadDataUrl } from './PixelOffice';
 import type { AgentLink, PlanAgent } from './AgentCompany';
 
 const NODE_W = 216;
 const NODE_H = 82;
+const HIERARCHY_PORT_INSET = 14;
 const GRID = 16;
 /* GÃ¶z aldan "yapay zekÃ¢ gÃ¶kkuÅŸaÄŸÄ±" paleti kaldÄ±rÄ±ldÄ±: dÃ¼ÄŸÃ¼mler tek bir sÄ±cak
    kalem (altÄ±n) + nÃ¶tr taÅŸ tonlarÄ±yla Ã§izilir; ajanÄ±n yÃ¼zÃ¼ OFÄ°STEKÄ° pixel-art
@@ -115,17 +116,17 @@ const LINK_PORT_SLOTS_RIGHT = [
 const PORT_CONFIG = {
   groups: {
     in: {
-      position: { name: 'absolute' as const, args: { x: '50%', y: 6 } },
+      position: { name: 'absolute' as const, args: { x: '50%', y: HIERARCHY_PORT_INSET } },
       attrs: {
-        /* Portlar görünmez bağlantı noktalarıdır; çizgiler doğrudan kartın
-           kenarına bağlanır. Görünmez alan sürükleyerek bağlamayı kolaylaştırır. */
-        circle: { r: 6, magnet: true, stroke: 'transparent', strokeWidth: 0, fill: 'transparent', cursor: 'crosshair' },
+        /* Portlar görünmez; uçlar kartın 14px içine girer, çizgi ucu
+           kartın arkasında kalır. Sürükleyerek bağlama kapalıdır. */
+        circle: { r: 6, magnet: false, stroke: 'transparent', strokeWidth: 0, fill: 'transparent', cursor: 'default' },
       },
     },
     out: {
-      position: { name: 'absolute' as const, args: { x: '50%', y: NODE_H - 6 } },
+      position: { name: 'absolute' as const, args: { x: '50%', y: NODE_H - HIERARCHY_PORT_INSET } },
       attrs: {
-        circle: { r: 6, magnet: true, stroke: 'transparent', strokeWidth: 0, fill: 'transparent', cursor: 'crosshair' },
+        circle: { r: 6, magnet: false, stroke: 'transparent', strokeWidth: 0, fill: 'transparent', cursor: 'default' },
       },
     },
     /* Serbest ilişkiler hiyerarşi portlarını kullanmaz: kartın yanından çıkıp
@@ -216,6 +217,8 @@ function portPoint(node: X6Node, portId: string): FlowPoint {
 }
 
 type LinkSide = 'left' | 'right';
+type LinkKind = 'hierarchy' | 'work';
+type LinkMenuState = { from: string; x: number; y: number };
 
 function linkSides(graph: Graph, from: string, to: string) {
   const a = graph.getCellById(from);
@@ -448,6 +451,9 @@ function replaceEdges(
     const stroke = selected ? '#D14D41' : EDGE_COLOR;
     const existingEdge = existing.get(childId);
     if (existingEdge) {
+      // Hiyerarşi çizgileri kartların arkasında kalmalı; port uçları kartın
+      // içine girse bile çizgi kartın önüne taşmasın.
+      if (existingEdge.getZIndex() !== -1) existingEdge.setZIndex(-1);
       // Silip yeniden eklemek X6 view'Ä±nda kopya bÄ±rakÄ±yor; yerinde gÃ¼ncelle.
       if (existingEdge.getSourceCellId() !== a.parentId || edgePort(existingEdge, 'source') !== 'out') {
         existingEdge.setSource({ cell: a.parentId as string, port: 'out' });
@@ -468,6 +474,7 @@ function replaceEdges(
       target: { cell: a.id, port: 'in' },
       data: { childId: a.id },
       connector: { name: 'smooth', args: { direction: 'V' } },
+      zIndex: -1,
       attrs: {
         line: {
           stroke,
@@ -600,6 +607,10 @@ export function FlowEditorX6(props: FlowEditorX6Props) {
   const [linkFrom, setLinkFrom] = useState<string | null>(null);
   const linkFromRef = useRef<string | null>(null);
   linkFromRef.current = linkFrom;
+  const [linkKind, setLinkKind] = useState<LinkKind>('work');
+  const linkKindRef = useRef<LinkKind>('work');
+  linkKindRef.current = linkKind;
+  const [linkMenu, setLinkMenu] = useState<LinkMenuState | null>(null);
   /* Serbest iliÅŸkiler varsayÄ±lan olarak yalnÄ±z seÃ§ili kart iÃ§in gÃ¶rÃ¼nÃ¼r;
      "BaÄŸlantÄ±lar" dÃ¼ÄŸmesi hepsini aÃ§ar. */
   const [showAllLinks, setShowAllLinks] = useState(false);
@@ -661,6 +672,7 @@ export function FlowEditorX6(props: FlowEditorX6Props) {
       mousewheel: { enabled: true, modifiers: [], minScale: 0.2, maxScale: 2, zoomAtMousePosition: true },
       interacting: { edgeMovable: false, nodeMovable: true, edgeLabelMovable: false },
       connecting: {
+        validateMagnet: () => false,
         /* Port Ã§apÄ±na yakÄ±nÄ±nca hat port ortasÄ±na kilitlenir. */
         snap: { radius: 44 },
         allowBlank: false,
@@ -706,20 +718,33 @@ export function FlowEditorX6(props: FlowEditorX6Props) {
       const from = linkFromRef.current;
       if (from && from !== node.id) {
         /* SaÄŸ tÄ±kla baÅŸlatÄ±lan baÄŸlantÄ± hedefe tÄ±klayÄ±nca kurulur. */
+        const kind = linkKindRef.current;
         setLinkFrom(null);
-        propsRef.current.onRequestLink(from, node.id);
+        setLinkMenu(null);
+        if (kind === 'hierarchy') propsRef.current.onLink(from, node.id);
+        else propsRef.current.onRequestLink(from, node.id);
         return;
       }
       if (from === node.id) {
         setLinkFrom(null);
         return;
       }
+      setLinkMenu(null);
       propsRef.current.onSelectNode(node.id);
     });
     graph.on('node:contextmenu', ({ e, node }) => {
       e.preventDefault();
       /* AynÄ± karta saÄŸ tÄ±k: baÄŸlantÄ± modunu kapat. */
-      setLinkFrom((cur) => (cur === node.id ? null : node.id));
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (rect) {
+        setLinkMenu({
+          from: node.id,
+          x: Math.max(8, Math.min(e.clientX - rect.left, rect.width - 228)),
+          y: Math.max(8, Math.min(e.clientY - rect.top, rect.height - 142)),
+        });
+      }
+      setLinkFrom(null);
+      setLinkKind('work');
       propsRef.current.onSelectNode(null);
       propsRef.current.onSelectEdge(null);
       propsRef.current.onSelectLink(null);
@@ -727,8 +752,10 @@ export function FlowEditorX6(props: FlowEditorX6Props) {
     graph.on('blank:contextmenu', ({ e }) => {
       e.preventDefault();
       if (linkFromRef.current) setLinkFrom(null);
+      setLinkMenu(null);
     });
     graph.on('edge:click', ({ edge }) => {
+      setLinkMenu(null);
       if (linkFromRef.current) {
         setLinkFrom(null);
         return;
@@ -738,6 +765,7 @@ export function FlowEditorX6(props: FlowEditorX6Props) {
       else if (d.childId) propsRef.current.onSelectEdge(d.childId);
     });
     graph.on('blank:click', () => {
+      setLinkMenu(null);
       if (linkFromRef.current) {
         setLinkFrom(null);
         return;
@@ -921,17 +949,27 @@ export function FlowEditorX6(props: FlowEditorX6Props) {
   }, [props.fitNonce, ready]);
 
   useEffect(() => {
-    if (!linkFrom) return;
+    if (!linkFrom && !linkMenu) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setLinkFrom(null);
+      if (e.key === 'Escape') {
+        setLinkFrom(null);
+        setLinkMenu(null);
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [linkFrom]);
+  }, [linkFrom, linkMenu]);
 
   const fit = useCallback(() => graphRef.current?.zoomToFit({ padding: 32, maxScale: 1 }), []);
   const zoom = useCallback((delta: number) => graphRef.current?.zoom(delta), []);
   const linkSource = linkFrom ? props.agents.find((a) => a.id === linkFrom) : null;
+  const linkKindLabel = t(linkKind === 'hierarchy' ? 'company.linkHierarchy' : 'company.linkWork');
+  const beginLink = (kind: LinkKind) => {
+    if (!linkMenu) return;
+    setLinkFrom(linkMenu.from);
+    setLinkKind(kind);
+    setLinkMenu(null);
+  };
 
   return (
     <div className="relative h-full w-full">
@@ -959,10 +997,51 @@ export function FlowEditorX6(props: FlowEditorX6Props) {
         </button>
       )}
 
+      {linkMenu && (
+        <div
+          className="absolute z-30 w-[220px] overflow-hidden rounded-lg border border-[#3A3835] bg-[#151412] shadow-2xl"
+          style={{ left: linkMenu.x, top: linkMenu.y }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <div className="border-b border-[#24221F] px-2.5 py-1.5 text-[9px] font-medium uppercase tracking-[0.1em] text-[#7C776B]">
+            {t('company.linkMenuTitle')}
+          </div>
+          <button
+            type="button"
+            onClick={() => beginLink('hierarchy')}
+            className="flex w-full items-center gap-2.5 px-2.5 py-2.5 text-left hover:bg-[#1D1B18] cursor-pointer"
+          >
+            <span className="grid h-7 w-7 shrink-0 place-items-center rounded-[5px] border border-[#3A3835] bg-[#211F1B] text-[#dcb67a]">
+              <Network size={12} />
+            </span>
+            <span className="min-w-0">
+              <span className="block text-[11px] font-medium text-[#E8E4DA]">{t('company.linkHierarchy')}</span>
+              <span className="mt-0.5 block text-[9.5px] leading-snug text-[#8C877B]">{t('company.linkHierarchyDesc')}</span>
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => beginLink('work')}
+            className="flex w-full items-center gap-2.5 border-t border-[#24221F] px-2.5 py-2.5 text-left hover:bg-[#1D1B18] cursor-pointer"
+          >
+            <span className="grid h-7 w-7 shrink-0 place-items-center rounded-[5px] border border-[#3A3835] bg-[#211F1B] text-[#5FA3AE]">
+              <Link2 size={12} />
+            </span>
+            <span className="min-w-0">
+              <span className="block text-[11px] font-medium text-[#E8E4DA]">{t('company.linkWork')}</span>
+              <span className="mt-0.5 block text-[9.5px] leading-snug text-[#8C877B]">{t('company.linkWorkDesc')}</span>
+            </span>
+          </button>
+        </div>
+      )}
+
       {linkFrom && (
         <div className="absolute left-1/2 top-2 z-20 flex max-w-[420px] -translate-x-1/2 items-center gap-2 rounded-md border border-[#3A3835] bg-[#1D1B18] px-2.5 py-1 text-[10px] text-[#E8E4DA] shadow-lg">
           <span className="min-w-0 truncate">
             {t('company.linkModeFrom', { name: linkSource?.name || t('company.newName') })}
+          </span>
+          <span className="shrink-0 rounded border border-[#3A3835] bg-[#26241F] px-1 py-0.5 text-[9px] text-[#CFC9BC]">
+            {linkKindLabel}
           </span>
           <button
             type="button"
@@ -1001,13 +1080,6 @@ export function FlowEditorX6(props: FlowEditorX6Props) {
 
       {props.selectedNodeId && !linkFrom && (
         <div className="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5">
-          <button
-            type="button"
-            onClick={() => setLinkFrom(props.selectedNodeId)}
-            className="flex items-center gap-1 rounded-md border border-[#3A3835] bg-[#1D1B18] px-2.5 py-1 text-[10.5px] text-[#E8E4DA] shadow-lg hover:bg-[#26241F] cursor-pointer"
-          >
-            <Link2 size={10} /> {t('company.startLink')}
-          </button>
           <button
             type="button"
             onClick={() => props.onAddChild(props.selectedNodeId as string)}

@@ -3,7 +3,7 @@
 // Tasarım: koşu SUNUCU-OTORİTELİdir. İstemci yalnızca başlatır ve durumu
 // yoklar; ajanların ürettiği zarflar, tel biçimleri ve token bilançosu
 // backend'den geldiği gibi gösterilir (arayüzde yeniden hesaplanmaz).
-import { API_BASE } from './ThalamusClient';
+import { API_BASE, localFetch } from './ThalamusClient';
 
 /** Mock sağlayıcı: deterministik, ağsız; boru hattını anahtarsız sınar. */
 export const AGENT_MOCK_PROVIDER = 'mock';
@@ -73,7 +73,7 @@ export interface StartRunRequest {
 
 /** Koşuyu başlatır; sunucu `run_id` döner. */
 export async function startAgentRun(req: StartRunRequest): Promise<string> {
-  const res = await fetch(`${API_BASE}/api/agent/run`, {
+  const res = await localFetch(`${API_BASE}/api/agent/run`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req),
@@ -87,7 +87,7 @@ export async function startAgentRun(req: StartRunRequest): Promise<string> {
 
 /** Koşunun güncel durumunu okur. */
 export async function fetchAgentState(runId: string): Promise<RunState> {
-  const res = await fetch(
+  const res = await localFetch(
     `${API_BASE}/api/agent/state?run_id=${encodeURIComponent(runId)}`,
     { method: 'GET' }
   );
@@ -99,7 +99,7 @@ export async function fetchAgentState(runId: string): Promise<RunState> {
 
 /** Koşuyu iptal eder (bir sonraki adım sınırında durur). */
 export async function cancelAgentRun(runId: string): Promise<boolean> {
-  const res = await fetch(`${API_BASE}/api/agent/cancel`, {
+  const res = await localFetch(`${API_BASE}/api/agent/cancel`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ run_id: runId }),

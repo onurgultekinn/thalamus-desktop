@@ -322,6 +322,36 @@ function ChatViewInner({
                   </div>
                 </div>
 
+                {/* Ajan araç etkinliği: tool-loop sırasında çağrılan araçlar.
+                    Akış sırasında canlı ("çalışıyor" hissi), bitince kompakt
+                    çip geçmişi — metinden ayrı, gürültü değil. */}
+                {msg.role === 'assistant' && !!msg.toolActivity?.length && (
+                  <div className="flex flex-wrap items-center gap-1 px-1">
+                    {msg.toolActivity.map((name, i) => {
+                      const count = msg.toolActivity!.filter(n => n === name).length;
+                      const last = i === msg.toolActivity!.lastIndexOf(name);
+                      // Her araç bir kez (son tekrarında ×N sayacıyla).
+                      if (!last) return null;
+                      const active = msg.streaming && i === msg.toolActivity!.length - 1;
+                      return (
+                        <span
+                          key={`${name}-${i}`}
+                          className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-mono text-[10px] leading-none ${
+                            active
+                              ? 'border-[#4385BE]/50 bg-[#4385BE]/15 text-[#4385BE]'
+                              : 'border-white/10 bg-white/5 text-white/50'
+                          }`}
+                          title={active ? `${name} çalışıyor…` : name}
+                        >
+                          <span className={active ? 'animate-pulse' : ''}>⚙</span>
+                          {name}
+                          {count > 1 && <span className="opacity-60">×{count}</span>}
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+
                 {/* Düşünme (reasoning): model destekliyorsa ve kullanıcı
                     kapatmadıysa gelir. Varsayılan KAPALI gelir (gürültü değil,
                     isteğe bağlı ayrıntı); tıklayınca açılır. */}
@@ -443,6 +473,22 @@ function ChatViewInner({
                             ? t('chat.tokensImageEst', { n: msg.images.reduce((s, i) => s + i.estTokens, 0) + Math.ceil(copyText.length / 4) })
                             : t('chat.tokensEst', { n: Math.ceil(copyText.length / 4) })}
                     </span>
+                    {!!msg.usage?.cachedTokens && (
+                      <>
+                        <span className="dot-separator">·</span>
+                        <span className="text-[#3AA99F]" title="prompt cache">
+                          {t('chat.usageCached', { n: msg.usage.cachedTokens })}
+                        </span>
+                      </>
+                    )}
+                    {!!msg.usage?.creditsRemaining && (
+                      <>
+                        <span className="dot-separator">·</span>
+                        <span className="text-[#D0A215]" title="EVREN">
+                          {t('chat.usageCredits', { n: msg.usage.creditsRemaining })}
+                        </span>
+                      </>
+                    )}
                     {msg.engine && msg.engine.compressedTokens > 0 && msg.engine.compressedTokens < msg.engine.originalTokens && (
                       <>
                         <span className="dot-separator">·</span>

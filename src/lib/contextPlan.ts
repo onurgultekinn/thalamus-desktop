@@ -165,8 +165,19 @@ export function addSavings(chatId: string, avoidedChars: number, files: number):
  */
 export const CACHE_KEEP = 24;
 export const CACHE_RECENT = 8;
+/**
+ * Geçmişin karakter bütçesi (~12k token). 24 mesajlık cache-penceresi kod
+ * içeren sohbetlerde 50k+ karaktere büyür ve BASİT bir soru bile devasa
+ * istek yollardı. Bütçe aşılırsa başlangıç YİNE büyük parçalarla ilerler
+ * (16'lı adım) — önek cache deseninin kendisi korunur.
+ */
+export const HISTORY_CHAR_BUDGET = 48_000;
 
-export function cacheAwareHistory<T>(messages: T[], chatId: string): T[] {
+export function cacheAwareHistory<T>(
+  messages: T[],
+  chatId: string,
+  charOf?: (m: T) => number
+): T[] {
   if (messages.length <= CACHE_KEEP) return messages;
   const key = 'thalamus_hist_start_' + chatId;
   let start = 0;
@@ -177,6 +188,19 @@ export function cacheAwareHistory<T>(messages: T[], chatId: string): T[] {
   }
   if (start < 0 || start > messages.length) start = 0;
   if (messages.length - start <= CACHE_KEEP) {
+    // Karakter bütçesi: pencereyi 16'şar mesaj geriye kaydırarak daralt.
+    if (charOf) {
+      const size = () =>
+        messages.slice(start).reduce((a, m) => a + (charOf(m) || 0), 0);
+      while (size() > HISTORY_CHAR_BUDGET && messages.length - start > CACHE_RECENT) {
+        start = Math.min(start + 16, messages.length - CACHE_RECENT);
+      }
+      try {
+        localStorage.setItem(key, String(start));
+      } catch {
+        /* kota dolu: pencere yine de doğru çalışır */
+      }
+    }
     return messages.slice(start);
   }
   // Eşik aşıldı: tek seferde büyük parça düşür (her turda kaydırma yok).

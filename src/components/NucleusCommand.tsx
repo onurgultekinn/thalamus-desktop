@@ -205,7 +205,7 @@ export function NucleusCommand({ open, onClose, context, onAction }: NucleusComm
         [],
         null,
         controller.signal,
-        {},
+        { toolsEnabled: false },
         {
           onDelta: (delta) => {
             if (requestSeq !== requestSeqRef.current) return;

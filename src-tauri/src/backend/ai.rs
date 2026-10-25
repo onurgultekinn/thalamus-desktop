@@ -74,7 +74,14 @@ pub struct AiChatRequest {
     pub provider: String,
     #[serde(default)]
     pub base_url: Option<String>,
-    pub api_key: String,
+    /// Açık akışlar (ayar testi) için doğrudan anahtar. Normal sohbet yolu
+    /// GÖNDERMEZ — `use_stored_key` ile backend kasadan çözer.
+    #[serde(default)]
+    pub api_key: Option<String>,
+    /// true → anahtar Credential Manager'dan `provider` kimliğiyle çözülür;
+    /// anahtar JS/renderer sürecine ve istek gövdesine hiç girmez.
+    #[serde(default)]
+    pub use_stored_key: bool,
     pub model: String,
     pub messages: Value,
     #[serde(default)]
@@ -98,13 +105,64 @@ pub struct AiChatRequest {
     /// (4096) kullanılır; 1..32768 aralığına kırpılır.
     #[serde(default)]
     pub max_tokens: Option<u32>,
+    /// İzin modu: run_command (kabuk) aracı yalnız "auto"/"autonomous"
+    /// modlarında modele sunulur. Boşsa yalnız okuma/düzenleme araçları var.
+    #[serde(default)]
+    pub permission: Option<String>,
+    /// false → araç şemaları HİÇ gönderilmez (~950 token/istek tasarrufu).
+    /// Araç gerektirmeyen dahili çağrılar (özetleme, komut palası) için.
+    #[serde(default)]
+    pub tools_enabled: Option<bool>,
+}
+
+/// İsteğin anahtarını çözer: (1) açıkça verilen api_key, (2) use_stored_key
+/// ise kasa (Credential Manager, DPAPI korumalı) provider kimliğiyle.
+/// Hata mesajlarında anahtar DEĞERİ asla yer almaz.
+fn resolve_api_key(req: &AiChatRequest) -> Result<String, (axum::http::StatusCode, String)> {
+    if let Some(k) = req.api_key.as_deref() {
+        if !k.trim().is_empty() {
+            return Ok(k.trim().to_string());
+        }
+    }
+    if req.use_stored_key {
+        return match crate::secrets::imp::secret_get(req.provider.trim()) {
+            Ok(Some(k)) if !k.trim().is_empty() => Ok(k.trim().to_string()),
+            Ok(_) => Err((
+                axum::http::StatusCode::UNAUTHORIZED,
+                format!("no stored key for connection '{}'", req.provider),
+            )),
+            Err(e) => Err((
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("key vault read failed: {}", e),
+            )),
+        };
+    }
+    Ok(String::new())
+}
+
+/// run_command (kabuk) aracına izin veren modlar. Frontend PERMISSION_MODES
+/// ile aynı anlamsal: auto/autonomous = ajan kendi doğrulamasını çalıştırır.
+fn shell_allowed(permission: Option<&str>) -> bool {
+    matches!(permission, Some("auto") | Some("autonomous"))
 }
 
 /// İstek gövdesine yazılan üretim parametreleri (tek yerde doğrulanır).
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy)]
 pub struct GenOptions {
     pub temperature: Option<f32>,
     pub max_tokens: Option<u32>,
+    /// Araç şemaları gönderilsin mi? (araç gerektirmeyen çağrılar için off)
+    pub tools_enabled: bool,
+}
+
+impl Default for GenOptions {
+    fn default() -> Self {
+        Self {
+            temperature: None,
+            max_tokens: None,
+            tools_enabled: true,
+        }
+    }
 }
 
 impl GenOptions {
@@ -114,6 +172,7 @@ impl GenOptions {
                 .temperature
                 .filter(|t| t.is_finite() && (0.0..=2.0).contains(t)),
             max_tokens: req.max_tokens.filter(|n| (1..=32_768).contains(n)),
+            tools_enabled: req.tools_enabled.unwrap_or(true),
         }
     }
 
@@ -252,7 +311,15 @@ fn build_code_context(blocks: &[(String, String, String)]) -> Option<String> {
     );
     for (id, name, body) in blocks {
         let _ = id;
-        match schema::extract_schema(body) {
+        // Küçük gövde: şema zaten gövdenin çoğunu gömer + başlık/tur bilgisi
+        // ekler → şema TAM KODDAN BÜYÜK olur. Eşik altında ham gövde gönder.
+        if body.chars().count() < 1_400 {
+            out.push_str(&format!("--- {} (small, full body) ---\n{}\n", name, body));
+            continue;
+        }
+        // Uzantı-duyarlı çıkarım: .py girinti, .ts/.tsx/.js/.rs küme
+        // parantezi derinliği. Desteklenmeyen uzantı → tam gövde (eskisi gibi).
+        match schema::extract_schema_for(name, body) {
             Some(s) => out.push_str(&format!(
                 "--- {} ---\n{}\n",
                 name,
@@ -293,6 +360,18 @@ fn recorded_edits_json(records: &[tools::RecordedEdit]) -> Vec<Value> {
             })
         })
         .collect()
+}
+
+/// todo_write kayıtlarını frontend'e taşınabilir JSON'a çevirir.
+fn todos_json(todos: &[(String, String)]) -> Value {
+    Value::Array(
+        todos
+            .iter()
+            .map(|(content, status)| {
+                json!({"content": content, "status": status})
+            })
+            .collect(),
+    )
 }
 
 /// Model yanıtındaki SEARCH/REPLACE bloklarını gövdelere uygular ve
@@ -456,10 +535,124 @@ fn post_with_retry<T>(mut f: impl FnMut() -> Result<T, String>) -> Result<T, Str
     }
 }
 
+/// dispatch_agent: salt-okunur sub-ajan araştırması. Alt döngü kendi başına
+/// çalışır (en fazla 6 tur, read-only araçlar), sonucu kısaltılarak ana
+/// bağlama döner. Alt-ajan alt-ajan doğuramaz (read_only_specs'te yok).
+const SUBAGENT_MAX_TURNS: usize = 6;
+const SUBAGENT_MAX_CHARS: usize = 6_000;
+
+#[allow(clippy::too_many_arguments)]
+fn run_dispatch_agent(
+    transport: &dyn Transport,
+    url: &str,
+    api_key: &str,
+    model: &str,
+    args: &Value,
+    ctx: &tools::ToolCtx,
+    reasoning_effort: Option<&str>,
+    gen: GenOptions,
+    engine: tools::EngineCtx,
+) -> String {
+    let task = args["task"].as_str().unwrap_or("").trim();
+    if task.is_empty() {
+        return "HATA: task gerekli (self-contained araştırma sorusu yaz)".into();
+    }
+    let messages = vec![
+        json!({"role": "system", "content":
+            "You are a read-only investigation subagent. Explore the workspace with the provided tools, then answer with a SHORT digest (max ~40 lines): key file paths, symbols, line numbers, and the direct answer. No greetings, no prose padding."
+        }),
+        json!({"role": "user", "content": task}),
+    ];
+    let sub_gen = GenOptions {
+        tools_enabled: true,
+        ..gen
+    };
+    match run_tool_loop(
+        transport,
+        url,
+        api_key,
+        model,
+        messages,
+        ctx.code_blocks,
+        ctx.root,
+        SUBAGENT_MAX_TURNS,
+        reasoning_effort,
+        sub_gen,
+        false,
+        true,
+        engine,
+    ) {
+        Ok((content, _, _, sub_usage, _, _)) => {
+            // Alt döngünün maliyeti ana bilançoya akar — görünmez kalmasın.
+            accumulate_usage(&mut ctx.sub_usage.borrow_mut(), &sub_usage);
+            if content.chars().count() > SUBAGENT_MAX_CHARS {
+                let head: String = content.chars().take(SUBAGENT_MAX_CHARS).collect();
+                format!("{}\n…[subagent digest truncated]", head)
+            } else {
+                content
+            }
+        }
+        Err(e) => format!("subagent failed: {}", e),
+    }
+}
+
+/// Tur başına gelen usage'ı toplamağa ekler. Sağlayıcı her istekte yalnız O
+/// isteğin token'ını raporlar; tool-loop'ta bağlam her tur yeniden gider —
+/// gerçek fatura = turların TOPLAMI. Diğer alanlar son turdan korunur.
+fn accumulate_usage(acc: &mut Value, round: &Value) {
+    if round.is_null() {
+        return;
+    }
+    let cached_of = |v: &Value| -> u64 {
+        v.get("prompt_tokens_details")
+            .and_then(|d| d.get("cached_tokens"))
+            .and_then(|c| c.as_u64())
+            .unwrap_or(0)
+            + v.get("prompt_cache_hit_tokens")
+                .and_then(|c| c.as_u64())
+                .unwrap_or(0)
+    };
+    if acc.is_null() {
+        // İlk tur: klonla, cache detayını üst düzeye taşı (toplam kaybetmesin).
+        *acc = round.clone();
+        let c = cached_of(acc);
+        if c > 0 {
+            acc["cached_tokens"] = json!(c);
+        }
+        return;
+    }
+    for key in ["prompt_tokens", "completion_tokens", "total_tokens"] {
+        let sum = acc.get(key).and_then(|v| v.as_u64()).unwrap_or(0)
+            + round.get(key).and_then(|v| v.as_u64()).unwrap_or(0);
+        acc[key] = json!(sum);
+    }
+    // Cache toplamı YALNIZ üst düzey sayaçtan yürür; detay alanları merge'le
+    // kopyalanmaz (çift sayım önlenir).
+    let cached_total = acc.get("cached_tokens").and_then(|v| v.as_u64()).unwrap_or(0)
+        + cached_of(round);
+    if cached_total > 0 {
+        acc["cached_tokens"] = json!(cached_total);
+    }
+    if let (Some(obj), Some(new)) = (acc.as_object_mut(), round.as_object()) {
+        for (k, v) in new {
+            if k == "prompt_tokens_details" || k == "prompt_cache_hit_tokens" {
+                continue;
+            }
+            obj.entry(k.clone()).or_insert_with(|| v.clone());
+        }
+    }
+}
 /// Tool-call döngüsü. Araçlar `tools` kayıt sisteminden gelir (dosya/arama/
 /// şema/düzenleme); tümü workspace köküne sınırlıdır. Döndürür: (içerik,
-/// düşünme, tur, usage, edit_file/write_file kayıtları).
-#[allow(clippy::too_many_arguments)] // iç çağrı: 8 bağımsız parametre; struct'a sarmak churn
+/// düşünme, tur, usage, edit kayıtları, todo kayıtları).
+/// `read_only=true` → sub-ajan modu: salt-okunur araç seti, değiştiren
+/// araçlar savunma olarak reddedilir (bkz. dispatch_agent).
+/// Bir ajan koşusunda turlar toplamında harcanabilecek azami girdi token'ı.
+/// (Kullanıcı başına maliyet sigortası; aracın tek turda okuyabildiği
+/// miktar zaten TOOL_RESULT_BUDGET ile sınırlı.)
+const RUN_PROMPT_BUDGET: u64 = 150_000;
+
+#[allow(clippy::too_many_arguments)] // iç çağrı: parametreler bilinçli; struct'a sarmak churn
 pub fn run_tool_loop(
     transport: &dyn Transport,
     url: &str,
@@ -471,9 +664,19 @@ pub fn run_tool_loop(
     max_rounds: usize,
     reasoning_effort: Option<&str>,
     gen: GenOptions,
-) -> Result<(String, String, usize, Value, Vec<tools::RecordedEdit>), String> {
-    let tools_json = tools::specs();
-    let ctx = tools::ToolCtx::new(root, code_blocks);
+    allow_shell: bool,
+    read_only: bool,
+    engine: tools::EngineCtx,
+) -> Result<(String, String, usize, Value, Vec<tools::RecordedEdit>, Vec<(String, String)>), String> {
+    let tools_json = if read_only {
+        tools::read_only_specs()
+    } else {
+        tools::specs(allow_shell)
+    };
+    let mut ctx = tools::ToolCtx::new(root, code_blocks);
+    ctx.allow_shell = allow_shell;
+    ctx.read_only = read_only;
+    ctx.engine = engine;
     let headers = vec![("Authorization".to_string(), format!("Bearer {}", api_key))];
     let mut rounds = 0usize;
     let mut usage = Value::Null;
@@ -488,15 +691,30 @@ pub fn run_tool_loop(
         let mut body = json!({
             "model": model,
             "messages": messages,
-            "tools": tools_json,
         });
+        if gen.tools_enabled {
+            body["tools"] = tools_json.clone();
+        }
         gen.apply(&mut body);
         if let Some(effort) = reasoning_effort {
             body["reasoning_effort"] = json!(effort);
         }
         let resp = post_with_retry(|| transport.post_json(url, &headers, &body))?;
         if let Some(u) = resp.get("usage") {
-            usage = u.clone(); // son yanıtın kullanımı
+            // Turların TOPLAMI raporlanır: bağlam her tur yeniden faturalanır.
+            accumulate_usage(&mut usage, u);
+            // RUN BÜTÇESİ: toplam girdi üst sınırı — kaçak bir döngü (model
+            // durmadan araç çağırırsa) faturayı patlatmadan kesilir.
+            let spent = usage
+                .get("prompt_tokens")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            if spent > RUN_PROMPT_BUDGET {
+                return Err(format!(
+                    "run input budget exceeded: {} prompt tokens > {} — narrow the task or read fewer/smaller chunks",
+                    spent, RUN_PROMPT_BUDGET
+                ));
+            }
         }
         let msg = resp["choices"][0]["message"].clone();
         if msg.is_null() {
@@ -513,15 +731,42 @@ pub fn run_tool_loop(
                 .or_else(|| msg["reasoning_content"].as_str())
                 .unwrap_or("")
                 .to_string();
-            return Ok((content, reasoning, rounds, usage, ctx.edits.into_inner()));
+            let mut final_usage = usage;
+            accumulate_usage(&mut final_usage, &ctx.sub_usage.borrow());
+            return Ok((
+                content,
+                reasoning,
+                rounds,
+                final_usage,
+                ctx.edits.into_inner(),
+                ctx.todos.into_inner(),
+            ));
         }
         messages.push(msg);
         let mut fresh_chars = 0usize;
+        // Tur içi dedupe: birebir aynı araç çağrısının sonucu ikinci kez
+        // bağlama girmez (paralel çağrılarda model bazen aynısını iki kez ister).
+        let mut round_seen: std::collections::HashSet<String> = Default::default();
         for tc in &tool_calls {
             let name = tc["function"]["name"].as_str().unwrap_or("").to_string();
             let args_raw = tc["function"]["arguments"].as_str().unwrap_or("{}");
             let args: Value = serde_json::from_str(args_raw).unwrap_or(json!({}));
-            let result = tools::execute(&name, &args, &ctx);
+            if !round_seen.insert(format!("{}:{}", name, args_raw)) {
+                messages.push(json!({
+                    "role": "tool",
+                    "tool_call_id": tc["id"].as_str().unwrap_or(""),
+                    "content": "duplicate of an identical call in this same round — its full result is already above; do not repeat identical calls.".to_string(),
+                }));
+                continue;
+            }
+            let result = if name == "dispatch_agent" && !ctx.read_only {
+                run_dispatch_agent(
+                    transport, url, api_key, model, &args, &ctx,
+                    reasoning_effort, gen, ctx.engine.clone(),
+                )
+            } else {
+                tools::execute(&name, &args, &ctx)
+            };
             fresh_chars += result.chars().count();
             messages.push(json!({
                 "role": "tool",
@@ -538,24 +783,38 @@ pub fn run_tool_loop(
 
 /// Proje belleği: workspace kökündeki AGENTS.md / CLAUDE.md / THALAMUS.md
 /// içeriği AI bağlamına eklenir (ZCode ve Claude Code ekolü).
+const PROJECT_MEMORY_MAX_CHARS: usize = 8_000;
+
 fn project_memory(root: &str) -> Option<String> {
     let mut parts: Vec<String> = Vec::new();
     for name in ["AGENTS.md", "CLAUDE.md", "THALAMUS.md"] {
         let p = std::path::Path::new(root).join(name);
         if let Ok(text) = std::fs::read_to_string(&p) {
             if !text.trim().is_empty() {
-                parts.push(format!("--- {} ---\n{}", name, text.trim()));
+                parts.push(format!("--- {} ---
+{}", name, text.trim()));
             }
         }
     }
     if parts.is_empty() {
-        None
-    } else {
-        Some(format!(
-            "PROJECT INSTRUCTIONS (follow these):\n{}",
-            parts.join("\n\n")
-        ))
+        return None;
     }
+    let mut out = format!(
+        "PROJECT INSTRUCTIONS (follow these):
+{}",
+        parts.join("
+
+")
+    );
+    if out.chars().count() > PROJECT_MEMORY_MAX_CHARS {
+        let head: String = out.chars().take(PROJECT_MEMORY_MAX_CHARS).collect();
+        out = format!(
+            "{}
+[...project instructions truncated to {} chars - keep AGENTS.md concise]",
+            head, PROJECT_MEMORY_MAX_CHARS
+        );
+    }
+    Some(out)
 }
 
 /// Kullanıcı görünmez sağlam sıkıştırma katmanı (P2).
@@ -610,6 +869,48 @@ fn compress_messages_invisibly(
 /// şeması). Hem tek seferlik hem akış yolu aynı hazırlığı kullanır.
 type PreparedPrompt = (Vec<Value>, Vec<(String, String, String)>, (usize, usize, usize));
 
+/// Geçmişteki DESTEK assistant mesajlarını kırpar. Ajan yanıtları (SEARCH/
+/// REPLACE blokları, tam dosya gövdeleri) binlerce token taşıyabilir ve her
+/// istekte yeniden faturalanır. Son KEEP_RECENT asistan mesajı tam kalır;
+/// daha eskiler MAX_LEN üstündeyse başı korunup kuyruk kesilir. Araç-çağrılı
+/// assistant mesajlarına (tool-loop içi) dokunulmaz — buraya frontend
+/// geçmişi gelir, onlar zaten tur sonunda atılır.
+const ASSISTANT_KEEP_RECENT: usize = 2;
+const ASSISTANT_MAX_CHARS: usize = 4_000;
+
+fn trim_old_assistant_messages(messages: &mut [Value]) {
+    let idx: Vec<usize> = messages
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| {
+            m.get("role").and_then(|r| r.as_str()) == Some("assistant")
+                && m.get("tool_calls").is_none()
+        })
+        .map(|(i, _)| i)
+        .collect();
+    if idx.len() <= ASSISTANT_KEEP_RECENT {
+        return;
+    }
+    for &i in &idx[..idx.len() - ASSISTANT_KEEP_RECENT] {
+        let len = messages[i]["content"].as_str().map(str::chars).map_or(0, Iterator::count);
+        if len <= ASSISTANT_MAX_CHARS {
+            continue;
+        }
+        if let Some(c) = messages[i]["content"].as_str() {
+            let head: String = c.chars().take(ASSISTANT_MAX_CHARS - 120).collect();
+            let trimmed = format!(
+                "{}
+[...{} more chars trimmed from this older reply to save context]",
+                head,
+                len - (ASSISTANT_MAX_CHARS - 120)
+            );
+            if let Some(obj) = messages[i].as_object_mut() {
+                obj.insert("content".into(), Value::String(trimmed));
+            }
+        }
+    }
+}
+
 fn prepare_prompt(
     state: &BackendState,
     req: &AiChatRequest,
@@ -619,7 +920,8 @@ fn prepare_prompt(
     // Local endpoint'ler (Ollama, LM Studio…) anahtarsız kullanılabilir;
     // bulut sağlayıcılar için anahtar zorunludur.
     let is_local_base = is_local_endpoint(&url);
-    if req.api_key.trim().is_empty() && !is_local_base {
+    let api_key = resolve_api_key(req)?;
+    if api_key.trim().is_empty() && !is_local_base {
         return Err((
             axum::http::StatusCode::BAD_REQUEST,
             "api_key gerekli".into(),
@@ -632,6 +934,9 @@ fn prepare_prompt(
             "messages cannot be empty".into(),
         ));
     }
+    // Token tasarrufu: eski dev asistan yanıtları (SEARCH/REPLACE, dosya
+    // gövdeleri) her istekte yeniden faturalanmasın — kuyrukları kesilir.
+    trim_old_assistant_messages(&mut messages);
     let blocks: Vec<(String, String, String)> = req
         .code_blocks
         .iter()
@@ -641,15 +946,31 @@ fn prepare_prompt(
     // ÖNEK CACHE: kod bağlamı her turda değişir. Onu başa koymak tüm öneki
     // geçersiz kılar; bu yüzden son kullanıcı mesajının HEMEN ÖNÜNE eklenir.
     // (Değişmeyen sistem + geçmiş öneki cache'te kalır.)
-    if let Some(mem) = project_memory(
-        &state
-            .workspace_root
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone(),
-    ) {
-        messages.insert(0, json!({"role": "system", "content": mem}));
+    // PROJE BELLEGI: yalniz gercek sohbet cagirilarinda gider. Aracsiz dahili
+    // cagirilar (ozetleme, komut palasi) talimatlari uygulamaz - orada AGENTS.md
+    // (~2k token) saf israttir. tools_enabled=false o cagirilarin isaretidir.
+    let internal_call = !GenOptions::from_request(req).tools_enabled;
+    if !internal_call {
+        if let Some(mem) = project_memory(
+            &state
+                .workspace_root
+                .read()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone(),
+        ) {
+            messages.insert(0, json!({"role": "system", "content": mem}));
+        }
     }
+    // ARAÇ POLİTİKASI (~55 token): genel bilgi sorularında araç çağrısını
+    // engeller (armut sorusu → tek tur; web_search yalnız gerçekten taze
+    // bilgi gerekince) ve modelin KENDİ yetenekleri hakkında repo
+    // karıştırmasını yasaklar.
+    messages.insert(
+        0,
+        json!({"role": "system", "content":
+            "TOOL POLICY: answer general-knowledge questions directly from your own knowledge              WITHOUT calling any tools — even though web_search exists, use it ONLY when fresh              or verifiable facts are genuinely required. Never inspect the repository to answer              questions about your own tools or capabilities."
+        }),
+    );
 
     // P2: görünmez lossless sıkıştırma — provider'a giden istek boyunca.
     // KULLANICI KORUMASI: "aynen/olduğu gibi/tam metin" istendiyse dokunma.
@@ -724,9 +1045,11 @@ fn stream_one_round(
         let mut body = json!({
             "model": model,
             "messages": messages,
-            "tools": tools_json,
             "stream": true,
         });
+        if gen.tools_enabled {
+            body["tools"] = tools_json.clone();
+        }
         gen.apply(&mut body);
         if include_usage {
             body["stream_options"] = json!({"include_usage": true});
@@ -890,9 +1213,19 @@ fn stream_tool_loop(
     max_rounds: usize,
     reasoning_effort: Option<&str>,
     gen: GenOptions,
+    allow_shell: bool,
+    read_only: bool,
+    engine: tools::EngineCtx,
 ) {
-    let tools_json = tools::specs();
-    let ctx = tools::ToolCtx::new(root, code_blocks);
+    let tools_json = if read_only {
+        tools::read_only_specs()
+    } else {
+        tools::specs(allow_shell)
+    };
+    let mut ctx = tools::ToolCtx::new(root, code_blocks);
+    ctx.allow_shell = allow_shell;
+    ctx.read_only = read_only;
+    ctx.engine = engine;
     let mut rounds = 0usize;
     let mut usage = Value::Null;
     loop {
@@ -921,15 +1254,18 @@ fn stream_tool_loop(
         match round {
             Ok((content, _reasoning, tool_calls, round_usage, finish_reason)) => {
                 if !round_usage.is_null() {
-                    usage = round_usage;
+                    accumulate_usage(&mut usage, &round_usage);
                 }
                 if tool_calls.is_empty() {
+                    let mut final_usage = usage;
+                    accumulate_usage(&mut final_usage, &ctx.sub_usage.borrow());
                     let _ = emit_event(tx, json!({
                         "type": "done",
                         "rounds": rounds,
-                        "usage": usage,
+                        "usage": final_usage,
                         "finish_reason": finish_reason,
                         "edits": recorded_edits_json(&ctx.edits.borrow()),
+                        "todos": todos_json(&ctx.todos.borrow()),
                     }));
                     return;
                 }
@@ -939,11 +1275,31 @@ fn stream_tool_loop(
                     "tool_calls": tool_calls.clone(),
                 }));
                 let mut fresh_chars = 0usize;
+                let mut round_seen: std::collections::HashSet<String> = Default::default();
                 for tc in &tool_calls {
                     let name = tc["function"]["name"].as_str().unwrap_or("").to_string();
                     let args_raw = tc["function"]["arguments"].as_str().unwrap_or("{}");
                     let args: Value = serde_json::from_str(args_raw).unwrap_or(json!({}));
-                    let result = tools::execute(&name, &args, &ctx);
+                    // Arac cagrisi gorunur olsun (on yuz "read_file calisiyor..."
+                    // gosterebilir; bilinmeyen olay tipini sessizce yoksayar).
+                    let _ = emit_event(tx, json!({"type": "tool_call", "name": name}));
+                    if !round_seen.insert(format!("{}:{}", name, args_raw)) {
+                        messages.push(json!({
+                            "role": "tool",
+                            "tool_call_id": tc["id"].as_str().unwrap_or(""),
+                            "content": "duplicate of an identical call in this same round — its full result is already above; do not repeat identical calls.".to_string(),
+                        }));
+                        continue;
+                    }
+                    let result = if name == "dispatch_agent" && !ctx.read_only {
+                        let transport = HttpTransport;
+                        run_dispatch_agent(
+                            &transport, url, api_key, model, &args, &ctx,
+                            reasoning_effort, gen, ctx.engine.clone(),
+                        )
+                    } else {
+                        tools::execute(&name, &args, &ctx)
+                    };
                     fresh_chars += result.chars().count();
                     messages.push(json!({
                         "role": "tool",
@@ -978,15 +1334,20 @@ pub async fn ai_chat_stream(
     let local_use = begin_use(&url);
     let (messages, blocks, engine) = prepare_prompt(&state, &req)?;
     let url_for_task = url.clone();
-    let api_key_for_task = req.api_key.clone();
+    let api_key_for_task = resolve_api_key(&req)?;
     let model_for_task = req.model.clone();
     let effort_for_task = req.reasoning_effort.clone();
     let gen_for_task = GenOptions::from_request(&req);
+    let permission_for_task = req.permission.clone();
     let root_for_task = state
         .workspace_root
         .read()
         .unwrap_or_else(|e| e.into_inner())
         .clone();
+    let engine_for_task = tools::EngineCtx {
+        bpe: Some(state.bpe.clone()),
+        repo_cache: Some(state.repo_cache.clone()),
+    };
 
     let (tx, rx) = tokio::sync::mpsc::channel::<String>(64);
     let _ = tx.try_send(
@@ -1013,6 +1374,9 @@ pub async fn ai_chat_stream(
             8,
             effort_for_task.as_deref(),
             gen_for_task,
+            shell_allowed(permission_for_task.as_deref()),
+            false,
+            engine_for_task.clone(),
         );
     });
 
@@ -1049,13 +1413,18 @@ pub async fn ai_chat(
     let gen_for_task = GenOptions::from_request(&req);
     let blocks_for_task = blocks.clone();
     let url_for_task = url.clone();
-    let api_key_for_task = req.api_key.clone();
+    let api_key_for_task = resolve_api_key(&req)?;
     let model_for_task = req.model.clone();
+    let permission_for_task = req.permission.clone();
     let root_for_task = state
         .workspace_root
         .read()
         .unwrap_or_else(|e| e.into_inner())
         .clone();
+    let engine_for_task = tools::EngineCtx {
+        bpe: Some(state.bpe.clone()),
+        repo_cache: Some(state.repo_cache.clone()),
+    };
     let result = tokio::task::spawn_blocking(move || {
         let transport = HttpTransport;
         run_tool_loop(
@@ -1069,6 +1438,9 @@ pub async fn ai_chat(
             8,
             effort_for_task.as_deref(),
             gen_for_task,
+            shell_allowed(permission_for_task.as_deref()),
+            false,
+            engine_for_task.clone(),
         )
     })
     .await
@@ -1087,7 +1459,7 @@ pub async fn ai_chat(
     let edits = if should_try_whole_file_fallback(&result.0, &edits, !blocks.is_empty()) {
         let fallback_messages = messages_before_context;
         let fallback_url = url.clone();
-        let fallback_key = req.api_key.clone();
+        let fallback_key = resolve_api_key(&req)?;
         let fallback_model = req.model.clone();
         let fallback_effort = req.reasoning_effort.clone();
         match tokio::task::spawn_blocking(move || {
@@ -1118,6 +1490,7 @@ pub async fn ai_chat(
         "rounds": result.2,
         "usage": result.3,
         "edits": edits,
+        "todos": todos_json(&result.5),
         // Görünmez katmanın bilançosu — ön yüz sıradan akışta göstermez.
         "engine": {
             "compressed_messages": engine_count,
@@ -1142,12 +1515,13 @@ mod tests {
             format!("{}\n", "a".repeat(200)).repeat(250),
         )
         .unwrap();
+        // Tur içi dedupe'yi aşmak için her çağrı FARKLI offset ister.
         let calls: Vec<Value> = (0..5)
             .map(|i| {
                 json!({
                     "id": format!("c{}", i),
                     "type": "function",
-                    "function": {"name": "read_file", "arguments": "{\"path\":\"big.txt\"}"}
+                    "function": {"name": "read_file", "arguments": format!("{{\"path\":\"big.txt\",\"offset\":{}}}", i + 1)}
                 })
             })
             .collect();
@@ -1169,6 +1543,9 @@ mod tests {
             4,
             None,
             GenOptions::default(),
+            false,
+            false,
+            tools::EngineCtx::default(),
         )
         .unwrap_err();
         assert!(err.contains("budget"), "bütçe hatası beklenirdi: {}", err);
@@ -1204,6 +1581,60 @@ mod tests {
     }
 
     #[test]
+    fn tools_disabled_omits_tools_key() {
+        let transport = FakeTransport {
+            responses: vec![json!({"choices":[{"message":{"content":"kisa cevap"}}]})],
+            seen: std::sync::Mutex::new(Vec::new()),
+        };
+        let gen = GenOptions {
+            tools_enabled: false,
+            ..GenOptions::default()
+        };
+        let (content, _, _, _, _, _) = run_tool_loop(
+            &transport,
+            "http://x",
+            "k",
+            "m",
+            vec![json!({"role": "user", "content": "merhaba"})],
+            &[],
+            std::path::Path::new("."),
+            4,
+            None,
+            gen,
+            false,
+            false,
+            tools::EngineCtx::default(),
+        )
+        .unwrap();
+        assert_eq!(content, "kisa cevap");
+        let seen = transport.seen.lock().unwrap_or_else(|e| e.into_inner());
+        assert!(
+            seen[0].get("tools").is_none(),
+            "araç kapalıyken tools anahtari GIDIMEMELI: {}",
+            seen[0]
+        );
+        // Varsayilan (default) acik kalmali.
+        assert!(GenOptions::default().tools_enabled);
+    }
+
+    #[test]
+    fn cached_tokens_accumulate() {
+        // Gerçek akış: acc her zaman Null'dan başlar (ilk tur klonla lift eder).
+        let mut acc = Value::Null;
+        let r1 = json!({"prompt_tokens": 100, "prompt_tokens_details": {"cached_tokens": 60}});
+        accumulate_usage(&mut acc, &r1);
+        let r2 = json!({"prompt_tokens": 50, "prompt_tokens_details": {"cached_tokens": 30}});
+        accumulate_usage(&mut acc, &r2);
+        assert_eq!(acc["prompt_tokens"], json!(150));
+        assert_eq!(acc["cached_tokens"], json!(90));
+        // DeepSeek biçimi: ilk turdan itibaren üst düzeye taşınmalı.
+        let mut acc2 = Value::Null;
+        let r3 = json!({"prompt_tokens": 10, "prompt_cache_hit_tokens": 7});
+        accumulate_usage(&mut acc2, &r3);
+        assert_eq!(acc2["cached_tokens"], json!(7));
+    }
+
+    #[test]
     fn transient_provider_errors_are_retried() {
         let transport = FlakyTransport {
             errors: std::sync::Mutex::new(vec![
@@ -1215,7 +1646,7 @@ mod tests {
             ]),
             seen: std::sync::Mutex::new(0),
         };
-        let (content, _, rounds, _, _) = run_tool_loop(
+        let (content, _, rounds, _, _, _) = run_tool_loop(
             &transport,
             "http://x",
             "k",
@@ -1226,6 +1657,9 @@ mod tests {
             4,
             None,
             GenOptions::default(),
+            false,
+            false,
+            tools::EngineCtx::default(),
         )
         .unwrap();
         assert_eq!(content, "tamam");
@@ -1251,6 +1685,9 @@ mod tests {
             4,
             None,
             GenOptions::default(),
+            false,
+            false,
+            tools::EngineCtx::default(),
         )
         .unwrap_err();
         assert!(err.contains("401"));
@@ -1281,6 +1718,240 @@ mod tests {
         assert_eq!(out[0]["file"], "a.ts");
         assert_eq!(out[0]["new_body"], "yeni a", "son kayıt kazanmalı");
         assert_eq!(out[1]["file"], "b.ts");
+    }
+
+    #[test]
+    fn dispatch_agent_runs_readonly_subloop() {
+        let tmp = std::env::temp_dir().join(format!("thx_sub_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&tmp);
+        std::fs::write(tmp.join("api.py"), "def login():
+    return True
+").unwrap();
+        // 1) ana tur: dispatch_agent çağrısı
+        // 2) alt döngü tur 1: read_file ister
+        // 3) alt döngü tur 2: özeti yazar
+        // 4) ana tur 2: nihai cevap
+        let transport = FakeTransport {
+            responses: vec![
+                json!({"choices":[{"message":{"role":"assistant","tool_calls":[
+                    {"id":"c1","type":"function","function":{"name":"dispatch_agent","arguments":"{\"task\":\"api.py login?\"}"}}
+                ]}}]}),
+                json!({"choices":[{"message":{"role":"assistant","tool_calls":[
+                    {"id":"s1","type":"function","function":{"name":"read_file","arguments":"{\"path\":\"api.py\"}"}}
+                ]}}]}),
+                json!({"choices":[{"message":{"content":"api.py:3 login() True doner"}}]}),
+                json!({"choices":[{"message":{"content":"Login True döndürüyor."}}]}),
+            ],
+            seen: std::sync::Mutex::new(Vec::new()),
+        };
+        let (content, _, _, _, edits, _) = run_tool_loop(
+            &transport,
+            "http://x",
+            "k",
+            "m",
+            vec![json!({"role": "user", "content": "login'i araştır"})],
+            &[],
+            std::path::Path::new(&tmp),
+            4,
+            None,
+            GenOptions::default(),
+            false,
+            false,
+            tools::EngineCtx::default(),
+        )
+        .unwrap();
+        assert_eq!(content, "Login True döndürüyor.");
+        assert!(edits.is_empty(), "sub-ajan düzenleme yapamaz");
+        let seen = transport.seen.lock().unwrap_or_else(|e| e.into_inner());
+        // Alt döngünün kendi istediği araç seti salt-okunur olmalı.
+        let sub_req = &seen[1];
+        let spec_names: Vec<String> = sub_req["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|t| t["function"]["name"].as_str().map(String::from))
+            .collect();
+        assert!(!spec_names.contains(&"edit_file".to_string()));
+        assert!(!spec_names.contains(&"dispatch_agent".to_string()));
+        assert!(spec_names.contains(&"read_file".to_string()));
+        // Alt döngünün mesajlarında subagent sistem sözleşmesi var.
+        assert!(sub_req["messages"][0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("read-only investigation subagent"));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn subagent_cannot_chain_edits_or_agents() {
+        let tmp = std::env::temp_dir();
+        let blocks: Vec<(String, String, String)> = vec![];
+        let mut c = tools::ToolCtx::new(&tmp, &blocks);
+        c.read_only = true;
+        let out = tools::execute(
+            "edit_file",
+            &serde_json::json!({"path":"x","search":"a","replace":"b"}),
+            &c,
+        );
+        assert!(out.contains("not allowed"), "savunma: {}", out);
+        // Alt-ajanda dispatch_agent hiç yok sayılır (derinlik kilidi).
+        let out2 = tools::execute("dispatch_agent", &serde_json::json!({"task":"x"}), &c);
+        assert!(out2.contains("unknown tool"), "derinlik kilidi: {}", out2);
+    }
+
+    #[test]
+    fn usage_accumulates_across_tool_rounds() {
+        // İki turlu koşu: her tur usage raporlar; toplam dönmeli (fatura
+        // gerçeği — bağlam her tur yeniden faturalanır).
+        let transport = FakeTransport {
+            responses: vec![
+                json!({"choices":[{"message":{"role":"assistant","tool_calls":[
+                    {"id":"c1","type":"function","function":{"name":"read_file","arguments":"{}"}}
+                ]}}], "usage":{"prompt_tokens":100,"completion_tokens":10,"total_tokens":110}}),
+                json!({"choices":[{"message":{"content":"bitti"}}], "usage":{"prompt_tokens":200,"completion_tokens":5,"total_tokens":205}}),
+            ],
+            seen: std::sync::Mutex::new(Vec::new()),
+        };
+        let (_, _, _, usage, _, _) = run_tool_loop(
+            &transport,
+            "http://x",
+            "k",
+            "m",
+            vec![json!({"role": "user", "content": "oku"})],
+            &[],
+            std::path::Path::new("."),
+            4,
+            None,
+            GenOptions::default(),
+            false,
+            false,
+            tools::EngineCtx::default(),
+        )
+        .unwrap();
+        assert_eq!(usage["prompt_tokens"], json!(300));
+        assert_eq!(usage["completion_tokens"], json!(15));
+        assert_eq!(usage["total_tokens"], json!(315));
+    }
+
+    #[test]
+    fn project_memory_is_capped() {
+        let tmp = std::env::temp_dir().join(format!("thx_mem_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&tmp);
+        let big = "kural satırı. ".repeat(2_000); // ~28k char
+        std::fs::write(tmp.join("AGENTS.md"), &big).unwrap();
+        let mem = project_memory(tmp.to_str().unwrap()).unwrap();
+        assert!(mem.chars().count() < 8_200, "üst sınır: {}", mem.chars().count());
+        assert!(mem.contains("truncated"), "kesildi notu olmalı");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn old_assistant_replies_are_trimmed_in_prepare() {
+        let big = "def f():
+".repeat(700); // ~7k char assistant yanıtı
+        let mut messages = vec![
+            json!({"role": "user", "content": "eski soru"}),
+            json!({"role": "assistant", "content": big}),
+            json!({"role": "user", "content": "yeni soru"}),
+            json!({"role": "assistant", "content": "kısa yanıt 1"}),
+            json!({"role": "assistant", "content": "kısa yanıt 2"}),
+            json!({"role": "user", "content": "son soru"}),
+        ];
+        trim_old_assistant_messages(&mut messages);
+        let trimmed = messages[1]["content"].as_str().unwrap();
+        assert!(trimmed.contains("trimmed from this older reply"), "{}", &trimmed[..80.min(trimmed.len())]);
+        assert!(trimmed.chars().count() < 4_100);
+        // Son 2 asistan mesajı DOKUNULMAZ.
+        assert_eq!(messages[3]["content"], "kısa yanıt 1");
+        assert_eq!(messages[4]["content"], "kısa yanıt 2");
+    }
+
+    #[test]
+    fn duplicate_calls_in_round_are_pointers() {
+        let tmp = std::env::temp_dir().join(format!("thx_dup_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&tmp);
+        std::fs::write(tmp.join("d.txt"), "içerik satırı
+").unwrap();
+        let calls: Vec<Value> = (0..2)
+            .map(|i| {
+                json!({
+                    "id": format!("c{}", i),
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": "{\"path\":\"d.txt\"}"}
+                })
+            })
+            .collect();
+        let transport = FakeTransport {
+            responses: vec![
+                json!({"choices":[{"message":{"role":"assistant","tool_calls":calls}}]}),
+                json!({"choices":[{"message":{"content":"tamam"}}]}),
+            ],
+            seen: std::sync::Mutex::new(Vec::new()),
+        };
+        let (_, _, _, _, _, _) = run_tool_loop(
+            &transport,
+            "http://x",
+            "k",
+            "m",
+            vec![json!({"role": "user", "content": "d.txt iki kez oku"})],
+            &[],
+            std::path::Path::new(&tmp),
+            4,
+            None,
+            GenOptions::default(),
+            false,
+            false,
+            tools::EngineCtx::default(),
+        )
+        .unwrap();
+        let seen = transport.seen.lock().unwrap_or_else(|e| e.into_inner());
+        let second = &seen[1];
+        let tool_contents: Vec<&str> = second["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|m| m["role"] == "tool")
+            .filter_map(|m| m["content"].as_str())
+            .collect();
+        assert_eq!(tool_contents.len(), 2);
+        assert!(tool_contents[0].contains("içerik satırı"));
+        assert!(tool_contents[1].contains("duplicate"), "ikincisi işaretçi: {}", tool_contents[1]);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn subagent_usage_flows_into_parent() {
+        let tmp = std::env::temp_dir();
+        // Ana tur: dispatch_agent; alt döngü tek turda cevap verir (usage 50).
+        let transport = FakeTransport {
+            responses: vec![
+                json!({"choices":[{"message":{"role":"assistant","tool_calls":[
+                    {"id":"c1","type":"function","function":{"name":"dispatch_agent","arguments":"{\"task\":\"bak\"}"}}
+                ]}}], "usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12}}),
+                json!({"choices":[{"message":{"content":"alt özet"}}], "usage":{"prompt_tokens":50,"completion_tokens":5,"total_tokens":55}}),
+                json!({"choices":[{"message":{"content":"bitti"}}], "usage":{"prompt_tokens":20,"completion_tokens":3,"total_tokens":23}}),
+            ],
+            seen: std::sync::Mutex::new(Vec::new()),
+        };
+        let (_, _, _, usage, _, _) = run_tool_loop(
+            &transport,
+            "http://x",
+            "k",
+            "m",
+            vec![json!({"role": "user", "content": "araştır"})],
+            &[],
+            std::path::Path::new(&tmp),
+            4,
+            None,
+            GenOptions::default(),
+            false,
+            false,
+            tools::EngineCtx::default(),
+        )
+        .unwrap();
+        // 10 (ana tur 1) + 50 (alt döngü) + 20 (ana tur 2) = 80.
+        assert_eq!(usage["prompt_tokens"], json!(80));
+        assert_eq!(usage["total_tokens"], json!(90));
     }
 
     #[test]
@@ -1401,7 +2072,7 @@ mod tests {
         )];
         let messages = vec![json!({"role":"user","content":"login kontrol et"})];
 
-        let (content, _reasoning, rounds, _usage, _edits) = run_tool_loop(
+        let (content, _reasoning, rounds, _usage, _edits, _todos) = run_tool_loop(
             &transport,
             "http://x",
             "key",
@@ -1412,6 +2083,9 @@ mod tests {
             4,
             None,
             GenOptions::default(),
+            false,
+            false,
+            tools::EngineCtx::default(),
         )
         .unwrap();
 
@@ -1441,7 +2115,7 @@ mod tests {
             "login".to_string(),
             "def login(): pass".to_string(),
         )];
-        let (content, _reasoning, _, _usage, _edits) = run_tool_loop(
+        let (content, _reasoning, _, _usage, _edits, _todos) = run_tool_loop(
             &transport,
             "http://x",
             "k",
@@ -1452,6 +2126,9 @@ mod tests {
             4,
             None,
             GenOptions::default(),
+            false,
+            false,
+            tools::EngineCtx::default(),
         )
         .unwrap();
         assert_eq!(content, "bulamadım");
@@ -1474,10 +2151,12 @@ mod tests {
 
     #[test]
     fn code_context_sends_schema_not_body() {
+        // Küçük gövde eşiği altı ham gönderilir; şema iddiası BÜYÜK gövde için.
+        let big_sample = crate::engine::code_shrink::SAMPLE.repeat(4);
         let blocks = vec![(
             "b1".into(),
             "sample.py".into(),
-            crate::engine::code_shrink::SAMPLE.into(),
+            big_sample,
         )];
         let ctx = build_code_context(&blocks).unwrap();
         assert!(ctx.contains("SCHEMA"));

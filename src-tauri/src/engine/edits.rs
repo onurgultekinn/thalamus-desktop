@@ -114,8 +114,65 @@ pub fn parse_edit_blocks(content: &str) -> Vec<EditBlock> {
     blocks
 }
 
+/// Satır bazlı esnek eşleştirme (son çare). `strict_ws=true` → satır sonları
+/// (boşluk/\r) yok sayılır; `false` → baştaki boşluk da (tab/space) yok
+/// sayılır. Dosyanın EOL stili (\r\n | \n) korunur; SEARCH'in baş/sondaki
+/// boş satırları eşleşme dışı bırakılır.
+fn apply_line_flexible(code: &str, search: &str, replace: &str, strict_ws: bool) -> Option<String> {
+    let eol = if code.contains("\r\n") { "\r\n" } else { "\n" };
+    let norm = |l: &str| -> String {
+        let l = l.strip_suffix('\r').unwrap_or(l);
+        if strict_ws { l.trim_end().to_string() } else { l.trim().to_string() }
+    };
+    // SEARCH imzası: baş/son boş satırlar atılır (model fazladan boş satır
+    // bırakabilir; bu satırlar eşleşmeye girmesin).
+    let mut search_sig: Vec<String> = search.lines().map(norm).collect();
+    while search_sig.first().map(|s| s.is_empty()).unwrap_or(false) {
+        search_sig.remove(0);
+    }
+    while search_sig.last().map(|s| s.is_empty()).unwrap_or(false) {
+        search_sig.pop();
+    }
+    if search_sig.is_empty() {
+        return None;
+    }
+    let code_lines: Vec<&str> = code.split('\n').collect();
+    let n = search_sig.len();
+    if code_lines.len() < n {
+        return None;
+    }
+    // Son satır dosya sonu_newline'suz olabilir; pencere onu da kapsayabilir.
+    for start in 0..=(code_lines.len() - n) {
+        let window_matches = (0..n).all(|k| norm(code_lines[start + k]) == search_sig[k]);
+        if window_matches {
+            let replace_lines: Vec<&str> = replace
+                .lines()
+                .map(|l| l.strip_suffix('\r').unwrap_or(l))
+                .collect();
+            let mut out = String::new();
+            for l in &code_lines[..start] {
+                out.push_str(l);
+                out.push('\n');
+            }
+            if !replace_lines.is_empty() {
+                out.push_str(&replace_lines.join(eol));
+            }
+            // Pencerenin bittiği yerden devam; kalan satırlar arasına EOL ekle.
+            let after = &code_lines[start + n..];
+            if !after.is_empty() {
+                out.push_str(eol);
+                out.push_str(&after.join("\n"));
+            }
+            return Some(out);
+        }
+    }
+    None
+}
+
 /// SEARCH metnini kodda bulur ve REPLACE ile değiştirir.
-/// Birebir eşleşme yoksa satır sonu toleransıyla dener.
+/// Merdiven: birebir → satır sonu toleransı → satır-esnek (son boşluk) →
+/// satır-esnek (tam trim). Windows \r\n dosyalarına \n SEARCH ve hafif
+/// girinti farkları artık düzenleme düşürmez (aider ekolü).
 pub fn apply_search_replace(code: &str, search: &str, replace: &str) -> Result<String, String> {
     if search.is_empty() {
         return Err("SEARCH boş olamaz.".into());
@@ -136,7 +193,33 @@ pub fn apply_search_replace(code: &str, search: &str, replace: &str) -> Result<S
             return Ok(code.replacen(&candidate, &rep, 1));
         }
     }
-    Err("SEARCH metni kodda bulunamadı (birebir kopya bekleniyor).".into())
+    // Esnek katmanlar: önce yalnız satır sonu boşlukları, sonra tam trim.
+    if let Some(out) = apply_line_flexible(code, search, replace, true) {
+        return Ok(out);
+    }
+    if let Some(out) = apply_line_flexible(code, search, replace, false) {
+        return Ok(out);
+    }
+    // Başarısızlık ipucu: SEARCH'in ilk dolu satırını kodda ara; bulunursa
+    // GERÇEK satırları göster — model tek denemede birebir kopya çıkarabilsin.
+    let hint = search
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .and_then(|first| code.lines().position(|l| l.trim() == first))
+        .map(|idx| {
+            let lines: Vec<&str> = code.lines().skip(idx.saturating_sub(1)).take(5).collect();
+            format!(
+                " İpucu: ilk satırına benzeyen bölge ~satır {} civarı:\n{}",
+                idx + 1,
+                lines.join("\n")
+            )
+        })
+        .unwrap_or_default();
+    Err(format!(
+        "SEARCH metni kodda bulunamadı (birebir kopya bekleniyor).{}",
+        hint
+    ))
 }
 
 /// Blokları dosya gövdelerine uygular. Her blok için sonuç raporlanır.
@@ -202,6 +285,75 @@ pub fn apply_blocks(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn crlf_file_accepts_lf_search_and_keeps_eol() {
+        let code = "fn a() {
+    return 1;
+}
+fn b() {}
+";
+        let out = apply_search_replace(code, "fn a() {
+    return 1;
+}", "fn a() {
+    return 2;
+}")
+            .expect("LF SEARCH, CRLF dosya eşleşmeli");
+        assert!(out.contains("return 2;"));
+        assert!(out.contains("
+"), "dosyanın EOL stili korunmalı");
+        assert!(out.contains("fn b() {}"), "geri kalan satırlar durmalı");
+    }
+
+    #[test]
+    fn trailing_whitespace_mismatch_still_matches() {
+        let code = "let x = 1;   
+let y = 2;
+";
+        let out = apply_search_replace(code, "let x = 1;", "let x = 10;")
+            .expect("satır sonu boşluk farkı eşleşmeli");
+        assert!(out.contains("let x = 10;"));
+        assert!(out.contains("let y = 2;"));
+    }
+
+    #[test]
+    fn indent_mismatch_matches_as_last_resort() {
+        let code = "def f():
+	return 1
+";
+        // Model tab yerine 4 boşluk yazdı — tam trim katmanı yakalar.
+        let out = apply_search_replace(code, "def f():
+    return 1", "def f():
+	return 2")
+            .expect("girinti farkı son çarede eşleşmeli");
+        assert!(out.contains("return 2"));
+    }
+
+    #[test]
+    fn leading_blank_lines_in_search_are_ignored() {
+        let code = "a
+b
+c
+";
+        let out = apply_search_replace(code, "
+
+b
+c
+
+", "X")
+            .expect("SEARCH'in boş baş/son satırları atılmalı");
+        assert_eq!(out, "a\nX\n");
+    }
+
+    #[test]
+    fn no_match_still_errors() {
+        assert!(apply_search_replace("a
+b
+", "zzz", "x").is_err());
+    }
+
+
     use super::*;
 
     #[test]

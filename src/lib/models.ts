@@ -8,7 +8,7 @@
  */
 import { getConnection, isLocalBaseUrl } from './connections';
 import { isLocalProvider, localModelsFor } from './localModels';
-import { API_BASE } from '../services/ThalamusClient';
+import { API_BASE, localFetch } from '../services/ThalamusClient';
 
 /**
  * Sağlayıcının GERÇEK model listesini sessizce çeker (toast/DOM yok).
@@ -17,7 +17,7 @@ import { API_BASE } from '../services/ThalamusClient';
 export async function fetchModelList(baseUrl: string, apiKey: string): Promise<string[]> {
   const base = baseUrl.trim().replace(/\/+$/, '');
   if (!base) return [];
-  const response = await fetch(`${API_BASE}/api/ai/test`, {
+  const response = await localFetch(`${API_BASE}/api/ai/test`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ base_url: base, api_key: apiKey }),

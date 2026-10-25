@@ -7,7 +7,7 @@
 //   - `focus` (aktif dosya) ve onun referans ettiği dosyalar ekstra puan alır
 //   - bütçeye göre greedy doldurma; sığmayan dosyalar "(bütçe dışı)" notuyla işaretlenir
 
-use crate::engine::schema::{extract_schema, render_schema};
+use crate::engine::schema::{extract_schema_for, render_schema, schema_definition_names};
 use std::collections::HashMap;
 use tiktoken_rs::CoreBPE;
 
@@ -23,25 +23,11 @@ pub struct RepoMapResult {
     pub total: usize,
 }
 
-fn definition_names(code: &str) -> Vec<String> {
-    let mut names = Vec::new();
-    for line in code.lines() {
-        let t = line.trim_start();
-        if let Some(rest) = t
-            .strip_prefix("def ")
-            .or_else(|| t.strip_prefix("async def "))
-            .or_else(|| t.strip_prefix("class "))
-        {
-            let name: String = rest
-                .chars()
-                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
-                .collect();
-            if !name.is_empty() {
-                names.push(name);
-            }
-        }
-    }
-    names
+/// Dosya başına (şema tanım adları) — sahiplik ve bütçe notları için.
+fn definition_names_of(file: &str, code: &str) -> Vec<String> {
+    crate::engine::schema::extract_schema_for(file, code)
+        .map(|s| crate::engine::schema::schema_definition_names(&s))
+        .unwrap_or_default()
 }
 
 pub fn build_repo_map(
@@ -50,30 +36,22 @@ pub fn build_repo_map(
     budget: usize,
     focus: Option<&str>,
 ) -> RepoMapResult {
-    // 1) Şemalar + tanım sahipliği
-    //    Şema çıkarıcı şimdilik Python; .py olmayan dosyalar "şema desteklenmiyor"
-    //    olarak işaretlenir (tree-sitter ile dil genelleştirme sonraki adım).
-    //    Bu sınırlama yanlış-pozitifi de engeller: .rs içindeki Python string'i
-    //    şema sanılmaz.
+    // 1) Şemalar + tanım sahipliği — uzantı-duyarlı çıkarıcı: .py girinti,
+    //    TS/JS/Rust/C-tarzı brace, Markdown/YAML/JSON dış hat.
     let mut schemas: HashMap<String, Option<String>> = HashMap::new();
     let mut def_owner: HashMap<String, String> = HashMap::new();
     for f in files {
-        let is_python = f.name.ends_with(".py");
-        let rendered = if is_python {
-            extract_schema(&f.code).map(|s| {
-                for name in definition_names(&f.code) {
-                    def_owner.entry(name).or_insert_with(|| f.name.clone());
-                }
-                // @C başlık satırını at (harita başına bir kez yeter)
-                let body = render_schema(&s);
-                match body.find('\n') {
-                    Some(i) => body[i + 1..].to_string(),
-                    None => body,
-                }
-            })
-        } else {
-            None
-        };
+        let rendered = extract_schema_for(&f.name, &f.code).map(|s| {
+            for name in schema_definition_names(&s) {
+                def_owner.entry(name).or_insert_with(|| f.name.clone());
+            }
+            // @C başlık satırını at (harita başına bir kez yeter)
+            let body = render_schema(&s);
+            match body.find('\n') {
+                Some(i) => body[i + 1..].to_string(),
+                None => body,
+            }
+        });
         schemas.insert(f.name.clone(), rendered);
     }
 
@@ -126,7 +104,7 @@ pub fn build_repo_map(
             let note = format!(
                 "## {} — out of budget ({} definitions; requestable via get_code_body)\n",
                 name,
-                definition_names(&f.code).len()
+                definition_names_of(name, &f.code).len()
             );
             map.push_str(&note);
             used += count(bpe, &note);

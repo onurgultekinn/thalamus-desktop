@@ -87,11 +87,19 @@ const FIELD = 'w-full min-w-0 rounded-[3px] border border-[#2A2825] bg-[#0F0E0E]
   + 'text-[#E8E4DA] outline-none placeholder:text-[#565248] focus:border-[#dcb67a]/50';
 
 const AI_SYSTEM = [
-  'You design the org plan of a small AI agent company.',
-  'Reply with strict JSON only. No markdown, no prose.',
-  'Shape: {"agents":[{"name":"...","role":"...","mission":"...","responsibilities":["..."],"parent":null}]}',
-  '"parent" is the zero-based index of the parent agent in the array, or null for the root.',
-  'Use 4 to 10 agents. Short names, one-sentence missions, 1-3 concrete responsibilities each.',
+  'You are a senior org designer for AI agent companies.',
+  'Turn the brief into a small operating model, not a list of job titles.',
+  'Reply with JSON only. No markdown, no prose, no code fences.',
+  'Schema: {"name":"...","agents":[{"name":"...","role":"...","mission":"...","responsibilities":["..."],"parent":null}],"links":[{"from":0,"to":1,"label":"...","note":"..."}]}.',
+  '"parent" is the zero-based index of the parent agent, or null for the root.',
+  '"links" are work relationships outside the hierarchy. from/to are agent indexes (names also work).',
+  'Use one root, 4-9 agents, max depth 3, and 2-6 useful links. Every agent must be reachable from the root.',
+  'Each role must own a distinct outcome; avoid overlapping missions.',
+  'Model real handoffs: who gives what to whom, and who checks the result.',
+  'Short names (1-3 words), one-sentence missions, 1-3 concrete responsibilities each.',
+  'Link labels must be short verbs such as delegates, informs, reviews, consults or depends on.',
+  'Do not add links to missing agents, duplicate a pair, or create cycles.',
+  'If the brief is vague, make reasonable assumptions and still return a complete plan.',
 ].join(' ');
 
 const TPL: Record<TplKey, Record<Lang, TplAgent[]>> = {
@@ -336,12 +344,18 @@ function loadPlan(): Plan {
   return emptyPlan();
 }
 
-function parseAiPlan(text: string): PlanAgent[] {
+interface ParsedAiPlan {
+  name: string;
+  agents: PlanAgent[];
+  links: AgentLink[];
+}
+
+function parseAiPlan(text: string): ParsedAiPlan | null {
   const start = text.indexOf('{');
   const end = text.lastIndexOf('}');
-  if (start < 0 || end <= start) return [];
+  if (start < 0 || end <= start) return null;
   let data: unknown;
-  try { data = JSON.parse(text.slice(start, end + 1)); } catch { return []; }
+  try { data = JSON.parse(text.slice(start, end + 1)); } catch { return null; }
   const obj = (data && typeof data === 'object' ? data : {}) as Record<string, unknown>;
   const raw = Array.isArray(obj.agents) ? obj.agents : Array.isArray(data) ? data : [];
   const parsed = raw.slice(0, 24).map((v) => {
@@ -366,9 +380,9 @@ function parseAiPlan(text: string): PlanAgent[] {
     remap.set(i, kept.length);
     kept.push(d);
   });
-  if (!kept.length) return [];
+  if (!kept.length) return null;
   const ids = kept.map(() => uid());
-  return sanitizeAgents(kept.map((d, i) => {
+  const mappedAgents: PlanAgent[] = kept.map((d, i) => {
     const mapped = d.parent !== null ? remap.get(d.parent) : undefined;
     return {
       id: ids[i],
@@ -379,7 +393,46 @@ function parseAiPlan(text: string): PlanAgent[] {
       resp: d.resp,
       model: '',
     };
-  }));
+  });
+  const agents = sanitizeAgents(mappedAgents);
+  const byIndex = new Map<number, string>();
+  for (const [source, index] of remap) byIndex.set(source, ids[index]);
+  const byName = new Map<string, string>();
+  for (const a of agents) {
+    const key = a.name.trim().toLowerCase();
+    if (key && !byName.has(key)) byName.set(key, a.id);
+  }
+  const resolveAgent = (v: unknown): string | undefined => {
+    if (typeof v === 'number' && Number.isInteger(v)) return byIndex.get(v);
+    if (typeof v !== 'string') return undefined;
+    const value = v.trim();
+    if (/^-?\d+$/.test(value)) return byIndex.get(Number(value));
+    return byName.get(value.toLowerCase());
+  };
+  const links: AgentLink[] = [];
+  const seenLinks = new Set<string>();
+  const rawLinks = Array.isArray(obj.links) ? obj.links : [];
+  for (const rawLink of rawLinks.slice(0, 16)) {
+    const l = (rawLink && typeof rawLink === 'object' ? rawLink : {}) as Record<string, unknown>;
+    const from = resolveAgent(l.from);
+    const to = resolveAgent(l.to);
+    if (!from || !to || from === to) continue;
+    const key = `${from}>${to}`;
+    if (seenLinks.has(key)) continue;
+    seenLinks.add(key);
+    links.push({
+      id: linkUid(),
+      from,
+      to,
+      label: (str(l.label) || str(l.relationship) || str(l.kind)).trim().slice(0, 48),
+      note: (str(l.note) || str(l.purpose)).trim().slice(0, 200),
+    });
+  }
+  return {
+    name: str(obj.name).trim().slice(0, 80),
+    agents,
+    links,
+  };
 }
 
 function toMarkdown(plan: Plan, companyFallback: string, agentFallback: string, connectionsTitle: string) {
@@ -901,16 +954,21 @@ export function AgentCompany({ active = true }: { active?: boolean }) {
       const res = await aiChat(messages, [], provider, ac.signal);
       if (ac.signal.aborted) return;
       const next = parseAiPlan(res.content);
-      if (!next.length) { setAiError(t('company.aiFailed')); return; }
+      if (!next?.agents.length) { setAiError(t('company.aiFailed')); return; }
       setPlan((p) => ({
         ...p,
-        agents: next.map((a) => ({ ...a, model: a.model || activeModel })),
-        links: [],
+        name: next.name || p.name,
+        agents: next.agents.map((a) => ({ ...a, model: a.model || activeModel })),
+        links: next.links,
       }));
       setExpandedId(null);
       setCollapsed(new Set());
       setFocusId(null);
-      setView('plan');
+      setSelectedChart(null);
+      setSelectedEdge(null);
+      setSelectedLink(null);
+      setView('chart');
+      setFlowFitNonce((n) => n + 1);
       setDialog(null);
       setBrief('');
       window.requestAnimationFrame(() => { if (planScrollRef.current) planScrollRef.current.scrollTop = 0; });

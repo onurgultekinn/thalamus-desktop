@@ -7,7 +7,7 @@
  * has no key the fallback happens among the other key-carrying connections.
  * Local endpoints (loopback URLs) are never auto-selected as fallback.
  */
-import { API_BASE } from './ThalamusClient';
+import { API_BASE, localFetch } from './ThalamusClient';
 import {
   activeProviderStorageKey,
   baseStorageKey,
@@ -48,7 +48,17 @@ export interface AiChatResponse {
   rounds?: number;
   finishReason?: string;
   edits?: AiEditResult[];
-  usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+  /** todo_write aracının son adım listesi (content + status). */
+  todos?: { content: string; status: string }[];
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+    /** Sağlayıcı prompt cache'inden karşılanan girdi token'ı (maliyet ~10x ucuz). */
+    cachedTokens?: number;
+    /** EVREN kredi bakiyesi snapshot'ı (kullanıcının kota görünürlüğü için). */
+    creditsRemaining?: string;
+  };
 }
 
 export interface CodeBlock {
@@ -312,6 +322,13 @@ export interface AiChatOptions {
   model?: string;
   /** Yanıt bitince yerel modeli kapat (tek seferlik görsel/araç çağrıları). */
   closeAfter?: boolean;
+  /** İzin modu (readonly|plan|ask|auto|safe|autonomous). auto/autonomous
+   *  modlarında backend run_command (kabuk) aracını modele açar. */
+  permission?: string;
+  /** false → araç şemaları hiç gönderilmez (~950 token/istek tasarrufu).
+   *  Yalnız araç gerektirmeyen dahili çağrılarda (özetleme, komut palası)
+   *  kapatın; kullanıcıya açık sohbet yüzeylerinde AÇIK kalmalı. */
+  toolsEnabled?: boolean;
 }
 
 function readSetting(key: string): string {
@@ -366,6 +383,8 @@ export interface AiChatStreamHandlers {
   onMeta?: (meta: {
     engine?: { compressed_messages?: number; original_tokens?: number; compressed_tokens?: number };
   }) => void;
+  /** Backend bir araç çağrısını yürütmeden hemen önce (ajan döngüsü görünürlüğü). */
+  onToolCall?: (name: string) => void;
 }
 
 /**
@@ -401,18 +420,22 @@ export async function aiChatStream(
 
   try {
     const gen = readGenerationOptions();
-    const res = await fetch(`${API_BASE}/api/ai/chat/stream`, {
+    const res = await localFetch(`${API_BASE}/api/ai/chat/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         provider: p.id,
-        api_key: p.key,
+        // Anahtar istek gövdesine GİRMEZ: backend kasa (Credential Manager,
+        // DPAPI) üzerinden provider kimliğiyle çözer. JS sürecinde key yok.
+        use_stored_key: true,
         model: opts.model || p.model,
         base_url: p.baseUrl || undefined,
         messages: withInstructions(messages),
         code_blocks: codeBlocks,
         reasoning_effort: p.reasoningEffort || undefined,
         preserve: opts.preserve || undefined,
+        permission: opts.permission || undefined,
+        tools_enabled: opts.toolsEnabled === false ? false : undefined,
         temperature: gen.temperature,
         max_tokens: gen.maxTokens,
       }),
@@ -437,7 +460,14 @@ export async function aiChatStream(
     let buffer = '';
     let content = '';
     let reasoning = '';
-    let usage: AiChatResponse['usage'];
+    let edits: AiEditResult[] | undefined;
+    let todos: AiChatResponse['todos'];
+    let usage:
+      | (AiChatResponse['usage'] & {
+          prompt_tokens_details?: { cached_tokens?: number };
+          prompt_cache_hit_tokens?: number;
+        })
+      | undefined;
     let rounds: number | undefined;
     let finishReason: string | undefined;
 
@@ -456,8 +486,15 @@ export async function aiChatStream(
         let event: {
           type?: string;
           content?: string;
+          name?: string;
+          edits?: AiEditResult[];
+          todos?: { content: string; status: string }[];
           message?: string;
-          usage?: AiChatResponse['usage'];
+          usage?: (AiChatResponse['usage']) & {
+            prompt_tokens_details?: { cached_tokens?: number };
+            prompt_cache_hit_tokens?: number;
+            evren?: { credits_remaining_cr?: string; routed_model?: string };
+          };
           rounds?: number;
           finish_reason?: string;
           engine?: { compressed_messages?: number; original_tokens?: number; compressed_tokens?: number };
@@ -475,16 +512,48 @@ export async function aiChatStream(
           handlers.onReasoning?.(event.content);
         } else if (event.type === 'meta') {
           handlers.onMeta?.({ engine: event.engine });
+        } else if (event.type === 'tool_call' && event.name) {
+          handlers.onToolCall?.(event.name);
         } else if (event.type === 'done') {
           usage = event.usage;
           rounds = event.rounds;
           finishReason = event.finish_reason;
+          // Ajan edit'leri (edit_file/write_file) ve todo listesi akışta da
+          // gelir — yakalanmazsa sessizce düşer (uygulama/uygulamama kararı
+          // çağıranındır ama veri kaybolamaz).
+          if (event.edits?.length) edits = event.edits;
+          if (event.todos?.length) todos = event.todos;
         } else if (event.type === 'error') {
           throw new Error(event.message || 'stream error');
         }
       }
     }
-    return { content, reasoning: reasoning || undefined, usage, rounds, finishReason };
+    type UsageWithProvider = (AiChatResponse['usage']) & {
+      prompt_tokens_details?: { cached_tokens?: number };
+      prompt_cache_hit_tokens?: number;
+      evren?: { credits_remaining_cr?: string; routed_model?: string };
+    };
+    const withExtras = (u?: UsageWithProvider) => {
+      if (!u) return u;
+      const cached =
+        (u.prompt_tokens_details?.cached_tokens ?? 0) + (u.prompt_cache_hit_tokens ?? 0);
+      const credits = (u as { evren?: { credits_remaining_cr?: string } }).evren
+        ?.credits_remaining_cr;
+      return {
+        ...u,
+        ...(cached ? { cachedTokens: cached } : {}),
+        ...(credits ? { creditsRemaining: credits } : {}),
+      };
+    };
+    return {
+      content,
+      reasoning: reasoning || undefined,
+      edits,
+      todos,
+      usage: withExtras(usage),
+      rounds,
+      finishReason,
+    };
   } catch (err) {
     // Kendi süre aşımımız: çağıran taraf "durduruldu" değil "süre doldu" desin.
     if (timedOut) throw new Error('TIMEOUT_600S');
@@ -516,12 +585,14 @@ export async function aiChat(
 
   try {
     const gen = readGenerationOptions();
-    const res = await fetch(`${API_BASE}/api/ai/chat`, {
+    const res = await localFetch(`${API_BASE}/api/ai/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         provider: p.id,
-        api_key: p.key,
+        // Anahtar istek gövdesine GİRMEZ: backend kasa (Credential Manager,
+        // DPAPI) üzerinden provider kimliğiyle çözer. JS sürecinde key yok.
+        use_stored_key: true,
         model: opts.model || p.model,
         base_url: p.baseUrl || undefined,
         messages: withInstructions(messages),
@@ -530,6 +601,8 @@ export async function aiChat(
         // bu alan gönderilir; yoksa yanıtlar kesilir (ölçüldü).
         reasoning_effort: p.reasoningEffort || undefined,
         preserve: opts.preserve || undefined,
+        permission: opts.permission || undefined,
+        tools_enabled: opts.toolsEnabled === false ? false : undefined,
         temperature: gen.temperature,
         max_tokens: gen.maxTokens,
       }),
@@ -539,7 +612,28 @@ export async function aiChat(
       const detail = await res.text().catch(() => '');
       throw new Error(`HTTP ${res.status} ${detail}`.trim());
     }
-    return (await res.json()) as AiChatResponse;
+    const data = (await res.json()) as AiChatResponse & {
+      usage?: {
+        prompt_tokens_details?: { cached_tokens?: number };
+        prompt_cache_hit_tokens?: number;
+      };
+    };
+    const rawUsage = data.usage as
+      | (AiChatResponse['usage'] & {
+          prompt_tokens_details?: { cached_tokens?: number };
+          prompt_cache_hit_tokens?: number;
+          evren?: { credits_remaining_cr?: string };
+        })
+      | undefined;
+    if (rawUsage) {
+      const cached =
+        (rawUsage.prompt_tokens_details?.cached_tokens ?? 0) +
+        (rawUsage.prompt_cache_hit_tokens ?? 0);
+      if (cached) data.usage = { ...data.usage, cachedTokens: cached };
+      const credits = rawUsage.evren?.credits_remaining_cr;
+      if (credits) data.usage = { ...data.usage, creditsRemaining: credits };
+    }
+    return data;
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener('abort', relayAbort);

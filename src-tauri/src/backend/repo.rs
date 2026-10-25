@@ -18,7 +18,10 @@ const SKIP_DIRS: [&str; 6] = [
     "src_backup_before_copy",
     ".zcode",
 ];
-const EXTENSIONS: [&str; 5] = ["py", "ts", "tsx", "js", "rs"];
+const EXTENSIONS: [&str; 21] = [
+    "py", "ts", "tsx", "js", "jsx", "mjs", "cjs", "rs", "java", "cs", "c", "h",
+    "cpp", "hpp", "go", "swift", "kt", "dart", "php", "sh", "md",
+];
 const MAX_DEPTH: usize = 6;
 const MAX_FILE_BYTES: u64 = 256 * 1024;
 const DEFAULT_BUDGET: usize = 1000;
@@ -26,11 +29,11 @@ const DEFAULT_BUDGET: usize = 1000;
 /// mtime'lı girdiler dışarı atılır.
 const MAX_CACHE_ENTRIES: usize = 512;
 
-type FileCache = Mutex<std::collections::HashMap<String, (SystemTime, String)>>;
+pub type FileCache = Mutex<std::collections::HashMap<String, (SystemTime, String)>>;
 
 /// `.thalamusignore` / `.aiderignore` (gitignore sözdizimi alt kümesi).
 /// Repo map'e girmeyecek yolları hariç tutar.
-fn load_ignore(root: &Path) -> Vec<String> {
+pub fn load_ignore(root: &Path) -> Vec<String> {
     for name in [".thalamusignore", ".aiderignore"] {
         if let Ok(text) = std::fs::read_to_string(root.join(name)) {
             return text
@@ -58,7 +61,7 @@ fn is_ignored(rel: &str, patterns: &[String]) -> bool {
     })
 }
 
-fn walk(
+pub fn walk(
     dir: &Path,
     root: &Path,
     depth: usize,
