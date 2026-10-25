@@ -38,18 +38,16 @@ export interface ExplainedError {
 }
 
 /**
- * Support wiki base URL. Empty until the wiki is published.
- * Once it exists, set this to e.g.
- *   'https://github.com/onurgultekinn/thalamus-desktop/wiki/errors/'
- * and every `wiki > <code>` link in the UI goes live — one page per code
- * (…/wiki/errors/415). No other code change is needed.
+ * Reference doc for the error-code registry (ERRORS.md at the repo root).
+ * Every `wiki > <code>` link in the UI opens this page; the table lists all
+ * codes in one place, and codes never change meaning between releases.
  */
-export const WIKI_BASE_URL = '';
+export const WIKI_BASE_URL =
+  'https://github.com/onurgultekinn/thalamus-desktop/blob/master/ERRORS.md';
 
-/** Link target for an error code, or null while the wiki is unpublished. */
-export function wikiUrlFor(code: string): string | null {
-  if (!WIKI_BASE_URL) return null;
-  return `${WIKI_BASE_URL}${code}`;
+/** Link target for an error code, or null while the reference doc is absent. */
+export function wikiUrlFor(_code: string): string | null {
+  return WIKI_BASE_URL || null;
 }
 
 /**

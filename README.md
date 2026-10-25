@@ -93,6 +93,11 @@ Packaging:
 npm run tauri:build
 ```
 
+## Error codes
+
+Every user-visible error shows a stable code. The full registry — what each
+code means and what to do — is in [ERRORS.md](ERRORS.md).
+
 ## Third-party notices
 
 See [ATTRIBUTIONS.md](ATTRIBUTIONS.md) for the full list of runtime
