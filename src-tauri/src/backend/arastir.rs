@@ -119,11 +119,9 @@ pub fn web_search(args: &Value) -> String {
         let err = payload.get("error").cloned().unwrap_or(Value::Null);
         return format!("search failed: {err}");
     }
-    let items = payload
-        .pointer("/result/items")
-        .cloned()
-        .unwrap_or_else(|| json!([]));
-    let mut out = json!({"items": items});
+    // Compact arastir envelope: items live at the top level.
+    let items = payload.get("items").cloned().unwrap_or_else(|| json!([]));
+    let mut out = json!({"engine": payload.get("engine").cloned().unwrap_or(Value::Null), "items": items});
     // Cevap ~2KB'yi aşıyorsa sıkıştırma kâr eder; motorun kararı zaten güvenli.
     if out.to_string().len() > 2048 {
         if let Ok(metrics) = post_json("/compress", out.clone()) {
@@ -132,10 +130,7 @@ pub fn web_search(args: &Value) -> String {
                 .and_then(Value::as_bool)
                 .unwrap_or(false)
             {
-                let saved = metrics
-                    .pointer("/result/saved_tokens")
-                    .cloned()
-                    .unwrap_or(json!(0));
+                let saved = metrics.get("tokens_saved").cloned().unwrap_or(json!(0));
                 out = json!({
                     "compressed": metrics.pointer("/result/processed_prompt").cloned().unwrap_or(Value::Null),
                     "decode": "SearXNG @T table: decode with the arastir compression grammar",
@@ -165,7 +160,7 @@ pub fn read_page(args: &Value) -> String {
                 return format!("read failed: {err}");
             }
             let text = payload
-                .pointer("/result/items/0/text")
+                .get("text")
                 .and_then(Value::as_str)
                 .unwrap_or("")
                 .to_string();

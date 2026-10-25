@@ -283,6 +283,7 @@ mod tests {
                 .method("OPTIONS")
                 .uri("/api/compress")
                 .header("host", "127.0.0.1:8277")
+                        .header("x-thalamus-token", session_token())
                 .header("Origin", origin)
                 .header("Access-Control-Request-Method", "POST")
                 .header("Access-Control-Request-Headers", "content-type")
@@ -370,6 +371,7 @@ mod tests {
                         .method("POST")
                         .uri("/api/ai/test")
                         .header("host", "127.0.0.1:8277")
+                        .header("x-thalamus-token", session_token())
                         .header("Content-Type", "application/json")
                         .body(Body::from(
                             r#"{"base_url":"file:///etc/passwd","api_key":""}"#,
@@ -396,6 +398,7 @@ mod tests {
                         .method("POST")
                         .uri("/api/ai/test")
                         .header("host", "127.0.0.1:8277")
+                        .header("x-thalamus-token", session_token())
                         .header("Content-Type", "application/json")
                         .body(Body::from(
                             r#"{"base_url":"https://api.openai.com/v1","api_key":""}"#,
@@ -422,6 +425,7 @@ mod tests {
                         .method("POST")
                         .uri("/api/compress")
                         .header("host", "127.0.0.1:8277")
+                        .header("x-thalamus-token", session_token())
                         .header("Content-Type", "application/json")
                         .body(Body::from(r#"{"prompt":"   "}"#))
                         .unwrap(),
