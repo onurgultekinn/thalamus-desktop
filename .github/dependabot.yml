@@ -29,6 +29,11 @@ updates:
       npm-minor:
         patterns: ["*"]
         update-types: ["minor", "patch"]
+    ignore:
+      # Tailwind v4 replaced the PostCSS plugin with @tailwindcss/postcss and
+      # changes the config format. Migration is deliberate, not automatic.
+      - dependency-name: tailwindcss
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: /
