@@ -1,15 +1,46 @@
+<div align="center">
+
+<img src="src-tauri/icons/128x128.png" alt="Thalamus Desktop" width="112" height="112" />
+
 # Thalamus Desktop
 
-Thalamus Desktop is a local-first AI workbench built around a lossless
-prompt-compression engine. The engine is pure Rust: it converts JSON segments
-of a prompt into a compact `@T` table, verifies the round trip, and reports
-token and cost savings. Around the engine sit a chat interface, a project
-view (file explorer, editor, terminal), an agent-mode copilot with local file
-tools, and support for any OpenAI-compatible provider, including local model
-runtimes such as Ollama and LM Studio. The frontend is React + TypeScript +
-Vite; the desktop shell and backend are Tauri 2 (Rust). The backend listens
-on 127.0.0.1 only, with a CORS allowlist and a DNS-rebinding guard; provider
-requests are made by the Rust process, not by the webview.
+**A local-first AI workbench built around a lossless prompt-compression engine.**
+
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![Status: beta](https://img.shields.io/badge/status-beta-orange.svg)](#status)
+[![Platform: Windows](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D4.svg)](#install)
+[![Tauri 2](https://img.shields.io/badge/Tauri-2-24C8DB.svg)](https://tauri.app)
+[![Rust](https://img.shields.io/badge/Rust-engine-000000.svg?logo=rust)](src-tauri/src/engine)
+[![TypeScript](https://img.shields.io/badge/TypeScript-React%20%2B%20Vite-3178C6.svg?logo=typescript&logoColor=white)](src)
+
+</div>
+
+---
+
+Thalamus Desktop combines an AI chat, a project workspace (file explorer,
+editor, terminal), and an agent-mode copilot in a single desktop application.
+The centerpiece is a prompt-compression engine written in pure Rust: it
+converts JSON segments into a compact `@T` table, verifies every round trip,
+and reports exactly how many tokens and dollars each prompt saves.
+
+Everything runs on your machine. The backend listens on `127.0.0.1` only,
+provider requests are made by the Rust process rather than the webview, API
+keys live in the OS credential vault, and no telemetry is collected.
+
+## Why
+
+Sending a prompt to a large model is expensive and most of the cost comes
+from structure the model does not need — repeated keys, boilerplate, and
+duplicated segments. Thalamus rewrites that structure losslessly before the
+request leaves your machine:
+
+- **Lossless by construction.** Only JSON segments are translated; every
+  conversion is round-trip verified, so the decompressed prompt is identical
+  to the original.
+- **No lossy shortcuts.** No summarization, paraphrase, or translation is
+  performed — code and prose are carried over word for word, in order.
+- **Visible savings.** Every message shows the token count before and after,
+  the savings percentage, and the cost delta.
 
 ## Features
 
@@ -52,14 +83,43 @@ requests are made by the Rust process, not by the webview.
 - Command palette and a secondary command bar for navigation and actions.
 - Settings for providers, default model, router mode, workspace root, editor behavior, and chat instructions.
 
-## Product principle
+## Architecture
 
-- Compression is fully lossless. Only JSON segments are converted to the `@T` table, and every conversion is round-trip verified. Code blocks and text are carried over word for word, and the segment order never changes.
-- No lossy transformation — summarization, paraphrase, or translation — is performed. Translation (TR to EN) was evaluated and rejected (2026-10): it would pay off in tokens, but it breaks the lossless principle.
+```
+┌──────────────────────────────────────────────────────────────┐
+│  Webview (React + TypeScript + Vite)                         │
+│  chat · project IDE · agent UI · settings · i18n             │
+└───────────────────────────┬──────────────────────────────────┘
+                            │ Tauri IPC / HTTP (127.0.0.1)
+┌───────────────────────────┴──────────────────────────────────┐
+│  Rust backend (Tauri 2)                                      │
+│                                                              │
+│  engine/          lossless @T compression, round-trip check   │
+│  backend/ai.rs    streaming, tool loop, retries, budgets      │
+│  backend/tools.rs workspace-pinned file tools                 │
+│  backend/repo*    workspace map for AI context                │
+│  agent/           multi-agent envelopes                       │
+│  secrets.rs       OS credential vault                         │
+└───────────────────────────┬──────────────────────────────────┘
+                            │ HTTPS
+                ┌───────────┴────────────┐
+                │ OpenAI-compatible APIs │  (or local runtimes)
+                └────────────────────────┘
+```
+
+The webview never contacts a provider directly. The Rust process owns
+provider credentials, request construction, and compression.
+
+## Status
+
+Early beta. The core engine, chat, project workspace, and agent tools are
+functional; builds are published under [Releases](../../releases). Expect
+breaking changes before `1.0`.
 
 ## Install
 
-Beta builds will be published under GitHub Releases.
+Beta builds will be published under GitHub Releases. Package-manager
+channels (`winget`) are planned for the first public beta.
 
 > (first public beta — builds coming)
 
@@ -92,6 +152,17 @@ Packaging:
 ```
 npm run tauri:build
 ```
+
+## Contributing
+
+Bug reports, feature ideas, and pull requests are welcome. Please read
+[CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR. For security issues,
+see [SECURITY.md](SECURITY.md).
+
+## Product principle
+
+- Compression is fully lossless. Only JSON segments are converted to the `@T` table, and every conversion is round-trip verified. Code blocks and text are carried over word for word, and the segment order never changes.
+- No lossy transformation — summarization, paraphrase, or translation — is performed. Translation (TR to EN) was evaluated and rejected (2026-10): it would pay off in tokens, but it breaks the lossless principle.
 
 ## Error codes
 
