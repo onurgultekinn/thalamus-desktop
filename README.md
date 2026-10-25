@@ -97,3 +97,12 @@ npm run tauri:build
 
 See [ATTRIBUTIONS.md](ATTRIBUTIONS.md) for the full list of runtime
 dependencies, licenses, and design credits.
+
+## License
+
+Copyright 2026 Onur Gültekin. Licensed under the
+[Apache License, Version 2.0](LICENSE). In short: you may use, modify, and
+distribute this software, including commercially, as long as the license
+and attribution notices are preserved. The "Thalamus" name and branding
+are not covered by the license.
+
