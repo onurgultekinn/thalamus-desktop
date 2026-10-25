@@ -177,7 +177,6 @@ fn router(state: BackendState) -> Router {
         .allow_headers(AllowHeaders::any());
 
     Router::new()
-        .layer(axum::middleware::from_fn(auth_mw))
         .route("/api/health", get(health))
         .route("/api/compress", post(compress))
         .route("/api/ai/chat", post(ai::ai_chat))
@@ -195,6 +194,9 @@ fn router(state: BackendState) -> Router {
         .route("/api/agent/state", get(agent::agent_state))
         .route("/api/agent/cancel", post(agent::agent_cancel))
         .with_state(state)
+        // Tum rotalar eklendikten SONRA sarmalanir (axum: layer yalniz o
+        // ana kadar eklenen rotalari sarar — basta cagrilmissa hicbirini sarmaz).
+        .layer(axum::middleware::from_fn(auth_mw))
         .layer(cors)
         // En dış katman: CORS preflight'ı bile Host denetiminden geçer.
         .layer(middleware::from_fn(host_guard))

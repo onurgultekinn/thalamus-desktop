@@ -8,6 +8,14 @@ src-tauri/src-tauri/
 
 # Yerel watcher günlüğü
 .zcode/shutdown-watch.log
+# Yerel ajan oturum araçlari (makineye ozel)
+.zcode/
+
+# Ozel calisma alani (arastirma, ic dokumanlar, probe'lar) - depolanmaz
+_private/
+
+# Kisisel/uretilen runtime config (app %APPDATA%'da kendi olusturur)
+src-tauri/thalamus_config.json
 
 # İşletim sistemi / editör
 Thumbs.db
