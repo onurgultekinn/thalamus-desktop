@@ -16,11 +16,39 @@ use crate::engine::edits;
 /// edit_file/write_file araçlarının kaydettiği düzenleme. Araç diske YAZMAZ:
 /// düzenleme döngü sonunda frontend'in `edits` raporuna birleştirilir —
 /// editör state'i ve undo zinciri bozulmaz (aynı sözleşme, tek yol).
+/// Ajan döngüsünün motor kaynakları: tokenizer (repo map token bütçesi)
+/// ve dosya içerik cache'i (mtime). Test bağlamlarında ikisi de None olabilir;
+/// repo_map aracı o durumda nazik bir hata döner.
+#[derive(Default, Clone)]
+pub struct EngineCtx {
+    pub bpe: Option<std::sync::Arc<tiktoken_rs::CoreBPE>>,
+    pub repo_cache: Option<
+        std::sync::Arc<
+            std::sync::Mutex<std::collections::HashMap<String, (std::time::SystemTime, String)>>,
+        >,
+    >,
+}
+
 #[derive(Debug, Clone)]
 pub struct RecordedEdit {
     pub file: String,
     pub new_body: String,
     pub message: String,
+}
+
+// Grep gösteriminde gerçek newline ve kısaltma karakteri.
+const NL_R: &str = "\n";
+const ELLIPSIS: &str = "\u{2026}";
+
+/// (grep context) Dosyadan 1-indexed satırı okur; hata durumunda boş döner.
+fn file_line_at(root: &Path, rel: &str, idx: usize) -> String {
+    match safe_join(root, rel) {
+        Ok(p) => std::fs::read_to_string(p)
+            .ok()
+            .and_then(|t| t.lines().nth(idx).map(str::to_string))
+            .unwrap_or_default(),
+        Err(_) => String::new(),
+    }
 }
 
 /// Araç yürütme bağlamı: workspace kökü + istekteki kod blokları.
@@ -36,6 +64,14 @@ pub struct ToolCtx<'a> {
     /// run_command aracı yalnızca açık izin modlarında (auto/autonomous)
     /// etkindir; varsayılan kapalıdır.
     pub allow_shell: bool,
+    /// Sub-ajan bayrağı: değiştiren araçlar (edit_file/write_file/run_command)
+    /// savunma olarak reddedilir (spec'te olmasalar bile).
+    pub read_only: bool,
+    /// dispatch_agent alt döngülerinin usage toplamı — ana usage'a akıtılır
+    /// (sub-ajanın tükettiği token'lar da gerçek maliyettir).
+    pub sub_usage: std::cell::RefCell<Value>,
+    /// Motor kaynakları (repo_map aracı için).
+    pub engine: EngineCtx,
 }
 
 impl<'a> ToolCtx<'a> {
@@ -46,6 +82,9 @@ impl<'a> ToolCtx<'a> {
             edits: std::cell::RefCell::new(Vec::new()),
             todos: std::cell::RefCell::new(Vec::new()),
             allow_shell: false,
+            read_only: false,
+            sub_usage: std::cell::RefCell::new(Value::Null),
+            engine: EngineCtx::default(),
         }
     }
 }
@@ -85,83 +124,172 @@ fn is_ignored_entry(name: &str) -> bool {
 /// `run_command` yalnızca izin modu izin veriyorsa listelenir.
 pub fn specs(allow_shell: bool) -> Value {
     let mut all = vec![
-            {
-                "type": "function",
-                "function": {
-                    "name": "edit_file",
-                    "description": "Applies a SEARCH/REPLACE edit to a file and records it (applied after the run, not written to disk mid-run). SEARCH must match the current content exactly (newline-tolerant). For multiple changes, call edit_file several times. PREFERRED way to edit code.",
-                    "parameters": {"type":"object","properties":{
-                        "path":{"type":"string","description":"path relative to the workspace root"},
-                        "search":{"type":"string","description":"exact existing lines to replace"},
-                        "replace":{"type":"string","description":"new lines (may be empty to delete)"}
-                    },"required":["path","search","replace"]}
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "write_file",
-                    "description": "Records the FULL content of a file (creates new files or rewrites a small existing file entirely). Prefer edit_file for small changes to existing files.",
-                    "parameters": {"type":"object","properties":{
-                        "path":{"type":"string","description":"path relative to the workspace root"},
-                        "content":{"type":"string","description":"the complete file content"}
-                    },"required":["path","content"]}
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "find_files",
-                    "description": "Finds files by glob pattern (e.g. '**/*.rs', 'src/*.ts'). Returns up to 100 relative paths.",
-                    "parameters": {"type":"object","properties":{
-                        "pattern":{"type":"string","description":"glob pattern relative to the workspace root"}
-                    },"required":["pattern"]}
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "get_code_body",
-                "description": "Returns the full body of a function/class definition seen in the schema. Call when you need details.",
+        json!({
+            "type": "function",
+            "function": {
+                "name": "edit_file",
+                "description": "SEARCH/REPLACE edit to a file; recorded, applied after the run. SEARCH must match exactly (newline-tolerant). Multiple calls ok. PREFERRED for edits.",
+                "parameters": {"type":"object","properties":{
+                    "path":{"type":"string","description":"relative path"},
+                    "search":{"type":"string","description":"exact existing lines"},
+                    "replace":{"type":"string","description":"new lines (empty = delete)"}
+                },"required":["path","search","replace"]}
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "write_file",
+                "description": "Write FULL file content (new file or full rewrite). Prefer edit_file.",
+                "parameters": {"type":"object","properties":{
+                    "path":{"type":"string","description":"relative path"},
+                    "content":{"type":"string","description":"complete file content"}
+                },"required":["path","content"]}
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "find_files",
+                "description": "Find files by glob ('**/*.rs', 'src/*.ts'), max 100.",
+                "parameters": {"type":"object","properties":{
+                    "pattern":{"type":"string"}
+                },"required":["pattern"]}
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "get_code_body",
+                "description": "Full body of a schema definition.",
                 "parameters": {"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}
             }
-        },
-            {
-                "type": "function",
-                "function": {
-                    "name": "read_file",
-                    "description": "Reads a file inside the workspace, page by page. Returns up to `limit` lines (default 400) starting at `offset` (1-based line number). READ the relevant file before making changes; pass offset to continue past a truncation notice. Set numbered=true to prefix line numbers (for referencing, not for SEARCH blocks).",
-                    "parameters": {"type":"object","properties":{
-                        "path":{"type":"string","description":"path relative to the workspace root"},
-                        "offset":{"type":"integer","description":"1-based first line to read (default 1)"},
-                        "limit":{"type":"integer","description":"max lines to read (default 400, max 2000)"},
-                        "numbered":{"type":"boolean","description":"prefix each line with its line number"}
-                    },"required":["path"]}
-                }
-            },
-        {
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "read_file",
+                "description": "Read a file page by page: `limit` lines (default 400) from 1-based `offset`; truncation notice gives next offset. numbered=true adds line numbers (reference only, NOT for SEARCH).",
+                "parameters": {"type":"object","properties":{
+                    "path":{"type":"string","description":"relative path"},
+                    "offset":{"type":"integer","description":"first line, 1-based"},
+                    "limit":{"type":"integer","description":"default 400, max 2000"},
+                    "numbered":{"type":"boolean"}
+                },"required":["path"]}
+            }
+        }),
+        json!({
             "type": "function",
             "function": {
                 "name": "list_dir",
-                "description": "Lists the entries of a directory (files/folders, sizes).",
+                "description": "List directory entries (dependency/output folders skipped).",
                 "parameters": {"type":"object","properties":{
-                    "path":{"type":"string","description":"relative directory (empty = root)"}
+                    "path":{"type":"string","description":"subdir, empty = root"}
                 }}
             }
-        },
-            {
-                "type": "function",
-                "function": {
-                    "name": "grep_search",
-                    "description": "Searches for text/pattern inside workspace files, case-insensitive. Set regex=true to treat the query as a regular expression. Returns up to 80 'path:line: text' hits (long lines are trimmed).",
-                    "parameters": {"type":"object","properties":{
-                        "query":{"type":"string"},
-                        "path":{"type":"string","description":"subdirectory (empty = root)"},
-                        "regex":{"type":"boolean","description":"treat query as a regular expression"}
-                    },"required":["query"]}
-                }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "grep_search",
+                "description": "Case-insensitive text search. regex=true for patterns; context=N (0-3) adds lines. Max 80 hits, long lines trimmed.",
+                "parameters": {"type":"object","properties":{
+                    "query":{"type":"string"},
+                    "path":{"type":"string","description":"subdir, empty = root"},
+                    "regex":{"type":"boolean"},
+                    "context":{"type":"integer","description":"0-3 context lines"}
+                },"required":["query"]}
             }
-    ])
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "todo_write",
+                "description": "Track a multi-step plan. Pass the FULL list each call (replaces old). status: pending|in_progress|done; one in_progress at a time.",
+                "parameters": {"type":"object","properties":{
+                    "todos":{"type":"array","items":{"type":"object","properties":{
+                        "content":{"type":"string"},
+                        "status":{"type":"string","enum":["pending","in_progress","done"]}
+                    },"required":["content","status"]}}
+                },"required":["todos"]}
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "repo_map",
+                "description": "Importance-ranked, token-budgeted map of workspace files (signatures only). Cheapest overview — call BEFORE reading many files. focus=prioritized file.",
+                "parameters": {"type":"object","properties":{
+                    "focus":{"type":"string","description":"prioritized file"},
+                    "budget":{"type":"integer","description":"default 800, max 4000"}
+                }}
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "dispatch_agent",
+                "description": "Spawn a READ-ONLY subagent to investigate the workspace (cannot edit/run). Give a self-contained question; it returns a short digest. Prefer for broad exploration — keeps context small.",
+                "parameters": {"type":"object","properties":{
+                    "task":{"type":"string","description":"self-contained question"}
+                },"required":["task"]}
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "web_search",
+                "description": "Searches the web (keyless, unlimited local engine). Returns result items with title/url/snippet. Use for facts, docs, news — anything outside the workspace. Large answers come back losslessly compressed.",
+                "parameters": {"type":"object","properties":{
+                    "query":{"type":"string","description":"the search query"},
+                    "limit":{"type":"integer","description":"max results (default 5, max 20)"}
+                },"required":["query"]}
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "read_page",
+                "description": "Reads a web page as clean text by URL (keyless). Use after web_search to read a promising result, or to read any URL the user mentions.",
+                "parameters": {"type":"object","properties":{
+                    "url":{"type":"string","description":"the page URL (http/https)"}
+                },"required":["url"]}
+            }
+        }),
+    ];
+    if allow_shell {
+        all.push(json!({
+            "type": "function",
+            "function": {
+                "name": "run_command",
+                "description": "Shell command in the workspace root (build/test/lint). Output capped 8000 chars — prefer quiet flags. Verification only; read_file/grep are cheaper. Killed at timeout_ms (default 60000, max 120000).",
+                "parameters": {"type":"object","properties":{
+                    "command":{"type":"string"}
+                },"required":["command"]}
+            }
+        }));
+    }
+    Value::Array(all)
+}
+
+/// Sub-ajan (dispatch_agent) araç seti: yalnız okuma. dispatch_agent burada
+/// YOK — alt-ajan alt-ajan doğuramaz (derinlik kontrolü spec düzeyinde).
+pub fn read_only_specs() -> Value {
+    let names = ["read_file", "grep_search", "find_files", "list_dir", "get_code_body", "repo_map"];
+    let full = specs(false);
+    Value::Array(
+        full.as_array()
+            .unwrap()
+            .iter()
+            .filter(|t| {
+                t["function"]["name"]
+                    .as_str()
+                    .map(|n| names.contains(&n))
+                    .unwrap_or(false)
+            })
+            .cloned()
+            .collect(),
+    )
 }
 
 /// Kök dışına çıkan yolları reddeder; kök altına canonicalize eder.
@@ -345,7 +473,12 @@ fn tool_grep(root: &Path, args: &Value) -> String {
             None => line.to_lowercase().contains(&lower),
         }
     };
-    let mut hits: Vec<String> = Vec::new();
+    // context=N: her hit'in N önce/sonra satırı da gösterilir (0..=3).
+    // Örtüşen pencereler dosya+satır bazında dedupe edilir.
+    let ctx_lines = args["context"].as_u64().unwrap_or(0).min(3) as isize;
+    // (dosya, satır_idx, hit mi) — gösterilecek satırlar.
+    let mut shown: Vec<(String, usize, bool)> = Vec::new();
+    let mut total_hits = 0usize;
     let mut stack = vec![start];
     while let Some(dir) = stack.pop() {
         let rd = match std::fs::read_dir(&dir) {
@@ -353,7 +486,7 @@ fn tool_grep(root: &Path, args: &Value) -> String {
             Err(_) => continue,
         };
         for e in rd.flatten() {
-            if hits.len() >= MAX_GREP_HITS {
+            if total_hits >= MAX_GREP_HITS {
                 break;
             }
             let name = e.file_name().to_string_lossy().to_string();
@@ -369,23 +502,21 @@ fn tool_grep(root: &Path, args: &Value) -> String {
                     continue;
                 }
                 if let Ok(text) = std::fs::read_to_string(&p) {
-                    for (i, line) in text.lines().enumerate() {
+                    let lines: Vec<&str> = text.lines().collect();
+                    let disp = p.strip_prefix(root).unwrap_or(&p).display().to_string();
+                    for (i, line) in lines.iter().enumerate() {
                         if hit_line(line) {
-                            let disp = p.strip_prefix(root).unwrap_or(&p);
-                            // Minified/tek satırlık dosyalar hit'i şişirmesin.
-                            let trimmed = line.trim();
-                            let shown: String =
-                                if trimmed.chars().count() > MAX_GREP_LINE_CHARS {
-                                    let head: String = trimmed
-                                        .chars()
-                                        .take(MAX_GREP_LINE_CHARS)
-                                        .collect();
-                                    format!("{}…", head)
-                                } else {
-                                    trimmed.to_string()
-                                };
-                            hits.push(format!("{}:{}: {}", disp.display(), i + 1, shown));
-                            if hits.len() >= MAX_GREP_HITS {
+                            total_hits += 1;
+                            let from = (i as isize - ctx_lines).max(0) as usize;
+                            let to = ((i as isize + ctx_lines).max(0) as usize)
+                                .min(lines.len().saturating_sub(1));
+                            for j in from..=to {
+                                let is_hit = j == i;
+                                if !shown.iter().any(|(f, n, _)| f == &disp && *n == j) {
+                                    shown.push((disp.clone(), j, is_hit));
+                                }
+                            }
+                            if total_hits >= MAX_GREP_HITS {
                                 break;
                             }
                         }
@@ -394,19 +525,122 @@ fn tool_grep(root: &Path, args: &Value) -> String {
             }
         }
     }
-    if hits.is_empty() {
+    if shown.is_empty() {
         format!("no match: '{}'", query)
     } else {
-        hits.join("\n")
+        shown.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+        let mut out = String::new();
+        let mut last_file = String::new();
+        for (f, n, is_hit) in &shown {
+            if f != &last_file {
+                if !last_file.is_empty() {
+                    out.push_str(NL_R);
+                }
+                out.push_str(&format!("{}:", f));
+                out.push_str(NL_R);
+                last_file = f.clone();
+            }
+            let line_text = file_line_at(root, f, *n);
+            let trimmed = line_text.trim();
+            let shown_txt: String = if trimmed.chars().count() > MAX_GREP_LINE_CHARS {
+                let head: String = trimmed.chars().take(MAX_GREP_LINE_CHARS).collect();
+                format!("{}{}", head, ELLIPSIS)
+            } else {
+                trimmed.to_string()
+            };
+            let mark = if *is_hit { ">" } else { " " };
+            out.push_str(&format!("{} {:>5}| {}", mark, n + 1, shown_txt));
+            out.push_str(NL_R);
+        }
+        out
     }
 }
 
-fn tool_get_code_body(args: &Value, blocks: &[(String, String, String)]) -> String {
-    let wanted = args["name"].as_str().unwrap_or("").to_lowercase();
+/// get_code_body'nin workspace katmani: tanim adini tum desteklenen dillerde
+/// arar, semadan satir araligini bulur ve YALNIZ o tanimin govdesini dondurur
+/// (dosyanin tamami degil - repo_map'in "requestable via get_code_body"
+/// sozunu gercekten tutan yol). `wanted` dosya yoluna benziyorsa dosyanin ilk
+/// sayfasini dondurur.
+fn get_code_body_from_workspace(ctx: &ToolCtx, wanted: &str) -> Option<String> {
+    let root = ctx.root.canonicalize().ok()?;
+    let empty_cache = std::sync::Mutex::new(std::collections::HashMap::new());
+    let cache = ctx
+        .engine
+        .repo_cache
+        .clone()
+        .unwrap_or_else(|| std::sync::Arc::new(empty_cache));
+    let ignore = super::repo::load_ignore(&root);
+    let mut files = Vec::new();
+    super::repo::walk(&root, &root, 0, &cache, &ignore, &mut files);
+
+    // 1) Dosya yolu gibi mi? ("src/util.ts", "app.rs") -> ilk sayfa.
+    let looks_like_path = wanted.contains('/') || wanted.contains('.');
+    if looks_like_path {
+        let wl = wanted.to_lowercase();
+        if let Some(f) = files
+            .iter()
+            .find(|f| f.name.to_lowercase() == wl || f.name.to_lowercase().ends_with(&wl))
+        {
+            let lines: Vec<&str> = f.code.lines().collect();
+            let take = lines.len().min(400);
+            let mut out = lines[..take].join("
+");
+            if take < lines.len() {
+                out.push_str(&format!(
+                    "
+[...file truncated: {} of {} lines — use read_file for the rest]",
+                    take,
+                    lines.len()
+                ));
+            }
+            return Some(out);
+        }
+    }
+
+    // 2) Tanim adi: semada ara, satir araligini kes.
+    fn search_entry(
+        entries: &[crate::engine::schema::SchemaEntry],
+        wl: &str,
+    ) -> Option<(usize, usize)> {
+        for e in entries {
+            if e.name.to_lowercase() == wl {
+                return Some((e.start, e.end));
+            }
+            if let Some(r) = search_entry(&e.children, wl) {
+                return Some(r);
+            }
+        }
+        None
+    }
+    let wl = wanted.to_lowercase();
+    for f in &files {
+        if let Some(schema) = crate::engine::schema::extract_schema_for(&f.name, &f.code) {
+            if let Some((start, end)) = search_entry(&schema.entries, &wl) {
+                let lines: Vec<&str> = f.code.lines().collect();
+                let from = (start - 1).min(lines.len());
+                let to = end.min(lines.len());
+                let mut body = lines[from..to].join("
+");
+                body.insert_str(0, &format!("// {} L{}-L{}
+", f.name, start, end));
+                if body.chars().count() > 12_000 {
+                    let head: String = body.chars().take(12_000).collect();
+                    body = format!("{}
+[...definition truncated]", head);
+                }
+                return Some(body);
+            }
+        }
+    }
+    None
+}
+
+fn tool_get_code_body(args: &Value, ctx: &ToolCtx) -> String {
+    let wanted = args["name"].as_str().unwrap_or("").trim().to_lowercase();
     if wanted.is_empty() {
         return "HATA: name parametresi gerekli.".into();
     }
-    for (id, name, body) in blocks {
+    for (id, name, body) in ctx.code_blocks {
         if name.to_lowercase().contains(&wanted)
             || id.to_lowercase().contains(&wanted)
             || body.contains(&format!("def {}", wanted))
@@ -415,12 +649,16 @@ fn tool_get_code_body(args: &Value, blocks: &[(String, String, String)]) -> Stri
             return body.clone();
         }
     }
+    // Workspace katmani: editor bloklarinda yok -> depoda tanim/yol ara.
+    // (repo_map'in butce disi notlari bu araca isaret eder; soz tutulmali.)
+    if let Some(body) = get_code_body_from_workspace(ctx, &wanted) {
+        return body;
+    }
     format!(
-        "'{}' not found. You can search in files with read_file/grep_search.",
+        "'{}' not found in editor blocks or workspace. Try grep_search to locate it, or read_file with a path.",
         wanted
     )
 }
-
 /// Düzenlenecek dosyanın GÜNCEL gövdesini çözer. Sıra önemli: (1) bu oturumda
 /// bu dosyaya önceki edit_file/write_file kaydı varsa kümülatif gövde, (2)
 /// istekteki code_blocks (editörün kaydedilmemiş durumunu korur), (3) disk.
@@ -446,6 +684,32 @@ fn resolve_edit_base(ctx: &ToolCtx, rel: &str) -> Option<String> {
     Some(String::from_utf8_lossy(&bytes).to_string())
 }
 
+/// Değişiklik satırlarını kabaca işaretler (+/-): modelin öz-denetimi için.
+/// Tam diff motoru değil — eski/yeni gövdede değişen ilk/son satır aralığını
+/// kesit olarak verir, ilk değişiklikle sınırlıdır.
+fn mini_diff(old: &str, new: &str) -> String {
+    let old_lines: Vec<&str> = old.lines().collect();
+    let new_lines: Vec<&str> = new.lines().collect();
+    let mut first = 0usize;
+    while first < old_lines.len() && first < new_lines.len() && old_lines[first] == new_lines[first] {
+        first += 1;
+    }
+    let mut old_last = old_lines.len();
+    let mut new_last = new_lines.len();
+    while old_last > first && new_last > first && old_lines[old_last - 1] == new_lines[new_last - 1] {
+        old_last -= 1;
+        new_last -= 1;
+    }
+    let mut out = String::new();
+    for l in &old_lines[first..old_last] {
+        out.push_str(&format!("-{}\n", l));
+    }
+    for l in &new_lines[first..new_last] {
+        out.push_str(&format!("+{}\n", l));
+    }
+    out
+}
+
 fn tool_edit_file(_root: &Path, args: &Value, ctx: &ToolCtx) -> String {
     let rel = args["path"].as_str().unwrap_or("").trim_start_matches("./");
     let search = args["search"].as_str().unwrap_or("");
@@ -462,14 +726,15 @@ fn tool_edit_file(_root: &Path, args: &Value, ctx: &ToolCtx) -> String {
     match edits::apply_search_replace(&body, search, replace) {
         Ok(new_body) => {
             let lines = new_body.lines().count();
+            let diff = mini_diff(&body, &new_body);
             ctx.edits.borrow_mut().push(RecordedEdit {
                 file: rel.to_string(),
                 new_body,
                 message: "applied via edit_file tool".into(),
             });
             format!(
-                "applied to '{}' (file is now {} lines). The edit is recorded and will be applied after the run.",
-                rel, lines
+                "applied to '{}' (file is now {} lines). The edit is recorded and will be applied after the run.\n{}",
+                rel, lines, diff
             )
         }
         Err(e) => format!(
@@ -588,16 +853,202 @@ fn tool_find_files(root: &Path, args: &Value) -> String {
     }
 }
 
+/// Kabuk komutu yürütür (izin moduna bağlı). cwd workspace kökü; çıktı
+/// sınırı uygulanır. Windows'ta cmd, diğerlerinde sh.
+/// Süre sınırıyla komut yürütür (std-only): bekleyici iş parçacığı çocuğu
+/// Mutex'ten hemen alıp `wait_with_output` ile bekler; ana akış kanaldan
+/// `recv_timeout` ile sonucu alır, zaman aşımında çocuğu öldürür. Bekleyici
+/// kilit TUTMAZ (take edip bırakır) — öldürme deadlock yaratmaz.
+fn output_with_timeout(
+    mut cmd: std::process::Command,
+    timeout: std::time::Duration,
+) -> Result<std::process::Output, String> {
+    use std::sync::{Arc, Mutex};
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+    cmd.stdin(std::process::Stdio::null());
+    let child = cmd.spawn().map_err(|e| e.to_string())?;
+    let shared = Arc::new(Mutex::new(Some(child)));
+    let (tx, rx) = std::sync::mpsc::channel();
+    let waiter = {
+        let shared = Arc::clone(&shared);
+        std::thread::spawn(move || {
+            let taken = shared.lock().unwrap_or_else(|e| e.into_inner()).take();
+            let res = match taken {
+                Some(c) => c.wait_with_output().map_err(|e| e.to_string()),
+                // Ana akış çoktan öldürdü.
+                None => Err("killed by timeout".into()),
+            };
+            let _ = tx.send(res);
+        })
+    };
+    match rx.recv_timeout(timeout) {
+        Ok(res) => {
+            let _ = waiter.join();
+            res
+        }
+        Err(_) => {
+            // Zaman aşımı: çocuğu öldür. join EDİLMEZ — Windows'ta cmd'nin
+            // yetim torunları stdout borusunu tutabilir; bekleyici iş
+            // parçacığı boru kapanınca kendi kendine biter, araç ANINDA döner.
+            if let Some(mut c) = shared.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                let _ = c.kill();
+            }
+            drop(waiter);
+            Err(format!(
+                "command timed out after {}ms and was killed — use a faster command or a smaller scope",
+                timeout.as_millis()
+            ))
+        }
+    }
+}
+
+fn tool_run_command(ctx: &ToolCtx, args: &Value) -> String {
+    if !ctx.allow_shell {
+        return "run_command is disabled in this permission mode (read-only/ask). Ask the user to switch to auto/autonomous mode.".into();
+    }
+    let command = args["command"].as_str().unwrap_or("").trim();
+    if command.is_empty() {
+        return "HATA: command gerekli".into();
+    }
+    let timeout_ms = args["timeout_ms"]
+        .as_u64()
+        .unwrap_or(60_000)
+        .clamp(1_000, 120_000);
+    let (prog, flag) = if cfg!(windows) {
+        ("cmd", "/C")
+    } else {
+        ("sh", "-c")
+    };
+    let root = match ctx.root.canonicalize() {
+        Ok(r) => r,
+        Err(e) => return format!("could not resolve workspace root: {}", e),
+    };
+    let mut cmd = std::process::Command::new(prog);
+    cmd.arg(flag).arg(command).current_dir(&root);
+    let out = output_with_timeout(cmd, std::time::Duration::from_millis(timeout_ms));
+    match out {
+        Ok(o) => {
+            let mut text = String::new();
+            if !o.stdout.is_empty() {
+                text.push_str(&String::from_utf8_lossy(&o.stdout));
+            }
+            if !o.stderr.is_empty() {
+                if !text.is_empty() {
+                    text.push_str("\n--- stderr ---\n");
+                }
+                text.push_str(&String::from_utf8_lossy(&o.stderr));
+            }
+            text.push_str(&format!("\n[exit code: {}]", o.status.code().unwrap_or(-1)));
+            if text.chars().count() > 8_000 {
+                let head: String = text.chars().take(8_000).collect();
+                format!("{}\n…[output truncated]", head)
+            } else {
+                text
+            }
+        }
+        Err(e) => format!("could not run command: {}", e),
+    }
+}
+
+/// repo_map araci: workspace'i tarar (mtime cache'li, ignore listeli) ve
+/// onem-sirali, token-butceli schema haritasi dondurur. Ajanin depoyu tek
+/// bakista gormesinin UCUZ yolu - dosya dosya read_file yerine bunu istesin.
+fn tool_repo_map(ctx: &ToolCtx, args: &Value) -> String {
+    let Some(bpe) = ctx.engine.bpe.clone() else {
+        return "repo_map is unavailable in this context (no tokenizer).".into();
+    };
+    let budget = args["budget"]
+        .as_u64()
+        .unwrap_or(800)
+        .clamp(100, 4_000) as usize;
+    let focus = args["focus"].as_str().map(str::to_string);
+    let root = match ctx.root.canonicalize() {
+        Ok(r) => r,
+        Err(e) => return format!("could not resolve workspace root: {}", e),
+    };
+    let empty_cache = std::sync::Mutex::new(std::collections::HashMap::new());
+    let cache = ctx
+        .engine
+        .repo_cache
+        .clone()
+        .unwrap_or_else(|| std::sync::Arc::new(empty_cache));
+    let ignore = super::repo::load_ignore(&root);
+    let mut files = Vec::new();
+    super::repo::walk(&root, &root, 0, &cache, &ignore, &mut files);
+    if files.is_empty() {
+        return "workspace has no mappable source files".into();
+    }
+    let result = crate::engine::repo_map::build_repo_map(&files, &bpe, budget, focus.as_deref());
+    format!(
+        "{}
+[repo map: {}/{} files, ~{} tokens of {} budget]",
+        result.map, result.included, result.total, result.tokens, budget
+    )
+}
+
+/// todo_write: tüm listeyi değiştirir (ZCode TodoWrite ekolü). Yanıtta kısa
+/// özet döner; tam liste run sonunda frontend'e gider.
+fn tool_todo_write(ctx: &ToolCtx, args: &Value) -> String {
+    let Some(list) = args["todos"].as_array() else {
+        return "HATA: todos dizisi gerekli".into();
+    };
+    let mut parsed: Vec<(String, String)> = Vec::new();
+    for t in list {
+        let content = t["content"].as_str().unwrap_or("").trim().to_string();
+        if content.is_empty() {
+            continue;
+        }
+        let status = match t["status"].as_str().unwrap_or("") {
+            "in_progress" => "in_progress".to_string(),
+            "done" => "done".to_string(),
+            _ => "pending".to_string(),
+        };
+        parsed.push((content, status));
+    }
+    if parsed.is_empty() {
+        return "HATA: todos boş olamaz".into();
+    }
+    let done = parsed.iter().filter(|(_, s)| s == "done").count();
+    let summary = parsed
+        .iter()
+        .map(|(c, s)| {
+            let mark = match s.as_str() {
+                "done" => "[x]",
+                "in_progress" => "[>]",
+                _ => "[ ]",
+            };
+            format!("{} {}", mark, c)
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let total = parsed.len();
+    *ctx.todos.borrow_mut() = parsed;
+    format!("todos updated ({}/{} done):\n{}", done, total, summary)
+}
+
 /// Araç çağrısını yürütür; sonucu modele metin olarak döndürür.
 pub fn execute(name: &str, args: &Value, ctx: &ToolCtx) -> String {
+    // Sub-ajan sözleşmesi: spec'te olmasalar bile değiştiren çağrılar reddi.
+    if ctx.read_only && matches!(name, "edit_file" | "write_file" | "run_command") {
+        return format!(
+            "{} is not allowed for subagents (read-only investigation).",
+            name
+        );
+    }
     match name {
-        "get_code_body" => tool_get_code_body(args, ctx.code_blocks),
+        "get_code_body" => tool_get_code_body(args, ctx),
         "read_file" => tool_read_file(ctx.root, args),
         "list_dir" => tool_list_dir(ctx.root, args),
         "grep_search" => tool_grep(ctx.root, args),
+        "web_search" => crate::backend::arastir::web_search(args),
+        "read_page" => crate::backend::arastir::read_page(args),
         "find_files" => tool_find_files(ctx.root, args),
         "edit_file" => tool_edit_file(ctx.root, args, ctx),
         "write_file" => tool_write_file(ctx.root, args, ctx),
+        "todo_write" => tool_todo_write(ctx, args),
+        "run_command" => tool_run_command(ctx, args),
+        "repo_map" => tool_repo_map(ctx, args),
         other => format!("unknown tool: {}", other),
     }
 }
@@ -832,6 +1283,178 @@ mod tests {
     }
 
     #[test]
+    fn todo_write_replaces_full_list() {
+        let tmp = std::env::temp_dir();
+        let blocks: Vec<(String, String, String)> = vec![];
+        let c = ctx(&tmp, &blocks);
+        let out = execute(
+            "todo_write",
+            &json!({"todos":[
+                {"content":"adım 1","status":"done"},
+                {"content":"adım 2","status":"in_progress"},
+                {"content":"adım 3","status":"pending"}
+            ]}),
+            &c,
+        );
+        assert!(out.contains("1/3 done"), "{}", out);
+        assert!(out.contains("[x] adım 1"));
+        assert!(out.contains("[>] adım 2"));
+        // İkinci çağrı listeyi DEĞİŞTİRİR, eklemez.
+        let _ = execute(
+            "todo_write",
+            &json!({"todos":[{"content":"tek adım","status":"pending"}]}),
+            &c,
+        );
+        assert_eq!(c.todos.borrow().len(), 1);
+    }
+
+    #[test]
+    fn run_command_respects_permission_gate() {
+        let tmp = std::env::temp_dir().join(format!("thx_{}n", std::process::id()));
+        let _ = std::fs::create_dir_all(&tmp);
+        let blocks: Vec<(String, String, String)> = vec![];
+        let mut c = ctx(&tmp, &blocks);
+        let denied = execute("run_command", &json!({"command":"echo hi"}), &c);
+        assert!(denied.contains("disabled"), "kapalıyken reddedilmeli: {}", denied);
+        c.allow_shell = true;
+        let allowed = execute("run_command", &json!({"command":"echo merhaba"}), &c);
+        assert!(allowed.contains("merhaba"), "açıkken çalışmalı: {}", allowed);
+        assert!(allowed.contains("exit code: 0"));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn repo_map_tool_builds_budgeted_map() {
+        let tmp = std::env::temp_dir().join(format!("thx_rm_{}", std::process::id()));
+        let src = tmp.join("src");
+        let _ = std::fs::create_dir_all(&src);
+        std::fs::write(src.join("util.ts"), "export function helperOne() { return 1; }
+").unwrap();
+        std::fs::write(
+            src.join("app.ts"),
+            "import { helperOne } from './util';
+export function main() { return helperOne(); }
+",
+        )
+        .unwrap();
+        let blocks: Vec<(String, String, String)> = vec![];
+        let mut c = ctx(&tmp, &blocks);
+        c.engine.bpe = Some(std::sync::Arc::new(tiktoken_rs::cl100k_base().unwrap()));
+        let out = execute("repo_map", &json!({}), &c);
+        assert!(out.contains("helperOne"), "sema gormeli: {}", out);
+        assert!(out.contains("app.ts"), "dosya gormeli: {}", out);
+        assert!(out.contains("repo map:"), "bilanço notu: {}", out);
+        // Engine yoksa (test baglami) nazik hata.
+        let c2 = ctx(&tmp, &blocks);
+        let deny = execute("repo_map", &json!({}), &c2);
+        assert!(deny.contains("unavailable"), "{}", deny);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn specs_stay_under_token_budget() {
+        // Araç şemaları her istekte (ve tool-loop'un her turunda) gider:
+        // ~4 bayt/token — büyüme bilinçli karar olsun. Kabuk açıkken
+        // run_command (+1 araç) için +500 bayt payı vardır.
+        for (allow, budget) in [(false, 3_700usize), (true, 4_150)] {
+            let bytes = serde_json::to_string(&specs(allow)).unwrap().len();
+            assert!(
+                bytes < budget,
+                "specs({}) {} bayt — bütçe aşıldı, açıklamaları kıs",
+                allow,
+                bytes
+            );
+        }
+    }
+
+    #[test]
+    fn specs_hide_shell_unless_allowed() {
+        let off = specs(false);
+        let names: Vec<&str> = off
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|t| t["function"]["name"].as_str())
+            .collect();
+        assert!(!names.contains(&"run_command"));
+        assert!(names.contains(&"edit_file"));
+        assert!(names.contains(&"todo_write"));
+        let on = specs(true);
+        let names_on: Vec<&str> = on
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|t| t["function"]["name"].as_str())
+            .collect();
+        assert!(names_on.contains(&"run_command"));
+    }
+
+    #[test]
+    fn mini_diff_marks_changed_lines() {
+        let d = mini_diff("a\nb\nc\n", "a\nX\nc\n");
+        assert!(d.contains("-b"), "{}", d);
+        assert!(d.contains("+X"), "{}", d);
+        assert!(!d.contains("-a"));
+        // Tamamen aynıysa boş diff.
+        assert_eq!(mini_diff("x\n", "x\n"), "");
+    }
+
+    #[test]
+    fn grep_context_includes_surrounding_lines() {
+        let tmp = std::env::temp_dir().join(format!("thx_{}ctx", std::process::id()));
+        let _ = std::fs::create_dir_all(&tmp);
+        std::fs::write(
+            tmp.join("c.rs"),
+            "fn a() {}
+fn b() {}
+fn hedef() {}
+fn d() {}
+fn e() {}
+",
+        )
+        .unwrap();
+        let blocks: Vec<(String, String, String)> = vec![];
+        let c = ctx(&tmp, &blocks);
+        let out = execute(
+            "grep_search",
+            &json!({"query":"hedef","context":1}),
+            &c,
+        );
+        assert!(out.contains("> "), "hit işaretli: {}", out);
+        assert!(out.contains("     2| fn b()"), "öncesi: {}", out);
+        assert!(out.contains("     4| fn d()"), "sonrası: {}", out);
+        assert!(!out.contains("fn a()"), "pencere dışı: {}", out);
+        // context yoksa eski tek satır davranışı (işaretsiz pencere yok).
+        let plain = execute("grep_search", &json!({"query":"hedef"}), &c);
+        assert!(plain.contains("hedef"));
+        assert!(!plain.contains("fn b()"));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn run_command_times_out_and_kills() {
+        let tmp = std::env::temp_dir().join(format!("thx_{}t", std::process::id()));
+        let _ = std::fs::create_dir_all(&tmp);
+        let blocks: Vec<(String, String, String)> = vec![];
+        let mut c = ctx(&tmp, &blocks);
+        c.allow_shell = true;
+        let ping = if cfg!(windows) {
+            "ping -n 30 127.0.0.1"
+        } else {
+            "sleep 30"
+        };
+        let start = std::time::Instant::now();
+        let out = execute(
+            "run_command",
+            &json!({"command": ping, "timeout_ms": 2000}),
+            &c,
+        );
+        assert!(out.contains("timed out"), "zaman aşımı: {}", out);
+        assert!(start.elapsed().as_secs() < 20, "gerçekten öldürülmeli");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
     fn grep_finds_line() {
         let tmp = std::env::temp_dir().join(format!("thx_{}c", std::process::id()));
         let _ = std::fs::create_dir_all(&tmp);
@@ -839,6 +1462,41 @@ mod tests {
         let blocks: Vec<(String, String, String)> = vec![];
         let c = ctx(&tmp, &blocks);
         assert!(execute("grep_search", &json!({"query":"hedef"}), &c).contains("hedef"));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn code_body_falls_back_to_workspace_definitions() {
+        let tmp = std::env::temp_dir().join(format!("thx_gcb_{}", std::process::id()));
+        let src = tmp.join("src");
+        let _ = std::fs::create_dir_all(&src);
+        std::fs::write(
+            src.join("svc.ts"),
+            "export function alpha() {
+  return 1;
+}
+
+export function bigOne() {
+  const pad = 1;
+  return alpha();
+}
+
+export function omega() {
+  return 3;
+}
+",
+        )
+        .unwrap();
+        // Editor bloklari BOS: tanim depodan bulunmali.
+        let blocks: Vec<(String, String, String)> = vec![];
+        let c = ctx(&tmp, &blocks);
+        let out = execute("get_code_body", &json!({"name":"bigOne"}), &c);
+        assert!(out.contains("L5-"), "tanim satir notu: {}", out);
+        assert!(out.contains("return alpha();"), "tanim govdesi: {}", out);
+        assert!(!out.contains("export function omega"), "diger tanimlar sirismamali");
+        // Dosya yolu gibi sorgu -> ilk sayfa.
+        let page = execute("get_code_body", &json!({"name":"src/svc.ts"}), &c);
+        assert!(page.contains("export function alpha"), "dosya sayfasi: {}", page);
         let _ = std::fs::remove_dir_all(&tmp);
     }
 

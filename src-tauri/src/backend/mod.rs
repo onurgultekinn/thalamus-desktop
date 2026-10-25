@@ -24,6 +24,7 @@ use tiktoken_rs::CoreBPE;
 use tower_http::cors::{AllowHeaders, AllowOrigin, CorsLayer};
 
 pub mod agent;
+pub mod arastir;
 pub mod ai;
 pub mod engines;
 pub mod local_models;
