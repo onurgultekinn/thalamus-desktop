@@ -1,0 +1,37 @@
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /src-tauri
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      cargo-minor:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      # Pulled in transitively through Tauri's Linux (GTK) stack. The advisory
+      # has no patched release, so every security-update attempt fails on the
+      # Linux-only path and does not affect the Windows build.
+      - dependency-name: glib
+      - dependency-name: gtk
+      - dependency-name: gdk
+      - dependency-name: atk
+      - dependency-name: soup3
+      - dependency-name: javascriptcore-rs
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      npm-minor:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
