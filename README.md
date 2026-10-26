@@ -164,7 +164,9 @@ credentials, request construction, and compression.
   config files or logs.
 - Agent file tools cannot leave the workspace root. The only network-capable
   tools are `web_search` and `read_page`; they receive the model's query or URL
-  and nothing else from your machine.
+  and nothing else from your machine. `read_page` URLs are screened before
+  fetch: only public http/https hosts are allowed — loopback, private, and
+  link-local addresses are rejected (SSRF guard, DNS-rebinding safe).
 - Provider requests leave only after local compression, and only to the endpoint
   you configured.
 - No telemetry, no analytics, no crash reporting. Logs stay on disk; nothing is

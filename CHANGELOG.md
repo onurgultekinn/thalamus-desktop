@@ -32,7 +32,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Local backend bound to `127.0.0.1` with session token, CORS allowlist, and
   DNS-rebinding guard.
-- Agent tools cannot escape the workspace root and have no network access.
+- Agent file tools cannot escape the workspace root; file edits are reviewable
+  diffs.
+- The agent's only network-capable tools are `web_search` and `read_page`;
+  `read_page` URLs are screened before fetch (SSRF guard).
 - No telemetry of any kind.
 
 <!--
