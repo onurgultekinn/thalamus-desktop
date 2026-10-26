@@ -186,9 +186,10 @@ production tree.
 
 ## Application code
 
-The Thalamus Desktop application source is © its authors and distributed under
-the license declared in \`package.json\` (currently \`UNLICENSED\`, i.e.
-proprietary/all rights reserved). Add the final license here once chosen.
+Copyright 2026 Onur Gültekin. The Thalamus Desktop application source is
+licensed under the Apache License, Version 2.0 (see \`LICENSE\`). The Thalamus
+name, logo and visual identity are not covered by that license (see
+\`TRADEMARK.md\`).
 `;
 
 writeFileSync(outFile, md, 'utf8');

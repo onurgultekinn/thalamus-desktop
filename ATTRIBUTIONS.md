@@ -95,14 +95,14 @@ patterns were used.
 | `@napi-rs/canvas` | 1.0.11 | MIT | https://github.com/Brooooooklyn/canvas |
 | `@napi-rs/canvas-win32-x64-msvc` | 1.0.11 | MIT | https://github.com/Brooooooklyn/canvas |
 | `@nodable/entities` | 3.1.0 | MIT | https://github.com/nodable/val-parsers |
-| `@oxc-project/types` | 0.139.0 | MIT | https://github.com/oxc-project/oxc |
+| `@oxc-project/types` | 0.155.0 | MIT | https://github.com/oxc-project/oxc |
 | `@panzoom/panzoom` | 4.6.2 | MIT | https://github.com/timmywil/panzoom |
 | `@pdf-lib/standard-fonts` | 1.0.0 | MIT | https://github.com/Hopding/standard-fonts |
 | `@pdf-lib/upng` | 1.0.1 | MIT | https://github.com/Hopding/upng |
 | `@prettier/plugin-xml` | 3.4.2 | MIT | https://github.com/prettier/plugin-xml |
 | `@profoundlogic/hogan` | 3.0.4 | Apache-2.0 | https://github.com/ProfoundLogic/hogan.js-ProfoundLogic |
 | `@protobuf-ts/runtime` | 2.11.1 | (Apache-2.0 AND BSD-3-Clause) | https://github.com/timostamm/protobuf-ts |
-| `@rolldown/binding-win32-x64-msvc` | 1.1.5 | MIT | https://github.com/rolldown/rolldown |
+| `@rolldown/binding-win32-x64-msvc` | 1.2.15 | MIT | https://github.com/rolldown/rolldown |
 | `@rolldown/pluginutils` | 1.0.1 | MIT | https://github.com/rolldown/plugins |
 | `@ssabrojs/hwpxjs` | 0.4.0 | MIT | https://github.com/ssabro/hwpxjs |
 | `@tauri-apps/api` | 2.11.1 | Apache-2.0 OR MIT | https://github.com/tauri-apps/tauri |
@@ -191,6 +191,7 @@ patterns were used.
 | `e-virt-table` | 1.4.16 | MIT | git@github.com:laichuangwen/e-virt-table |
 | `earcut` | 3.2.4 | ISC | https://github.com/mapbox/earcut |
 | `entities` | 8.1.0 | BSD-2-Clause | https://github.com/fb55/entities |
+| `escape-string-regexp` | 5.0.0 | MIT | sindresorhus/escape-string-regexp |
 | `estree-util-is-identifier-name` | 3.0.0 | MIT | syntax-tree/estree-util-is-identifier-name |
 | `extend` | 3.0.2 | MIT | https://github.com/justmoon/node-extend |
 | `fast-xml-builder` | 1.3.1 | MIT | https://github.com/NaturalIntelligence/fast-xml-builder |
@@ -240,8 +241,16 @@ patterns were used.
 | `lowlight` | 1.20.0 | MIT | wooorm/lowlight |
 | `lucide-react` | 1.28.0 | ISC | https://github.com/lucide-icons/lucide |
 | `maplibre-gl` | 6.13.0 | BSD-3-Clause | https://github.com/maplibre/maplibre-gl-js |
+| `markdown-table` | 3.0.4 | MIT | wooorm/markdown-table |
 | `marked` | 18.1.1 | MIT | https://github.com/markedjs/marked |
+| `mdast-util-find-and-replace` | 3.0.3 | MIT | syntax-tree/mdast-util-find-and-replace |
 | `mdast-util-from-markdown` | 2.0.3 | MIT | syntax-tree/mdast-util-from-markdown |
+| `mdast-util-gfm` | 3.1.0 | MIT | syntax-tree/mdast-util-gfm |
+| `mdast-util-gfm-autolink-literal` | 2.0.1 | MIT | syntax-tree/mdast-util-gfm-autolink-literal |
+| `mdast-util-gfm-footnote` | 2.1.0 | MIT | syntax-tree/mdast-util-gfm-footnote |
+| `mdast-util-gfm-strikethrough` | 2.0.1 | MIT | syntax-tree/mdast-util-gfm-strikethrough |
+| `mdast-util-gfm-table` | 2.0.0 | MIT | syntax-tree/mdast-util-gfm-table |
+| `mdast-util-gfm-task-list-item` | 2.0.0 | MIT | syntax-tree/mdast-util-gfm-task-list-item |
 | `mdast-util-mdx-expression` | 2.0.1 | MIT | syntax-tree/mdast-util-mdx-expression |
 | `mdast-util-mdx-jsx` | 3.2.0 | MIT | syntax-tree/mdast-util-mdx-jsx |
 | `mdast-util-mdxjs-esm` | 2.0.1 | MIT | syntax-tree/mdast-util-mdxjs-esm |
@@ -252,6 +261,13 @@ patterns were used.
 | `mgrs` | 1.0.0 | MIT | https://github.com/proj4js/mgrs |
 | `micromark` | 4.0.2 | MIT | https://github.com/micromark/micromark/tree/main/packages/micromark |
 | `micromark-core-commonmark` | 2.0.3 | MIT | https://github.com/micromark/micromark/tree/main/packages/micromark-core-commonmark |
+| `micromark-extension-gfm` | 3.0.0 | MIT | micromark/micromark-extension-gfm |
+| `micromark-extension-gfm-autolink-literal` | 2.1.0 | MIT | micromark/micromark-extension-gfm-autolink-literal |
+| `micromark-extension-gfm-footnote` | 2.1.0 | MIT | micromark/micromark-extension-gfm-footnote |
+| `micromark-extension-gfm-strikethrough` | 2.1.0 | MIT | micromark/micromark-extension-gfm-strikethrough |
+| `micromark-extension-gfm-table` | 2.1.2 | MIT | micromark/micromark-extension-gfm-table |
+| `micromark-extension-gfm-tagfilter` | 2.0.0 | MIT | micromark/micromark-extension-gfm-tagfilter |
+| `micromark-extension-gfm-task-list-item` | 2.1.0 | MIT | micromark/micromark-extension-gfm-task-list-item |
 | `micromark-factory-destination` | 2.0.1 | MIT | https://github.com/micromark/micromark/tree/main/packages/micromark-factory-destination |
 | `micromark-factory-label` | 2.0.1 | MIT | https://github.com/micromark/micromark/tree/main/packages/micromark-factory-label |
 | `micromark-factory-space` | 2.0.1 | MIT | https://github.com/micromark/micromark/tree/main/packages/micromark-factory-space |
@@ -276,7 +292,7 @@ patterns were used.
 | `mousetrap` | 1.6.5 | Apache-2.0 WITH LLVM-exception | https://github.com/ccampbell/mousetrap |
 | `ms` | 2.1.3 | MIT | vercel/ms |
 | `murmurhash-js` | 1.0.0 | MIT | https://github.com/mikolalysenko/murmurhash-js |
-| `nanoid` | 3.3.16 | MIT | ai/nanoid |
+| `nanoid` | 3.3.20 | MIT | ai/nanoid |
 | `nopt` | 1.0.10 | MIT | http://github.com/isaacs/nopt |
 | `pako` | 2.2.0 | (MIT AND Zlib) | nodeca/pako |
 | `pako` | 1.0.11 | (MIT AND Zlib) | nodeca/pako |
@@ -289,12 +305,12 @@ patterns were used.
 | `pdf-lib` | 1.17.1 | MIT | https://github.com/Hopding/pdf-lib |
 | `pdfjs-dist` | 6.4.299 | Apache-2.0 | https://github.com/mozilla/pdf.js |
 | `picocolors` | 1.1.1 | ISC | alexeyraspopov/picocolors |
-| `picomatch` | 4.0.5 | MIT | micromatch/picomatch |
+| `picomatch` | 4.0.7 | MIT | micromatch/picomatch |
 | `plantuml-encoder` | 1.4.0 | MIT | https://github.com/markushedvall/plantuml-encoder |
 | `points-on-curve` | 0.2.0 | MIT | https://github.com/pshihn/bezier-points |
 | `points-on-path` | 0.2.1 | MIT | https://github.com/pshihn/points-on-path |
-| `postal-mime` | 4.0.7 | MIT-0 | https://github.com/postalsys/postal-mime |
-| `postcss` | 8.5.25 | MIT | postcss/postcss |
+| `postal-mime` | 4.1.4 | MIT-0 | https://github.com/postalsys/postal-mime |
+| `postcss` | 8.5.31 | MIT | postcss/postcss |
 | `potpack` | 2.1.0 | ISC | https://github.com/mapbox/potpack |
 | `prettier` | 3.9.9 | MIT | prettier/prettier |
 | `prismjs` | 1.30.0 | MIT | https://github.com/PrismJS/prism |
@@ -310,11 +326,13 @@ patterns were used.
 | `readable-stream` | 2.3.8 | MIT | https://github.com/nodejs/readable-stream |
 | `refractor` | 5.0.0 | MIT | wooorm/refractor |
 | `regexp-to-ast` | 0.5.0 | MIT | https://github.com/bd82/regexp-to-ast |
+| `remark-gfm` | 4.0.1 | MIT | remarkjs/remark-gfm |
 | `remark-parse` | 11.0.0 | MIT | https://github.com/remarkjs/remark/tree/main/packages/remark-parse |
 | `remark-rehype` | 11.1.2 | MIT | remarkjs/remark-rehype |
+| `remark-stringify` | 11.0.0 | MIT | https://github.com/remarkjs/remark/tree/main/packages/remark-stringify |
 | `require-from-string` | 2.0.2 | MIT | floatdrop/require-from-string |
 | `resolve-protobuf-schema` | 2.1.0 | MIT | https://github.com/mafintosh/resolve-protobuf-schema |
-| `rolldown` | 1.1.5 | MIT | https://github.com/rolldown/rolldown |
+| `rolldown` | 1.2.15 | MIT | https://github.com/rolldown/rolldown |
 | `roughjs` | 4.6.6 | MIT | https://github.com/pshihn/rough |
 | `rtf.js` | 3.0.9 | MIT | https://github.com/tbluemel/rtf.js |
 | `safe-buffer` | 5.1.2 | MIT | https://github.com/feross/safe-buffer |
@@ -323,7 +341,7 @@ patterns were used.
 | `setimmediate` | 1.0.5 | MIT | YuzuJS/setImmediate |
 | `shpjs` | 6.2.0 | MIT | https://github.com/calvinmetcalf/shapefile-js |
 | `snappyjs` | 0.7.0 | MIT | zhipeng-jia/snappyjs |
-| `source-map-js` | 1.2.1 | BSD-3-Clause | 7rulnik/source-map-js |
+| `source-map-js` | 1.2.2 | BSD-3-Clause | 7rulnik/source-map-js |
 | `space-separated-tokens` | 2.0.2 | MIT | wooorm/space-separated-tokens |
 | `sql.js` | 1.14.1 | MIT | http://github.com/sql-js/sql.js |
 | `string_decoder` | 1.1.1 | MIT | https://github.com/nodejs/string_decoder |
@@ -351,9 +369,8 @@ patterns were used.
 | `utility-types` | 3.11.0 | MIT | https://github.com/piotrwitek/utility-types |
 | `vfile` | 6.0.3 | MIT | vfile/vfile |
 | `vfile-message` | 4.0.3 | MIT | vfile/vfile-message |
-| `vite` | 8.1.5 | MIT | https://github.com/vitejs/vite |
+| `vite` | 8.3.5 | MIT | https://github.com/vitejs/vite |
 | `wkt-parser` | 1.6.0 | MIT | https://github.com/proj4js/wkt-parser |
-| `ws` | 8.22.0 | MIT | https://github.com/websockets/ws |
 | `xml-naming` | 0.3.0 | MIT | https://github.com/NaturalIntelligence/xml-naming |
 | `zwitch` | 2.0.4 | MIT | wooorm/zwitch |
 
@@ -901,6 +918,7 @@ production tree.
 
 ## Application code
 
-The Thalamus Desktop application source is © its authors and distributed under
-the license declared in `package.json` (currently `UNLICENSED`, i.e.
-proprietary/all rights reserved). Add the final license here once chosen.
+Copyright 2026 Onur Gültekin. The Thalamus Desktop application source is
+licensed under the Apache License, Version 2.0 (see `LICENSE`). The Thalamus
+name, logo and visual identity are not covered by that license (see
+`TRADEMARK.md`).

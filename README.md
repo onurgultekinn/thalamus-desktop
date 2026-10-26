@@ -76,17 +76,19 @@ structure losslessly before the request leaves your machine:
   context.
 
 **Agent tools**
-- Copilot agent mode with workspace-scoped tools: `read_file`, `write_file`,
-  `edit_file`, `list_dir`, `find_files`, `grep_search`, `get_code_body`,
-  `todo_write`, `dispatch_agent`, and `run_command`.
-- Permission modes: read-only, plan, safe, auto, autonomous. `run_command` is
-  exposed only in `auto` and `autonomous`.
+- Copilot agent mode with thirteen tools: `read_file`, `write_file`, `edit_file`,
+  `list_dir`, `find_files`, `grep_search`, `get_code_body`, `repo_map`,
+  `todo_write`, `dispatch_agent`, `web_search`, `read_page`, and `run_command`.
+- Permission modes: read-only, plan, ask, safe, auto, autonomous. `run_command`
+  is exposed only in `auto` and `autonomous`.
 - File edits are recorded during a run and applied through a reviewable diff, so
   the editor state and undo history stay intact.
 - Sub-agents via `dispatch_agent`; their token usage is rolled into the parent
-  run.
-- Every tool path is resolved inside the workspace root, tool output is size
-  capped, and no tool has network access.
+  run. Sub-agents are read-only and cannot spawn further sub-agents.
+- **Network access is limited to two tools**: `web_search` (keyless search) and
+  `read_page` (fetch a page as text). Every other tool is filesystem-only. File
+  tool paths are resolved inside the workspace root, and tool output is size
+  capped.
 
 **Multi-agent runs**
 - Agent Mesh: agents exchange typed JSON envelopes, and those envelopes pass
@@ -100,13 +102,23 @@ structure losslessly before the request leaves your machine:
 - Any OpenAI-compatible endpoint. Presets: OpenAI, DeepSeek, Google Gemini,
   xAI Grok, Mistral, Groq, OpenRouter, Together AI, Fireworks, Perplexity,
   Zhipu GLM, Moonshot Kimi, Qwen (DashScope), SiliconFlow, DeepBricks, EVREN,
-  Ollama, LM Studio, plus a custom base URL.
+  Ollama, LM Studio, a custom base URL, and a managed local server mode.
 - API keys are stored in the OS credential vault, not in plain files.
 - Local model discovery: running OpenAI-compatible servers (Ollama, LM Studio,
   llama.cpp, vLLM and others), installed inference engines, and model files on
   disk.
 - Local models can be started and stopped from Settings, with automatic idle
   shutdown.
+
+**Web tools (optional external dependency)**
+- `web_search` and `read_page` do not talk to the internet directly. They call a
+  local helper binary, [`arastir`](https://github.com/onurgultekinn/arastir),
+  over `127.0.0.1:19900`; Thalamus starts it detached on first use.
+- The helper is a separate install. If it is missing, both tools return an
+  explicit error ("Arastir API'ye ulaşılamadı…") and the rest of the agent
+  keeps working. Nothing else in the app needs it.
+- When the helper is present, search and page text that exceed the compression
+  threshold are passed through the same lossless encoder and arrive compressed.
 
 **Interface**
 - English and Turkish UI, switchable at runtime.
@@ -150,7 +162,11 @@ credentials, request construction, and compression.
   allowlist, and a DNS-rebinding guard.
 - Provider keys are read from the OS credential vault. They are never written to
   config files or logs.
-- Agent tools cannot leave the workspace root and have no network access.
+- Agent file tools cannot leave the workspace root. The only network-capable
+  tools are `web_search` and `read_page`; they receive the model's query or URL
+  and nothing else from your machine.
+- Provider requests leave only after local compression, and only to the endpoint
+  you configured.
 - No telemetry, no analytics, no crash reporting. Logs stay on disk; nothing is
   sent unless you copy it into a report.
 

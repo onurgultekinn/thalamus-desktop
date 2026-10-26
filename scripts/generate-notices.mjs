@@ -98,7 +98,7 @@ lines.push('THIRD-PARTY NOTICES');
 lines.push('===================');
 lines.push('');
 lines.push('Bu uygulama, aşağıdaki açık kaynak ve üçüncü taraf bileşenleri içerir.');
-lines.push('Proje lisansı: UNLICENSED (proprietary) — tüm hakları saklıdır.');
+lines.push('Proje lisansı: Apache License 2.0 (bkz. LICENSE). "Thalamus" adı ve markası lisans kapsamı dışındadır (bkz. TRADEMARK.md).');
 lines.push(`Üretim tarihi: ${new Date().toISOString().slice(0, 10)}`);
 lines.push('');
 lines.push('1) JavaScript / TypeScript paketleri');

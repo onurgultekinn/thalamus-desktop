@@ -23,3 +23,7 @@ days.
   that assumption.
 - Agent file tools are restricted to the workspace root; escape paths from
   that sandbox are in scope.
+- The agent has exactly two network-capable tools, `web_search` and
+  `read_page`. They take a query or a URL from the model and return text. Any
+  way to make them read local files, reach the local backend, or SSRF into
+  private networks is in scope.
