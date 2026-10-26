@@ -143,6 +143,79 @@ pub fn web_search(args: &Value) -> String {
 }
 
 /// `read_page` aracı: sayfayı temiz metin olarak okur (jina → exa → tarayıcı).
+/// `read_page`/`web_search` bağlantı hedeflerini SSRF'ye karşı süzer.
+///
+/// Modelin verebileceği her URL buradan geçer: yalnız http/https kabul edilir;
+/// loopback, özel ağlar ve bağlantısız aralıklar (127.0.0.1, ::1, 10/8,
+/// 172.16/12, 192.168/16, 169.254/16, ::1, fc00::/7, fe80::/10) reddedilir.
+/// Gerekçe: yerel backend (127.0.0.1:8277) aynı makinede oturuyor — izinsiz
+/// bir `read_page`, session token'lı API'ye kapalı kapıdan bakma yoludur.
+/// IP'ler hostname çözümlemesinden SONRA da denetlenir (DNS-rebinding).
+fn url_allowed(url: &str) -> Result<(), String> {
+    use std::net::IpAddr;
+
+    let parsed = reqwest::Url::parse(url).map_err(|e| format!("read_page: invalid url ({e})"))?;
+    let scheme_ok = matches!(parsed.scheme(), "http" | "https");
+    if !scheme_ok {
+        return Err(format!(
+            "read_page: unsupported scheme '{}' (only http/https)",
+            parsed.scheme()
+        ));
+    }
+
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "read_page: url has no host".to_string())?
+        .trim_end_matches('.')
+        .to_ascii_lowercase();
+
+    // Ana bilgisayar adı doğrudan loopback/özel olarak adlandırılmışsa erken reddet.
+    const BLOCKED_NAMES: [&str; 4] = ["localhost", "localhost.localdomain", "ip6-localhost", "ip6-loopback"];
+    if BLOCKED_NAMES.contains(&host.as_str()) || host.ends_with(".local") || host.ends_with(".internal") {
+        return Err("read_page: access to local/private hostnames is denied".into());
+    }
+
+    // Çözümlenen her adres için de denetle (DNS-rebinding kapanır).
+    let addrs: Vec<std::net::SocketAddr> = if let Ok(ip) = host.parse::<IpAddr>() {
+        vec![std::net::SocketAddr::new(ip, 0)]
+    } else {
+        use std::net::ToSocketAddrs;
+        (host, parsed.port().unwrap_or(80))
+            .to_socket_addrs()
+            .map_err(|e| format!("read_page: could not resolve host ({e})"))?
+            .collect()
+    };
+    if addrs.is_empty() {
+        return Err("read_page: could not resolve host".into());
+    }
+    for addr in &addrs {
+        let ip = addr.ip();
+        let blocked = match ip {
+            IpAddr::V4(v4) => {
+                v4.is_loopback()
+                    || v4.is_private()
+                    || v4.is_link_local()
+                    || v4.is_broadcast()
+                    || v4.is_unspecified()
+                    || v4.octets()[0] == 100 && v4.octets()[1] >= 64 && v4.octets()[1] <= 127 // CGNAT
+                    || v4.octets()[0] == 192 && v4.octets()[1] == 0 && v4.octets()[2] == 2 // TEST-NET doc
+            }
+            IpAddr::V6(v6) => {
+                v6.is_loopback()
+                    || v6.is_unspecified()
+                    || (v6.segments()[0] & 0xfe00) == 0xfc00 // ULA fc00::/7
+                    || (v6.segments()[0] & 0xffc0) == 0xfe80 // link-local fe80::/10
+            }
+        };
+        if blocked {
+            return Err(format!(
+                "read_page: access to private/loopback address {ip} is denied"
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub fn read_page(args: &Value) -> String {
     let url = args
         .get("url")
@@ -152,6 +225,9 @@ pub fn read_page(args: &Value) -> String {
         .to_string();
     if url.is_empty() {
         return "read_page: url is required".into();
+    }
+    if let Err(e) = url_allowed(&url) {
+        return e;
     }
     match get_json(&format!("/read?url={}", urlencode(&url))) {
         Ok(payload) => {
@@ -205,4 +281,41 @@ fn urlencode(s: &str) -> String {
 #[allow(dead_code)]
 pub fn ping() -> bool {
     health_alive()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn https_and_public_hosts_are_allowed() {
+        assert!(url_allowed("https://example.com/docs").is_ok());
+        assert!(url_allowed("http://example.com").is_ok());
+        assert!(url_allowed("https://rustlang.org/?q=1#x").is_ok());
+    }
+
+    #[test]
+    fn non_http_schemes_are_rejected() {
+        assert!(url_allowed("file:///etc/passwd").is_err());
+        assert!(url_allowed("ftp://example.com/x").is_err());
+        assert!(url_allowed("javascript:alert(1)").is_err());
+    }
+
+    #[test]
+    fn loopback_and_private_targets_are_rejected() {
+        assert!(url_allowed("http://127.0.0.1:8277/api/health").is_err());
+        assert!(url_allowed("http://localhost/x").is_err());
+        assert!(url_allowed("http://10.0.0.5/x").is_err());
+        assert!(url_allowed("http://172.16.1.1/x").is_err());
+        assert!(url_allowed("http://192.168.1.10:8080/x").is_err());
+        assert!(url_allowed("http://169.254.169.254/latest/meta-data").is_err());
+        assert!(url_allowed("http://[::1]:8277/x").is_err());
+        assert!(url_allowed("http://[fe80::1]/x").is_err());
+    }
+
+    #[test]
+    fn malformed_urls_are_rejected() {
+        assert!(url_allowed("not a url").is_err());
+        assert!(url_allowed("http://").is_err());
+    }
 }
