@@ -10,7 +10,8 @@ same condition. Codes follow HTTP status semantics.
 | 408 | Request Timeout | no response within 180 s | retry; check your connection |
 | 401 | Unauthorized | no API key set, or the provider rejected the key | open Settings → Providers and check the key |
 | 402 | Payment Required | provider billing/balance failure | top up or check the provider dashboard |
-| 403 | Forbidden | provider access denied (plan or key scope) | check the provider plan/key permissions |
+| 403 | Forbidden | provider access denied (plan or key scope); also used when a tool blocks a path outside the workspace | check the provider plan/key permissions, or open a folder that contains the requested path |
+| 400 | Bad Request | provider has no known endpoint and no custom base URL | set a base URL in Settings → Providers, or pick another provider |
 | 404 | Not Found | model or endpoint unknown to the provider | pick another model in Settings |
 | 415 | Unsupported Media Type | the file is not valid UTF-8 text | open it with a text editor or choose another file |
 | 429 | Too Many Requests | provider rate or usage limit | wait and retry, or switch model |
