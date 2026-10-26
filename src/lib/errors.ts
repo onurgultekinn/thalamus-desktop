@@ -128,6 +128,28 @@ export function explainError(err: unknown, context?: string): ExplainedError {
     };
   }
 
+  // Provider preset unknown and no custom base URL: a configuration problem,
+  // not a server fault.
+  if (/^unknown provider /i.test(raw) || /provide a base url|no base_url/i.test(raw)) {
+    return {
+      code: '400',
+      title: t('err.providerConfigTitle'),
+      explanation: t('err.providerConfigMsg'),
+      detail: trimDetail(raw),
+    };
+  }
+
+  // A tool rejected a path outside the workspace sandbox. Security-relevant,
+  // so it gets its own message rather than the generic failure text.
+  if (/access outside the workspace root/i.test(raw)) {
+    return {
+      code: '403',
+      title: t('err.sandboxTitle'),
+      explanation: t('err.sandboxMsg'),
+      detail: trimDetail(raw),
+    };
+  }
+
   // HTTP status codes cover most provider failures.
   const http = raw.match(/^HTTP (\d{3})\b([\s\S]*)$/);
   if (http) {
