@@ -1,9 +1,19 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import { readFileSync } from 'node:fs';
+
+// App version is read from package.json at build time so the UI can show the
+// exact build the user is running. Tauri's config keeps the same number.
+const appVersion = JSON.parse(
+  readFileSync(path.resolve(__dirname, 'package.json'), 'utf8')
+).version as string;
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(appVersion),
+  },
   plugins: [
     react(),
     // NOT: @file-viewer/vite-plugin BİLEREK kullanılmıyor. `config` kancası her
