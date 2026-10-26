@@ -229,36 +229,28 @@ pub fn read_page(args: &Value) -> String {
     if let Err(e) = url_allowed(&url) {
         return e;
     }
-    match get_json(&format!("/read?url={}", urlencode(&url))) {
+    // balanced seviye: ~%72 token, sayılar %97-99 korunur (arastir textlab ölçümü).
+    match get_json(&format!("/read?url={}&level=balanced", urlencode(&url))) {
         Ok(payload) => {
             if !payload.get("ok").and_then(Value::as_bool).unwrap_or(false) {
                 let err = payload.get("error").cloned().unwrap_or(Value::Null);
                 return format!("read failed: {err}");
             }
+            // Kompakt zarf: metin tepede, sıkıştırma istatistikleri yanında.
             let text = payload
                 .get("text")
                 .and_then(Value::as_str)
                 .unwrap_or("")
                 .to_string();
-            // Metin uzunsa kayıpsız sıkıştırma uygula (aynı gramerle decode edilir).
-            if text.len() > 4096 {
-                if let Ok(metrics) = post_json("/compress", json!(text)) {
-                    if metrics
-                        .pointer("/result/is_compressed")
-                        .and_then(Value::as_bool)
-                        .unwrap_or(false)
-                    {
-                        return json!({
-                            "url": url,
-                            "compressed_text": metrics.pointer("/result/processed_prompt").cloned().unwrap_or(Value::Null),
-                            "saved_tokens": metrics.pointer("/result/saved_tokens").cloned().unwrap_or(json!(0)),
-                            "note": "lossless-verified compression; decode with the @T grammar",
-                        })
-                        .to_string();
-                    }
-                }
-            }
-            json!({"url": url, "text": text}).to_string()
+            let engine = payload.get("engine").cloned().unwrap_or(Value::Null);
+            let compression = payload.get("compression").cloned().unwrap_or(Value::Null);
+            json!({
+                "url": url,
+                "engine": engine,
+                "text": text,
+                "compression": compression,
+            })
+            .to_string()
         }
         Err(e) => e,
     }
