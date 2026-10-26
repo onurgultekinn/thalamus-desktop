@@ -14,6 +14,8 @@ same condition. Codes follow HTTP status semantics.
 | 404 | Not Found | model or endpoint unknown to the provider | pick another model in Settings |
 | 415 | Unsupported Media Type | the file is not valid UTF-8 text | open it with a text editor or choose another file |
 | 429 | Too Many Requests | provider rate or usage limit | wait and retry, or switch model |
+| 413 | Payload Too Large | the agent tried to read more in one step than allowed | re-run the request; it will read in smaller pieces |
+| 508 | Loop Detected | the agent hit its tool-step limit before finishing | re-run, or narrow the request to a specific file or question |
 | 5xx | Provider Server Error | passthrough of the provider's own 500/502/... | retry later; nothing wrong on your side |
 | 503 | Service Unavailable | the local engine is unreachable | restart the app; check the backend log |
 | 507 | Insufficient Storage | localStorage quota exceeded | clear old chats or exports |

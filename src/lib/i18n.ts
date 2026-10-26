@@ -531,6 +531,10 @@ const en = {
   'err.engineMsg': 'The chat could not reach the local backend (127.0.0.1:8277). Close and reopen Thalamus; if it persists, the backend failed to start.',
   'err.binaryTitle': 'Not a text file',
   'err.binaryMsg': 'This file is not valid UTF-8 text — it may be binary, an image or a legacy encoding. Open it with an external editor.',
+  'err.loopTitle': 'Agent stopped early',
+  'err.loopMsg': 'The agent reached its tool-step limit before finishing. Re-run the request, or narrow it (a specific file or question helps).',
+  'err.budgetTitle': 'Too much read in one step',
+  'err.budgetMsg': 'The agent tried to read more content in a single step than is allowed. Re-run the request and it will read in smaller pieces.',
   'err.opFailedMsgFile': 'This operation failed unexpectedly. Check that the file is not open in another program and that you have permission, then try again.',
   'err.opFailedMsg': 'This operation failed unexpectedly. If it keeps happening, check Settings > Providers (key / Base URL) and try a different provider.',
 
@@ -1422,6 +1426,10 @@ const tr: Record<TranslationKey, string> = {
   'err.engineMsg': 'Sohbet yerel arka uca (127.0.0.1:8277) ulaşamadı. Uygulamayı kapatıp yeniden açın; sürerse arka uç başlatılamamış demektir.',
   'err.binaryTitle': 'Metin dosyası değil',
   'err.binaryMsg': 'Bu dosya geçerli UTF-8 metni değil — ikili veri, görsel veya eski bir kodlama olabilir. Harici bir düzenleyiciyle açın.',
+  'err.loopTitle': 'Ajan erken durdu',
+  'err.loopMsg': 'Ajan bitirmeden araç adımı sınırına ulaştı. İsteği tekrar çalıştırın veya daraltın (belirli bir dosya ya da soru daha iyi sonuç verir).',
+  'err.budgetTitle': 'Tek adımda çok fazla okuma',
+  'err.budgetMsg': 'Ajan tek adımda izin verilenden fazla içerik okumaya çalıştı. İsteği tekrar çalıştırın; küçük parçalar hâlinde okuyacaktır.',
   'err.opFailedMsgFile': 'Bu işlem beklenmedik şekilde başarısız oldu. Dosyanın başka bir programda açık olmadığını ve izniniz olduğunu kontrol edip tekrar deneyin.',
   'err.opFailedMsg': 'Bu işlem beklenmedik şekilde başarısız oldu. Tekrarlanıyorsa Ayarlar > Sağlayıcılar (anahtar / Temel URL) bölümünü kontrol edip farklı bir sağlayıcı deneyin.',
 

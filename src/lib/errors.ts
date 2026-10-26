@@ -20,6 +20,8 @@
  * | 404   | Not Found                   | model or endpoint unknown to provider       |
  * | 415   | Unsupported Media Type      | file is not valid UTF-8 text (binary/other) |
  * | 429   | Too Many Requests           | provider rate / usage limit                 |
+ * | 413   | Payload Too Large           | agent read too much in one round            |
+ * | 508   | Loop Detected               | agent hit the tool-round limit              |
  * | 5xx   | Provider Server Error       | passthrough of provider's own 500/502/...   |
  * | 503   | Service Unavailable         | local engine unreachable (network layer)    |
  * | 507   | Insufficient Storage        | localStorage quota exceeded                 |
@@ -203,6 +205,25 @@ export function explainError(err: unknown, context?: string): ExplainedError {
       code: '415',
       title: t('err.binaryTitle'),
       explanation: t('err.binaryMsg'),
+      detail: trimDetail(raw),
+    };
+  }
+
+  // Agent stopped making progress: it ran out of tool rounds or read too much
+  // in a single round. Both are recoverable by re-running the request.
+  if (/tool loop limit exceeded/i.test(raw)) {
+    return {
+      code: '508',
+      title: t('err.loopTitle'),
+      explanation: t('err.loopMsg'),
+      detail: trimDetail(raw),
+    };
+  }
+  if (/tool result budget exceeded/i.test(raw)) {
+    return {
+      code: '413',
+      title: t('err.budgetTitle'),
+      explanation: t('err.budgetMsg'),
       detail: trimDetail(raw),
     };
   }
