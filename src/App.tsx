@@ -1154,7 +1154,7 @@ export default function App() {
                 'Write the question and options in the user’s language. Give 2–4 concrete, mutually exclusive options; ' +
                 'use multiple:true only when several apply. Never ask for details already present in the conversation or attached files. ' +
                 'If the request is clear enough, answer normally — do not ask a question just to be safe. ' +
-                // Kod yanıtı biçimi (ölçülmüş karar, lab TRIALS-014): dosyayı baştan
+                // Kod yanıtı biçimi (iç ölçüm günlüğü, TRIALS-014): dosyayı baştan
                 // yazmak yerine yalnız değişen satırları `git diff` biçiminde yaz.
                 // Çıktı token'ı ~%82 azalıyor; anlama farkı ölçülemedi.
                 'When you propose a change to existing code, DO NOT rewrite the whole file. ' +

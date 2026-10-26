@@ -5,10 +5,10 @@
 //   2) ANLAMA     : eşleştirilmiş probda delta >= -COMPREHENSION_TOLERANCE_POINTS
 //   3) ÖRNEKLEM   : en az MIN_PAIRED_QUESTIONS eşleştirilmiş soru
 //
-// Bu sabitler `cargo run --example lab -- certify` tarafından ÖLÇÜM
-// sonuçlarıyla karşılaştırılır (lab/gates.sh 11. kapı). İkisi çelişirse kapı
-// kırmızı olur; böylece "sertifikalı" etiketi elle yazılmış bir iddia değil,
-// ölçüm dosyalarına bağlı bir kuraldır.
+// Bu sabitler yazarın ayrı tuttuğu ölçüm harness'ı tarafından ölçüm
+// sonuçlarıyla karşılaştırılır. Harness ve korpuslar bu depoda yayınlanmaz;
+// buradaki `evidence` alanları (ör. TRIALS-019) o iç ölçüm günlüğüne atıftır.
+// "Sertifikalı" etiketi elle yazılmış bir iddia değil, eşik kuralına bağlıdır.
 use crate::engine::plain_table::PlainKind;
 
 pub const MIN_SAVINGS_PCT: f64 = 25.0;

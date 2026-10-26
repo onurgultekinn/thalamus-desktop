@@ -126,7 +126,7 @@ pub fn process(raw_prompt: &str, bpe: &CoreBPE, veto_override: bool) -> String {
 
     // KAYIPSIZLIK BEKÇİSİ: segmentler girdiyi birebir kaplamıyorsa (boşluk ya da
     // örtüşme) birleştirme sessizce karakter kaybedebilir. Gerçek kod
-    // dosyalarında gözlendi (lab/docs/TRIALS.md, TRIALS-003). Böyle bir durumda
+    // dosyalarında gözlendi (iç ölçüm günlüğü, TRIALS-003). Böyle bir durumda
     // sıkıştırma tamamen iptal edilir ve ham metin döner: kayıpsızlık kazançtan
     // önce gelir.
     if !PromptSegmenter::tiles_exactly(&segments, raw_prompt) {
