@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or usage help
+    url: https://github.com/onurgultekinn/thalamus-desktop/discussions/categories/q-a
+    about: Ask how something works, or how to configure a provider or local model.
+  - name: Share an idea
+    url: https://github.com/onurgultekinn/thalamus-desktop/discussions/categories/ideas
+    about: Discuss a feature before it becomes an issue.
+  - name: Report a security vulnerability
+    url: https://github.com/onurgultekinn/thalamus-desktop/security/advisories/new
+    about: Please do not open a public issue for security problems.
