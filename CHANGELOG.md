@@ -17,12 +17,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pricing from the public LiteLLM catalogue (12-hour cache).
 - Project workspace: file explorer, editor with save/run/autosave, PowerShell
   terminal via `portable-pty` and xterm.js, and a repository map for AI context.
-- Agent mode with ten workspace-scoped tools and five permission modes;
+- Agent mode with thirteen tools (file, search, `repo_map`, `todo`, web
+  `web_search`/`read_page`, sub-agents) and six permission modes;
   `run_command` is limited to `auto` and `autonomous`.
 - Edits recorded during an agent run and applied through a reviewable diff.
 - Agent Mesh multi-agent envelopes that reuse the lossless encoder, with a mock
   brain for key-less runs; Agent Company plan, flow, and office views.
-- Any OpenAI-compatible provider: 18 presets plus custom base URLs; keys stored
+- Any OpenAI-compatible provider: 19 provider presets (incl. a managed local server) plus custom base URLs; keys stored
   in the OS credential vault; local model discovery, start, and idle shutdown.
 - English and Turkish UI, Dark (Obsidian) and Nord Red themes, and the global
   Nucleus command surface.
