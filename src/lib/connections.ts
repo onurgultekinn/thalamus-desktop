@@ -12,7 +12,7 @@
  * converted into a connection with the SAME id, so vault entries and model
  * selections keep working untouched.
  */
-import { getStoredKey } from './secrets';
+import { hasStoredKey } from './secrets';
 import { baseStorageKey, activeProviderStorageKey } from './providers';
 
 export interface Connection {
@@ -262,11 +262,9 @@ async function migrateOnce(): Promise<void> {
       base = localStorage.getItem(baseStorageKey(id)) || '';
       model = localStorage.getItem(`tlm_model_${id}`) || '';
     } catch { /* noop */ }
-    let key = '';
-    try {
-      key = (await getStoredKey(id)).trim();
-    } catch { /* vault yoksa localStorage fallback'ini denemiş olur */ }
-    if (!base && !model && !key) continue;
+    // Yalnız VAR/YOK — anahtar değeri webview'a hiç gelmez.
+    const hasKey = await hasStoredKey(id).catch(() => false);
+    if (!base && !model && !hasKey) continue;
     const preset = LEGACY[id];
     if (!preset?.endpoint) continue;
     out.push(

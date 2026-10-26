@@ -36,6 +36,22 @@ export async function getStoredKey(providerId: string): Promise<string> {
   return localStorage.getItem(keyStorageKey(providerId)) || '';
 }
 
+/**
+ * Anahtar VAR MI? — değeri webview'a HİÇ gelmez. Ayarlar/bağlantı arayüzü
+ * "kayıtlı" göstergesi için yalnız bunu kullanır; sohbet istekleri de
+ * anahtarı hiç taşımaz (backend `use_stored_key` ile kasadan çözer).
+ */
+export async function hasStoredKey(providerId: string): Promise<boolean> {
+  if (isTauri()) {
+    try {
+      return await invoke<boolean>('secret_exists', { provider: providerId });
+    } catch {
+      return !!localStorage.getItem(keyStorageKey(providerId));
+    }
+  }
+  return !!localStorage.getItem(keyStorageKey(providerId));
+}
+
 export async function setStoredKey(providerId: string, key: string): Promise<void> {
   if (isTauri()) {
     try {

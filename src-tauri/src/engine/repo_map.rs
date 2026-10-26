@@ -14,6 +14,9 @@ use tiktoken_rs::CoreBPE;
 pub struct RepoFile {
     pub name: String,
     pub code: String,
+    /// Dosyanın son değişiklik zamanı (şema cache anahtarı). Test/örnek
+    /// yollarında None olabilir → cache kullanılmaz.
+    pub mtime: Option<std::time::SystemTime>,
 }
 
 pub struct RepoMapResult {
@@ -137,14 +140,17 @@ mod tests {
             RepoFile {
                 name: "notes.py".into(),
                 code: "x = 1\n".into(),
+                mtime: None,
             },
             RepoFile {
                 name: "utils.py".into(),
                 code: "def validate_token(token):\n    return token.startswith('tok_')\n".into(),
+                mtime: None,
             },
             RepoFile {
                 name: "api.py".into(),
                 code: "def dispatch(h):\n    if not validate_token(h):\n        raise ValueError\n    return h\n".into(),
+                mtime: None,
             },
         ];
         let b = bpe();
@@ -163,10 +169,12 @@ mod tests {
             RepoFile {
                 name: "a.py".into(),
                 code: "def f1():\n    pass\n\ndef f2():\n    pass\n\ndef f3():\n    pass\n".into(),
+                mtime: None,
             },
             RepoFile {
                 name: "b.py".into(),
                 code: "def g1():\n    pass\n".into(),
+                mtime: None,
             },
         ];
         let b = bpe();

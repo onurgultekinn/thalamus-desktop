@@ -162,7 +162,31 @@ pub mod imp {
         write_blob(&target_name(provider), &bytes)
     }
 
+    /// Bir sırrın KULLANILABİLİR biçimde olduğunu doğrular. Kritik: DPAPI
+    /// çözme başarısız olduğunda blob'u "eski düz kayıt" sanıp UTF-16 çözmek
+    /// şifreli metni ÇÖP metne dönüştürür; o çöp geri yazılırsa gerçek anahtar
+    /// kalıcı olarak YOK OLUR (yaşandı: 178 karakterlik kontrol karakterli
+    /// değer -> Authorization başlığı geçersiz -> "builder error").
+    /// Bu yüzden düz kayıt yalnız "makul sır" görünüyorsa yükseltilir.
+    fn looks_like_secret(s: &str) -> bool {
+        let n = s.chars().count();
+        if n < 8 || n > 4096 {
+            return false;
+        }
+        s.chars().all(|c| {
+            !c.is_control()
+                && !c.is_whitespace()
+                && c != '\u{FFFD}'
+                && c != '\u{FEFF}'
+        })
+    }
+
     pub fn secret_set(provider: &str, secret: &str) -> Result<(), String> {
+        if !looks_like_secret(secret) {
+            return Err(
+                "API key looks invalid (control/invisible characters); paste it again".into(),
+            );
+        }
         let blob = protect(secret)?;
         write_blob(&target_name(provider), &blob)
     }
@@ -210,12 +234,46 @@ pub mod imp {
             CredFree(cred as *mut core::ffi::c_void);
             (secret, legacy)
         };
-        // Sessiz yükseltme: düz kayıttan okunduysa şimdi korumalı yaz.
-        // Başarısızlık sessiz geçilir — okuma zaten doğru değeri verdi.
+        // BOZUK KAYIT KORUMASI: değer kullanılabilir görünmüyorsa (kontrol
+        // karakteri vb.) ASLA geri yazma — temizle ve "yok" dön. Böylece bir
+        // çözme hatası gerçek anahtarı kalıcı olarak yok edemez.
+        if !result.is_empty() && !looks_like_secret(&result) {
+            let _ = secret_delete(provider);
+            return Ok(None);
+        }
+        // Sessiz yükseltme: yalnız DOĞRULANMIŞ düz kayıt korumalıya geçer.
         if was_legacy && !result.is_empty() {
             let _ = secret_set(provider, &result);
         }
+        if result.is_empty() {
+            return Ok(None);
+        }
         Ok(Some(result))
+    }
+
+    /// Anahtar VAR MI? Değeri okumadan var/yok — ayarlar arayüzü ve bağlantı
+    /// seçimi için yeterli olan tek bilgi (anahtar değeri JS'e hiç gitmesin).
+    pub fn secret_exists(provider: &str) -> Result<bool, String> {
+        use windows_sys::Win32::Foundation::ERROR_NOT_FOUND;
+        use windows_sys::Win32::Security::Credentials::{
+            CredFree, CredReadW, CREDENTIALW, CRED_TYPE_GENERIC,
+        };
+
+        let target = to_wide(&target_name(provider));
+        let mut cred: *mut CREDENTIALW = std::ptr::null_mut();
+        let ok = unsafe { CredReadW(target.as_ptr(), CRED_TYPE_GENERIC, 0, &mut cred) };
+        if ok == 0 {
+            let err = unsafe { windows_sys::Win32::Foundation::GetLastError() };
+            if err == ERROR_NOT_FOUND {
+                return Ok(false);
+            }
+            return Err(format!(
+                "Could not read Credential Manager (GetLastError={})",
+                err
+            ));
+        }
+        unsafe { CredFree(cred as *mut core::ffi::c_void) };
+        Ok(true)
     }
 
     pub fn secret_delete(provider: &str) -> Result<(), String> {
@@ -241,10 +299,21 @@ pub mod imp {
     mod tests {
         use super::*;
 
+        /// Testler OS kimlik deposunu PAYLAŞIR. Paralel koşuda CredWrite/CredRead
+        /// iç içe girince DPAPI çözümü geçici olarak başarısız olabiliyor ve
+        /// (doğru davranışla) bozuk sayılıp siliniyordu → kararsız test.
+        /// Tüm kasa testleri bu kilitle SIRAYLA koşar.
+        static VAULT_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+        fn lock_vault() -> std::sync::MutexGuard<'static, ()> {
+            VAULT_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+        }
+
         /// Gerçek kullanıcı kimlik bilgisi deposunda round-trip yapar ve
         /// temizler; yalnızca Windows'ta çalışır.
         #[test]
         fn credential_round_trip() {
+            let _guard = lock_vault();
             let provider = "__cargo_test_only__";
             secret_set(provider, "sk-test-12345").unwrap();
             let read = secret_get(provider).unwrap();
@@ -256,6 +325,7 @@ pub mod imp {
         /// Korunan blob gerçekten şifreli mi? (MAGIC dışında düz metin yok.)
         #[test]
         fn protected_blob_is_not_plaintext() {
+            let _guard = lock_vault();
             use windows_sys::Win32::Security::Credentials::{
                 CredFree, CredReadW, CREDENTIALW, CRED_TYPE_GENERIC,
             };
@@ -286,9 +356,59 @@ pub mod imp {
             secret_delete(provider).unwrap();
         }
 
+        /// REGRESYON (veri yok etme): DPAPI çözülemeyen bir blob'u "eski düz"
+        /// kayıt sanıp çözmek çöp üretir; o çöp GERİ YAZILMAMALI. Yazılırsa
+        /// gerçek anahtar kalıcı olarak kaybolur (yaşandı: builder error 500).
+        #[test]
+        fn undecryptable_blob_is_cleared_not_persisted() {
+            let _guard = lock_vault();
+            use windows_sys::Win32::Security::Credentials::{
+                CredWriteW, CREDENTIALW, CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC,
+            };
+
+            let provider = "__cargo_test_corrupt__";
+            // MAGIC öneki VAR ama gövde DPAPI değil: unprotect başarısız olur.
+            let mut blob: Vec<u8> = MAGIC_PROTECTED.to_vec();
+            blob.extend((0u16..200).map(|i| (i.wrapping_mul(7919) % 65535) as u8));
+            let mut target = to_wide(&target_name(provider));
+            let cred = CREDENTIALW {
+                Flags: 0,
+                Type: CRED_TYPE_GENERIC,
+                TargetName: target.as_mut_ptr(),
+                Comment: std::ptr::null_mut(),
+                LastWritten: unsafe { std::mem::zeroed() },
+                CredentialBlobSize: blob.len() as u32,
+                CredentialBlob: blob.as_ptr() as *mut u8,
+                Persist: CRED_PERSIST_LOCAL_MACHINE,
+                AttributeCount: 0,
+                Attributes: std::ptr::null_mut(),
+                TargetAlias: std::ptr::null_mut(),
+                UserName: std::ptr::null_mut(),
+            };
+            assert_ne!(unsafe { CredWriteW(&cred, 0) }, 0, "test blob yazılamadı");
+
+            let got = secret_get(provider).expect("okuma hata vermemeli");
+            assert_eq!(got, None, "bozuk kayıt değer olarak dönmemeli");
+            assert!(
+                !secret_exists(provider).unwrap(),
+                "bozuk kayıt kasadan SİLİNMELİ (yoksa her açılışta tekrar çöp üretir)"
+            );
+        }
+
+        /// Kontrol karakteri içeren değer yazılmamalı (başlık bozulmasının kökü).
+        #[test]
+        fn set_rejects_control_characters() {
+            let _guard = lock_vault();
+            let provider = "__cargo_test_ctrl__";
+            let err = secret_set(provider, "sk-abc\u{0007}def").unwrap_err();
+            assert!(err.contains("invalid"), "reddedilmeli: {}", err);
+            assert_eq!(secret_get(provider).unwrap(), None);
+        }
+
         /// Eski düz kayıt: okunabilmeli (geçiş) ve şifreliye yükseltilmeli.
         #[test]
         fn legacy_plaintext_upgrades_to_protected() {
+            let _guard = lock_vault();
             let provider = "__cargo_test_legacy__";
             write_legacy_plain(provider, "sk-legacy-42").unwrap();
             // İlk okuma: değer düz biçimden çözülmeli.
@@ -309,6 +429,9 @@ pub mod imp {
     }
     pub fn secret_get(_provider: &str) -> Result<Option<String>, String> {
         Ok(None)
+    }
+    pub fn secret_exists(_provider: &str) -> Result<bool, String> {
+        Ok(false)
     }
     pub fn secret_delete(_provider: &str) -> Result<(), String> {
         Ok(())

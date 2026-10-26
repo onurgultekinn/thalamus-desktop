@@ -27,6 +27,19 @@ pub struct EngineCtx {
             std::sync::Mutex<std::collections::HashMap<String, (std::time::SystemTime, String)>>,
         >,
     >,
+    /// Şema cache'i: (dosya, mtime) → tanım adı → (start, end). get_code_body
+    /// her çağrıda tüm repoyu yeniden tarayıp şema çıkarmasın (büyük repoda
+    /// ciddi gecikme kaynağıydı). BackendState'te PAYLAŞILIR.
+    pub schema_cache: Option<
+        std::sync::Arc<
+            std::sync::Mutex<
+                std::collections::HashMap<
+                    String,
+                    (std::time::SystemTime, std::collections::HashMap<String, (usize, usize)>),
+                >,
+            >,
+        >,
+    >,
 }
 
 #[derive(Debug, Clone)]
@@ -337,7 +350,8 @@ fn safe_join(root: &Path, rel: &str) -> Result<PathBuf, String> {
     }
 }
 
-fn tool_read_file(root: &Path, args: &Value) -> String {
+fn tool_read_file(ctx: &ToolCtx, args: &Value) -> String {
+    let root = ctx.root;
     let rel = args["path"].as_str().unwrap_or("");
     if rel.is_empty() {
         return "HATA: path gerekli".into();
@@ -350,6 +364,16 @@ fn tool_read_file(root: &Path, args: &Value) -> String {
         Ok(p) => {
             if p.is_dir() {
                 return format!("HATA: '{}' bir dizin (list_dir kullan)", rel);
+            }
+            // Çok büyük dosyayı belleğe alma: 8 MB üstü yalnız baştan okunur.
+            const HARD_READ_CAP: u64 = 8 * 1024 * 1024;
+            let meta_len = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
+            if meta_len > HARD_READ_CAP {
+                return format!(
+                    "'{}' is too large ({} MB > 8 MB). Use grep_search to locate the relevant lines, then read_file with offset/limit.",
+                    rel,
+                    meta_len / (1024 * 1024)
+                );
             }
             match std::fs::read(&p) {
                 Ok(bytes) => {
@@ -365,6 +389,12 @@ fn tool_read_file(root: &Path, args: &Value) -> String {
                     let text = String::from_utf8_lossy(&bytes);
                     let lines: Vec<&str> = text.lines().collect();
                     let total = lines.len();
+                    if offset > total {
+                        return format!(
+                            "offset {} is past the end of '{}' ({} lines) — use offset=1 or a smaller offset",
+                            offset, rel, total
+                        );
+                    }
                     let start = (offset - 1).min(total);
                     let end = (start + limit).min(total);
                     // Karakter sınırını bozmadan byte bütçesine uyan satırları al.
@@ -598,24 +628,37 @@ fn get_code_body_from_workspace(ctx: &ToolCtx, wanted: &str) -> Option<String> {
     }
 
     // 2) Tanim adi: semada ara, satir araligini kes.
-    fn search_entry(
-        entries: &[crate::engine::schema::SchemaEntry],
-        wl: &str,
-    ) -> Option<(usize, usize)> {
-        for e in entries {
-            if e.name.to_lowercase() == wl {
-                return Some((e.start, e.end));
-            }
-            if let Some(r) = search_entry(&e.children, wl) {
-                return Some(r);
-            }
-        }
-        None
-    }
     let wl = wanted.to_lowercase();
     for f in &files {
-        if let Some(schema) = crate::engine::schema::extract_schema_for(&f.name, &f.code) {
-            if let Some((start, end)) = search_entry(&schema.entries, &wl) {
+        // Tanım haritası: (dosya, mtime) anahtarıyla cache'lenir.
+        let defs: Option<std::collections::HashMap<String, (usize, usize)>> = match (&ctx.engine.schema_cache, f.mtime) {
+            (Some(cache), Some(mtime)) => {
+                let hit = cache
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get(&f.name)
+                    .filter(|(t, _)| *t == mtime)
+                    .map(|(_, m)| m.clone());
+                match hit {
+                    Some(m) => Some(m),
+                    None => {
+                        let built = crate::engine::schema::extract_schema_for(&f.name, &f.code)
+                            .map(|sc| collect_def_spans(&sc.entries));
+                        if let Some(ref m) = built {
+                            cache
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .insert(f.name.clone(), (mtime, m.clone()));
+                        }
+                        built
+                    }
+                }
+            }
+            _ => crate::engine::schema::extract_schema_for(&f.name, &f.code)
+                .map(|sc| collect_def_spans(&sc.entries)),
+        };
+        if let Some(defs) = defs {
+            if let Some((start, end)) = defs.get(&wl).copied() {
                 let lines: Vec<&str> = f.code.lines().collect();
                 let from = (start - 1).min(lines.len());
                 let to = end.min(lines.len());
@@ -633,6 +676,27 @@ fn get_code_body_from_workspace(ctx: &ToolCtx, wanted: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// Şemadaki tüm tanımları (yuvalanmışlar dahil) ad → (start, end) olarak
+/// düzleştirir (cache'e yazılan biçim).
+fn collect_def_spans(
+    entries: &[crate::engine::schema::SchemaEntry],
+) -> std::collections::HashMap<String, (usize, usize)> {
+    fn walk(
+        e: &crate::engine::schema::SchemaEntry,
+        out: &mut std::collections::HashMap<String, (usize, usize)>,
+    ) {
+        out.entry(e.name.to_lowercase()).or_insert((e.start, e.end));
+        for c in &e.children {
+            walk(c, out);
+        }
+    }
+    let mut out = std::collections::HashMap::new();
+    for e in entries {
+        walk(e, &mut out);
+    }
+    out
 }
 
 fn tool_get_code_body(args: &Value, ctx: &ToolCtx) -> String {
@@ -750,11 +814,16 @@ fn tool_write_file(_root: &Path, args: &Value, ctx: &ToolCtx) -> String {
     if rel.is_empty() {
         return "HATA: path gerekli".into();
     }
-    // Hedefin workspace içinde olduğunu doğrula (var olan dosyada yazım onayı).
-    if let Ok(p) = safe_join(ctx.root, rel) {
-        if p.is_dir() {
-            return format!("HATA: '{}' bir dizin", rel);
+    // Hedefin workspace içinde olduğunu doğrula. Hata DÖNÜLÜRSE kayıt
+    // oluşturulmaz: eskiden `..` içeren yol sessizce kaydediliyor ve
+    // frontend tarafında uygulanabiliyordu (workspace dışına yazma).
+    match safe_join(ctx.root, rel) {
+        Ok(p) => {
+            if p.is_dir() {
+                return format!("HATA: '{}' bir dizin", rel);
+            }
         }
+        Err(e) => return format!("HATA: {}", e),
     }
     ctx.edits.borrow_mut().push(RecordedEdit {
         file: rel.to_string(),
@@ -888,10 +957,25 @@ fn output_with_timeout(
             res
         }
         Err(_) => {
-            // Zaman aşımı: çocuğu öldür. join EDİLMEZ — Windows'ta cmd'nin
-            // yetim torunları stdout borusunu tutabilir; bekleyici iş
-            // parçacığı boru kapanınca kendi kendine biter, araç ANINDA döner.
+            // Zaman aşımı: SÜREÇ AĞACINI öldür (cmd'nin torunları — ör. ping,
+            // npm'in node'u — yetim kalıp boruyu/CPU'yu tutmasın). Windows'ta
+            // taskkill /T /F; diğer platformlarda pkill -P.
             if let Some(mut c) = shared.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                let pid = c.id();
+                #[cfg(windows)]
+                {
+                    let _ = std::process::Command::new("taskkill")
+                        .args(["/PID", &pid.to_string(), "/T", "/F"])
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .status();
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = std::process::Command::new("pkill")
+                        .args(["-TERM", "-P", &pid.to_string()])
+                        .status();
+                }
                 let _ = c.kill();
             }
             drop(waiter);
@@ -1055,7 +1139,7 @@ pub fn execute(name: &str, args: &Value, ctx: &ToolCtx) -> String {
     }
     match name {
         "get_code_body" => tool_get_code_body(args, ctx),
-        "read_file" => tool_read_file(ctx.root, args),
+        "read_file" => tool_read_file(ctx, args),
         "list_dir" => tool_list_dir(ctx.root, args),
         "grep_search" => tool_grep(ctx.root, args),
         "web_search" => frame_external(crate::backend::arastir::web_search(args)),
@@ -1124,6 +1208,37 @@ mod tests {
         );
         assert!(page2.contains("satır400"));
         assert!(!page2.contains("satır500\n"));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn read_file_reports_offset_past_end() {
+        let tmp = std::env::temp_dir().join(format!("thx_{}oe", std::process::id()));
+        let _ = std::fs::create_dir_all(&tmp);
+        std::fs::write(tmp.join("s.txt"), "a
+b
+c
+").unwrap();
+        let blocks: Vec<(String, String, String)> = vec![];
+        let c = ctx(&tmp, &blocks);
+        let out = execute("read_file", &json!({"path":"s.txt","offset":999}), &c);
+        assert!(out.contains("past the end"), "açıklayıcı hata: {}", out);
+        assert!(out.contains("3 lines"));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn read_file_rejects_oversized_files() {
+        let tmp = std::env::temp_dir().join(format!("thx_{}big", std::process::id()));
+        let _ = std::fs::create_dir_all(&tmp);
+        // 9 MB (seyrek/yavaş olmasın diye set_len ile boyutlandır).
+        let f = std::fs::File::create(tmp.join("huge.log")).unwrap();
+        f.set_len(9 * 1024 * 1024).unwrap();
+        drop(f);
+        let blocks: Vec<(String, String, String)> = vec![];
+        let c = ctx(&tmp, &blocks);
+        let out = execute("read_file", &json!({"path":"huge.log"}), &c);
+        assert!(out.contains("too large"), "boyut koruması: {}", out);
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
@@ -1258,6 +1373,42 @@ mod tests {
             &c,
         );
         assert!(out.contains("applied"), "code_block gövdesi bulunmalı: {}", out);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn write_file_rejects_path_escape() {
+        let tmp = std::env::temp_dir().join(format!("thx_we_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&tmp);
+        let blocks: Vec<(String, String, String)> = vec![];
+        let c = ctx(&tmp, &blocks);
+        let out = execute(
+            "write_file",
+            &json!({"path":"../../outside.txt","content":"x"}),
+            &c,
+        );
+        assert!(out.contains("Security"), "workspace dışı reddedilmeli: {}", out);
+        assert!(c.edits.borrow().is_empty(), "kayıt ÜRETİLMEMELİ");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn edit_file_rejects_path_escape() {
+        let tmp = std::env::temp_dir().join(format!("thx_ee_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&tmp);
+        let blocks: Vec<(String, String, String)> = vec![];
+        let c = ctx(&tmp, &blocks);
+        let out = execute(
+            "edit_file",
+            &json!({"path":"../../etc/hosts","search":"a","replace":"b"}),
+            &c,
+        );
+        assert!(
+            out.contains("not found") || out.contains("Security"),
+            "dış yol reddedilmeli: {}",
+            out
+        );
+        assert!(c.edits.borrow().is_empty(), "kayıt ÜRETİLMEMELİ");
         let _ = std::fs::remove_dir_all(&tmp);
     }
 

@@ -25,7 +25,7 @@ import {
   PictureInPicture2, 
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
-import { pickFiles } from '../lib/workspace';
+import { pickFiles, readAttachedFiles } from '../lib/workspace';
 import { aiChat, aiChatStream, userMessage, type AiChatResponse, type AiEditResult } from '../services/aiClient';
 import { cacheAwareHistory } from '../lib/contextPlan';
 import { prepareImageFile, IMAGE_MODE_ORDER, DEFAULT_IMAGE_MODE, type AttachedImage, type ImageMode } from '../lib/imageAttach';
@@ -446,9 +446,29 @@ export function ThalamusCopilot({
     const callRealAI = async (prompt: string, streamMsgId?: string): Promise<AiChatResponse> => {
     // Code context: a SCHEMA is sent instead of the body; the LLM requests the body via get_code_body.
     // No loss — the original code stays in the editor/locally.
-    const codeBlocks = activeFileCode.trim()
+    const codeBlocks: { id: string; name: string; body: string }[] = activeFileCode.trim()
       ? [{ id: activeFile, name: activeFile, body: activeFileCode }]
       : [];
+    // SEÇİLEN DOSYALAR: içerik gerçekten okunur (eskiden yalnız yol gidiyordu,
+    // model dosyayı göremiyordu). Bütçe: dosya başına 60k, toplam 180k karakter
+    // (motor bu metni kayıpsız sıkıştırır). Okunamayan dosya sessizce düşmez.
+    if (selectedFiles.length > 0) {
+      const attached = await readAttachedFiles(selectedFiles, {
+        perFileChars: 60_000,
+        totalChars: 180_000,
+      });
+      for (const a of attached) {
+        if (a.body) {
+          codeBlocks.push({ id: a.name, name: a.name, body: a.body });
+        } else if (a.error) {
+          codeBlocks.push({
+            id: a.name,
+            name: a.name,
+            body: `// okunamadı: ${a.error}`,
+          });
+        }
+      }
+    }
     const images = pendingImagesRef.current.map((i) => ({ url: i.url, detail: i.detail }));
     clearPendingImages();
     const history = cacheAwareHistory(
@@ -488,7 +508,13 @@ export function ThalamusCopilot({
         },
       });
     } finally {
-      if (paintTimer !== undefined) window.clearTimeout(paintTimer);
+      // Bekleyen son boyamayı ATMA: akış bitince son parçalar placeholder'da
+      // görünsün (temizlemek onları sessizce düşürüyordu).
+      if (paintTimer !== undefined) {
+        window.clearTimeout(paintTimer);
+        paintTimer = undefined;
+        paint();
+      }
     }
   };
 

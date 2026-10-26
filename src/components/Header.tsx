@@ -1,3 +1,5 @@
+import { t } from '../lib/i18n';
+
 interface HeaderProps {
   activePath?: string;
   /** Komut paletini açar (Ctrl+K). */
@@ -88,7 +90,7 @@ export function Header({
               title="Ctrl+K"
               className="group flex items-center gap-1.5 text-[11px] text-[#87857F] transition-colors hover:text-[#CECDC3] cursor-pointer"
             >
-              <span className="leading-none font-medium">Ara</span>
+              <span className="leading-none font-medium">{t('nav.search')}</span>
               <span className="text-[10px] leading-none text-[#575654] group-hover:text-[#87857F] transition-colors select-none">
                 Ctrl K
               </span>

@@ -28,6 +28,7 @@ pub mod arastir;
 pub mod ai;
 pub mod engines;
 pub mod local_models;
+pub mod model_caps;
 pub mod repo;
 pub mod serve;
 pub mod tools;
@@ -41,6 +42,11 @@ pub struct BackendState {
     pub workspace_root: Arc<RwLock<String>>,
     /// Dosya içerik cache'i (mtime'a göre) — değişmeyen dosyalar yeniden okunmaz.
     pub repo_cache: Arc<Mutex<HashMap<String, (SystemTime, String)>>>,
+    /// Şema cache'i: (dosya, mtime) → tanım adı → satır aralığı. get_code_body
+    /// her çağrıda tüm repoyu yeniden taramasın.
+    pub schema_cache: Arc<
+        Mutex<HashMap<String, (SystemTime, HashMap<String, (usize, usize)>)>>,
+    >,
     /// Ajan Ağı koşuları — sunucu-otoriteli durum (arayüz yoklar).
     pub agent_runs: crate::agent::SharedRuns,
 }
@@ -219,6 +225,7 @@ pub fn serve(bpe: Arc<CoreBPE>, workspace_root: Arc<RwLock<String>>) -> BackendS
         bpe: bpe.clone(),
         workspace_root: workspace_root.clone(),
         repo_cache: Arc::new(std::sync::Mutex::new(HashMap::new())),
+        schema_cache: Arc::new(std::sync::Mutex::new(HashMap::new())),
         agent_runs: Arc::new(Mutex::new(HashMap::new())),
     });
 
@@ -273,6 +280,7 @@ mod tests {
                     .to_string(),
             )),
             repo_cache: Arc::new(Mutex::new(HashMap::new())),
+            schema_cache: Arc::new(Mutex::new(HashMap::new())),
             agent_runs: Arc::new(Mutex::new(HashMap::new())),
         }
     }

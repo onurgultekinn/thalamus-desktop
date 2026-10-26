@@ -100,6 +100,33 @@ function ensureShape() {
   } as never);
 }
 
+const LINK_MARKER_SIZE = 7;
+
+/**
+ * Serbest ilişki oku (mavi kesikli).
+ *
+ * `offset` KRİTİK — X6'nın klasik işaretçisi `normalize()` ile
+ * `tx = -width/2 - offset` kadar kaydırır, yani üretilen yol
+ * `[-width/2-offset, +width/2-offset]` aralığına düşer. Ucun TAM olarak
+ * port noktasına (kart kenarına) oturması için aralığın `[-size, 0]`
+ * olması gerekir:
+ *
+ *     +width/2 - offset = 0  ⟹  offset = +size/2
+ *
+ * Varsayılan (offset = -size/2) ucu kartın size/2 px İÇİNE sokuyordu;
+ * 0 ise yarı yarıya taşırıyordu. Her ikisi de "ok karta düzgün oturmuyor"
+ * görüntüsü verir (kullanıcı raporu).
+ */
+function linkMarker(stroke: string) {
+  return {
+    name: 'classic',
+    size: LINK_MARKER_SIZE,
+    offset: LINK_MARKER_SIZE / 2,
+    fill: stroke,
+    strokeWidth: 0,
+  };
+}
+
 const LINK_LEFT_PORTS = ['link-left-a', 'link-left-b', 'link-left-c'] as const;
 const LINK_RIGHT_PORTS = ['link-right-a', 'link-right-b', 'link-right-c'] as const;
 const LINK_PORT_SLOTS = [
@@ -504,9 +531,14 @@ function replaceEdges(
         ex.setTarget({ cell: l.to, port: targetPort });
       }
       if (route) applyFreeLook(ex, route);
+      // Ok ucu konumu KOŞULSUZ düzeltilir (eski kenarlar da düzelsin):
+      // uç, port noktasına yani kart kenarına tam oturur. Gerekçe: linkMarker.
+      if (ex.attr('line/targetMarker/offset') !== LINK_MARKER_SIZE / 2) {
+        ex.attr('line/targetMarker/offset', LINK_MARKER_SIZE / 2);
+      }
       if (ex.attr('line/strokeDasharray') !== '4 4') {
         ex.attr('line/strokeDasharray', '4 4');
-        ex.attr('line/targetMarker/size', 7);
+        ex.attr('line/targetMarker/size', LINK_MARKER_SIZE);
         ex.attr('line/targetMarker/strokeWidth', 0);
       }
       if (ex.attr('line/stroke') !== stroke || ex.attr('line/strokeWidth') !== (selected ? 2 : 1.25)) {
@@ -539,7 +571,7 @@ function replaceEdges(
           strokeWidth: selected ? 2 : 1.25,
           strokeDasharray: '4 4',
           sourceMarker: null,
-          targetMarker: { name: 'classic', size: 7, fill: stroke, strokeWidth: 0 },
+          targetMarker: linkMarker(stroke),
         },
       },
       labels: labelText ? [labelItem(labelText)] : [],

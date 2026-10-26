@@ -209,7 +209,7 @@ export function AgentMesh({ embedded = false, initialTask = '' }: { embedded?: b
       req = {
         provider: p.id,
         base_url: p.baseUrl || undefined,
-        api_key: p.key,
+        use_stored_key: true,
         model: p.model,
         task: text,
         max_tasks: maxTasks,

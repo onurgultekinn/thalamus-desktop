@@ -65,7 +65,8 @@ export interface RunState {
 export interface StartRunRequest {
   provider: string;
   base_url?: string;
-  api_key?: string;
+  /** Anahtar gönderilmez; backend kasasından çözülür. */
+  use_stored_key?: boolean;
   model: string;
   task: string;
   max_tasks?: number;

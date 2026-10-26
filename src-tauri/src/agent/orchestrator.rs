@@ -93,8 +93,12 @@ pub struct RunRequest {
     pub provider: String,
     #[serde(default)]
     pub base_url: Option<String>,
+    /// Doğrudan anahtar (eski/mock akışlar). Normal istemci GÖNDERMEZ;
+    /// `use_stored_key` ile backend kasasından çözülür (JS'e key girmez).
     #[serde(default)]
     pub api_key: String,
+    #[serde(default)]
+    pub use_stored_key: bool,
     pub model: String,
     pub task: String,
     #[serde(default)]
@@ -419,10 +423,21 @@ pub fn start_run(
             max_tasks,
         })
     } else {
+        // Anahtar: açıkça verilmişse o, yoksa kasa (DPAPI). Hata mesajında
+        // anahtar değeri asla yer almaz.
+        let resolved_key = if !req.api_key.trim().is_empty() {
+            req.api_key.trim().to_string()
+        } else if req.use_stored_key {
+            crate::secrets::imp::secret_get(req.provider.trim())
+                .map_err(|e| format!("key vault read failed: {}", e))?
+                .ok_or_else(|| format!("no stored key for connection '{}'", req.provider))?
+        } else {
+            String::new()
+        };
         Box::new(LlmBrain::new(
             &provider,
             req.base_url.as_deref(),
-            &req.api_key,
+            &resolved_key,
             &model,
         )?)
     };

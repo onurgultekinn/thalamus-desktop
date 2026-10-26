@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { MarkdownMessage } from './MarkdownMessage';
 
 /**
@@ -57,6 +57,18 @@ export function splitLiveBlocks(content: string): { frozen: string[]; tail: stri
 
 export const StreamingMessage: React.FC<{ content: string }> = ({ content }) => {
   const { frozen, tail } = splitLiveBlocks(content);
+
+  // BEKLEME TESPİTİ: delta akarken imleç SABİT durur (yanıp sönmez).
+  // Yalnız 350 ms yeni parça gelmezse "nefes alma" animasyonu başlar.
+  // Eskiden animasyon her render'da (her token'da) sıfırlandığı için imleç
+  // sürekli yanıp sönüyor ve düzensiz görünüyordu; bu artık olmuyor.
+  const [idle, setIdle] = useState(false);
+  useEffect(() => {
+    setIdle(false);
+    const id = window.setTimeout(() => setIdle(true), 350);
+    return () => window.clearTimeout(id);
+  }, [content]);
+
   return (
     <div className="tlm-streaming">
       {frozen.map((block, index) => (
@@ -65,11 +77,11 @@ export const StreamingMessage: React.FC<{ content: string }> = ({ content }) => 
       {/* İmleç yalnız canlı kuyrukta: donmuş blokların sonunda dik çizgi
           birikmesin diye kuyruk ayrı sarmalanır (.tlm-stream-tail). */}
       {tail.trim() ? (
-        <div className="tlm-stream-tail">
+        <div className={`tlm-stream-tail${idle ? ' is-idle' : ''}`}>
           <MarkdownMessage content={tail} streaming />
         </div>
       ) : (
-        <span className="tlm-stream-dots" aria-hidden="true" />
+        <span className={`tlm-stream-dots${idle ? ' is-idle' : ''}`} aria-hidden="true" />
       )}
     </div>
   );

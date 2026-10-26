@@ -32,7 +32,7 @@ import {
   unloadLocalModel,
   type ServeResult,
 } from '../lib/localModels';
-import { getStoredKey } from '../lib/secrets';
+import { hasStoredKey } from '../lib/secrets';
 
 export interface AiEditResult {
   file: string;
@@ -70,7 +70,8 @@ export interface CodeBlock {
 export interface ActiveProvider {
   id: string;
   name: string;
-  key: string;
+  /** Anahtar DEĞERİ burada YOK; yalnız kasada kayıtlı mı bilgisi. */
+  hasKey: boolean;
   baseUrl: string;
   model: string;
   /** Düşünme kapatılırken gönderilecek değer (ör. EVREN/vLLM için "none"). */
@@ -124,7 +125,7 @@ export async function getActiveProvider(): Promise<ActiveProvider | null> {
       return {
         id: 'managed',
         name: connectionName('managed'),
-        key: '',
+        hasKey: false,
         baseUrl: base || 'http://127.0.0.1:11500/v1',
         model,
       };
@@ -139,16 +140,16 @@ export async function getActiveProvider(): Promise<ActiveProvider | null> {
 
   for (const c of ordered) {
     const local = isLocalBaseUrl(c.baseUrl);
-    const key = (await getStoredKey(c.id)).trim();
+    const hasKey = await hasStoredKey(c.id).catch(() => false);
     // Yerel uç noktalar anahtarsız çalışır; uzak bağlantılar anahtarsız ELLENİR.
-    if (!local && !key) continue;
+    if (!local && !hasKey) continue;
     // Yerel bağlantılar yalnızca açıkça seçiliyken kullanılır (fallback değil).
     if (local && c.id !== preferred) continue;
     const model = getProviderModel(c.id);
     return {
       id: c.id,
       name: c.name || connectionName(c.id),
-      key,
+      hasKey,
       baseUrl: c.baseUrl,
       model,
       reasoningEffort: reasoningPreference(

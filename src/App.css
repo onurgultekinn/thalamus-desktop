@@ -1027,33 +1027,76 @@ html[data-theme='nord-red'] .text-\[\#dcb67a\] { color: #DBA871 !important; }
 }
 
 /* ── Akış (streaming) ────────────────────────────────────────────────────── */
-@keyframes tlm-caret-blink {
-  50% { opacity: 0; }
+/* Yumuşak "nefes": sert on/off yerine opaklık dalgalanması — titreme hissi
+   vermez. Yalnız BEKLEME durumunda çalışır (aşağıdaki .is-idle). */
+@keyframes tlm-caret-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.28; }
 }
 
-/* Yanıp sönen imleç: yalnız CANLI kuyruğun sonuna eklenir. Eskiden tüm
-   akış sarmalayıcısını hedeflediği için donmuş her bloğun sonunda bir dik
-   çizgi beliriyordu; artık tek imleç yalnız yazılan yerde görünür. */
+/* İmleç: yalnız CANLI kuyruğun sonuna eklenir (donmuş bloklarda birikmez).
+   YAZARKEN SABİT ve tam opaktır — her token'da animasyon sıfırlandığı için
+   eskiden çıldıran bir yanıp sönme oluşuyordu. Beklerken (350 ms sessizlik)
+   yumuşak nefes animasyonu devreye girer. */
 .tlm-stream-tail > div > :is(p, li, h1, h2, h3, h4, h5, h6):last-child::after,
 .tlm-stream-tail > div > :is(ul, ol):last-child > li:last-child::after {
   content: '';
   display: inline-block;
   width: 2px;
-  height: 1em;
-  margin-left: 3px;
-  vertical-align: -0.15em;
+  height: 1.05em;
+  margin-left: 2px;
+  border-radius: 1px;
+  vertical-align: text-bottom;
+  transform: translateY(-0.06em);
   background: rgb(var(--tlm-gold));
-  animation: tlm-caret-blink 1s steps(2, start) infinite;
+  opacity: 1;
 }
 
-/* Henüz görünür metin yokken (ilk parça beklenirken) aynı imleç. */
+/* AKIŞ SARMALAYICISI: donmuş bloklar ayrı <MarkdownMessage> örnekleri olarak
+   çizildiği için her birinin kendi dış marjı üst üste biniyordu (bloklar
+   arası boşluk iki katına çıkıyor, imleç yeri kayıyordu). Ardışık blokların
+   YALNIZ ilk çocuğunun üst marjını sıfırla: akış düzgün bir metin gibi akar. */
+.tlm-streaming > * + * > :first-child {
+  margin-top: 0 !important;
+}
+.tlm-streaming > * {
+  min-width: 0;
+}
+
+/* Bekleme: nefes al. .is-idle yalnız sessizlikte eklenir. */
+.tlm-stream-tail.is-idle > div > :is(p, li, h1, h2, h3, h4, h5, h6):last-child::after,
+.tlm-stream-tail.is-idle > div > :is(ul, ol):last-child > li:last-child::after {
+  animation: tlm-caret-breathe 1.5s ease-in-out infinite;
+}
+
+/* Henüz görünür metin yokken (ilk parça beklenirken) aynı imleç.
+   Block içinde tek başına durduğu için satır kutusuna hizalanır. */
+/* Son blok kod/çit ise ::after satır içine giremez; imleci kuyruk
+   sarmalayıcısının sonuna yerleştir (görünmez değil, alt satırda). */
+.tlm-stream-tail:has(> div > :last-child:is(pre, .code-block-wrapper))::after {
+  content: '';
+  display: block;
+  width: 2px;
+  height: 1.05em;
+  margin-top: 2px;
+  border-radius: 1px;
+  background: rgb(var(--tlm-gold));
+}
+.tlm-stream-tail.is-idle:has(> div > :last-child:is(pre, .code-block-wrapper))::after {
+  animation: tlm-caret-breathe 1.5s ease-in-out infinite;
+}
+
 .tlm-stream-dots {
   display: inline-block;
   width: 2px;
-  height: 1em;
-  vertical-align: -0.15em;
+  height: 1.05em;
+  border-radius: 1px;
+  vertical-align: text-bottom;
   background: rgb(var(--tlm-gold));
-  animation: tlm-caret-blink 1s steps(2, start) infinite;
+}
+
+.tlm-stream-dots.is-idle {
+  animation: tlm-caret-breathe 1.5s ease-in-out infinite;
 }
 
 /* Yarım kalan cevabın altındaki dürüst not (durduruldu / süre doldu / koptu). */

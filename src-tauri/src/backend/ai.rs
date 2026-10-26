@@ -14,7 +14,7 @@ use serde_json::{json, Value};
 use crate::engine::pipeline::process_with_metrics;
 use crate::engine::{edits, schema, MINIMAL_DECODER_INSTRUCTION};
 
-use super::{tools, BackendState};
+use super::{model_caps, tools, BackendState};
 use super::serve::begin_use;
 use axum::extract::State;
 
@@ -118,18 +118,31 @@ pub struct AiChatRequest {
 /// İsteğin anahtarını çözer: (1) açıkça verilen api_key, (2) use_stored_key
 /// ise kasa (Credential Manager, DPAPI korumalı) provider kimliğiyle.
 /// Hata mesajlarında anahtar DEĞERİ asla yer almaz.
+/// Başlığa yazılamayacak karakterleri ayıklar. Kasadan bozuk bir değer
+/// gelse bile reqwest'in "builder error" (500) vermesi yerine ya temiz
+/// değer kullanılır ya da açıklayıcı 400 döner.
+fn sanitize_key(raw: &str) -> String {
+    raw.chars()
+        .filter(|c| !c.is_control() && !c.is_whitespace())
+        .collect()
+}
+
 fn resolve_api_key(req: &AiChatRequest) -> Result<String, (axum::http::StatusCode, String)> {
     if let Some(k) = req.api_key.as_deref() {
-        if !k.trim().is_empty() {
-            return Ok(k.trim().to_string());
+        let cleaned = sanitize_key(k);
+        if !cleaned.is_empty() {
+            return Ok(cleaned);
         }
     }
     if req.use_stored_key {
         return match crate::secrets::imp::secret_get(req.provider.trim()) {
-            Ok(Some(k)) if !k.trim().is_empty() => Ok(k.trim().to_string()),
+            Ok(Some(k)) if !sanitize_key(&k).is_empty() => Ok(sanitize_key(&k)),
             Ok(_) => Err((
                 axum::http::StatusCode::UNAUTHORIZED,
-                format!("no stored key for connection '{}'", req.provider),
+                format!(
+                    "no valid stored key for '{}'. Paste the key again in Settings → Providers (the previous entry was corrupt and has been cleared).",
+                    req.provider
+                ),
             )),
             Err(e) => Err((
                 axum::http::StatusCode::INTERNAL_SERVER_ERROR,
@@ -153,6 +166,11 @@ pub struct GenOptions {
     pub max_tokens: Option<u32>,
     /// Araç şemaları gönderilsin mi? (araç gerektirmeyen çağrılar için off)
     pub tools_enabled: bool,
+    /// MODEL YETENEĞİ: model `tools` desteklemiyorsa şema gönderilmez
+    /// (laya/clef gibi modellerde sağlayıcı 400 verirdi).
+    pub model_supports_tools: bool,
+    /// Model `reasoning_effort` alanını reddediyorsa gönderilmez.
+    pub model_supports_reasoning_effort: bool,
 }
 
 impl Default for GenOptions {
@@ -161,6 +179,8 @@ impl Default for GenOptions {
             temperature: None,
             max_tokens: None,
             tools_enabled: true,
+            model_supports_tools: true,
+            model_supports_reasoning_effort: true,
         }
     }
 }
@@ -173,7 +193,17 @@ impl GenOptions {
                 .filter(|t| t.is_finite() && (0.0..=2.0).contains(t)),
             max_tokens: req.max_tokens.filter(|n| (1..=32_768).contains(n)),
             tools_enabled: req.tools_enabled.unwrap_or(true),
+            // Yetenekler prepare_prompt'ta modele göre doldurulur.
+            model_supports_tools: true,
+            model_supports_reasoning_effort: true,
         }
+    }
+
+    /// Model yeteneklerini uygular (prepare_prompt sonrası çağrılır).
+    pub fn with_caps(mut self, caps: &model_caps::ModelCaps) -> Self {
+        self.model_supports_tools = caps.tools;
+        self.model_supports_reasoning_effort = caps.reasoning_effort;
+        self
     }
 
     fn max_tokens_or_default(&self) -> u32 {
@@ -257,6 +287,14 @@ pub async fn ai_test(
     })))
 }
 
+/// Chat URL'inden sağlayıcı TABANINI çıkarır (".../v1/chat/completions" →
+/// ".../v1"). Model yeteneği sorgusu (`/models`) bu tabanı ister.
+fn base_url_of(chat_url: &str) -> &str {
+    chat_url
+        .strip_suffix("/chat/completions")
+        .unwrap_or(chat_url)
+}
+
 pub(crate) fn provider_url(provider: &str, base_url: Option<&str>) -> Result<String, String> {
     // Kullanıcı tanımlı bağlantı: verilen base_url HER ZAMAN önceliklidir;
     // sabit eşlemeler yalnızca hiç URL verilmediğinde yedektir.
@@ -297,7 +335,10 @@ pub(crate) fn is_local_endpoint(url: &str) -> bool {
 /// Kod bağlamı: gövde yerine ŞEMA gönderilir (bağlam tasarrufu);
 /// gövde `get_code_body` aracıyla istenir. Düzenlemeler aider tarzı
 /// SEARCH/REPLACE blokları olarak beklenir.
-fn build_code_context(blocks: &[(String, String, String)]) -> Option<String> {
+fn build_code_context(
+    blocks: &[(String, String, String)],
+    bpe: &tiktoken_rs::CoreBPE,
+) -> Option<String> {
     if blocks.is_empty() {
         return None;
     }
@@ -319,14 +360,40 @@ fn build_code_context(blocks: &[(String, String, String)]) -> Option<String> {
         }
         // Uzantı-duyarlı çıkarım: .py girinti, .ts/.tsx/.js/.rs küme
         // parantezi derinliği. Desteklenmeyen uzantı → tam gövde (eskisi gibi).
+        //
+        // ÖLÇÜMLÜ SEÇİM (AR-GE): şema her zaman kazanç sağlamaz — çok küçük
+        // ya da çok sayıda kısa fonksiyon içeren dosyada şema TAM GÖVDEDEN
+        // BÜYÜK olabilir. Token'la ölçülür; kazanç %25'in (certification
+        // eşiği) altındaysa tam gövde gönderilir. Anlama tarafının ölçümü
+        // lab/tools/comprehension_probe.py code_schema yöntemiyle çalışır.
         match schema::extract_schema_for(name, body) {
-            Some(s) => out.push_str(&format!(
-                "--- {} ---\n{}\n",
-                name,
-                schema::render_schema(&s)
-            )),
+            Some(sch) => {
+                let rendered = schema::render_schema(&sch);
+                let body_tokens = bpe.encode_ordinary(body).len();
+                let schema_tokens = bpe.encode_ordinary(&rendered).len();
+                let savings = if body_tokens == 0 {
+                    0.0
+                } else {
+                    100.0 * (body_tokens.saturating_sub(schema_tokens)) as f64
+                        / body_tokens as f64
+                };
+                if savings >= 25.0 {
+                    out.push_str(&format!("--- {} ---
+{}
+", name, rendered));
+                } else {
+                    out.push_str(&format!(
+                        "--- {} (small/sparse, full body) ---
+{}
+",
+                        name, body
+                    ));
+                }
+            }
             None => out.push_str(&format!(
-                "--- {} (schema extraction failed, full body) ---\n{}\n",
+                "--- {} (schema extraction failed, full body) ---
+{}
+",
                 name, body
             )),
         }
@@ -437,7 +504,7 @@ fn whole_file_fallback(
     msgs.push(json!({"role": "user", "content": instruction}));
     let mut body = json!({"model": model, "messages": msgs});
     gen.apply(&mut body);
-    if let Some(effort) = reasoning_effort {
+    if let Some(effort) = reasoning_effort.filter(|_| gen.model_supports_reasoning_effort) {
         body["reasoning_effort"] = json!(effort);
     }
     let resp = transport.post_json(
@@ -692,11 +759,11 @@ pub fn run_tool_loop(
             "model": model,
             "messages": messages,
         });
-        if gen.tools_enabled {
+        if gen.tools_enabled && gen.model_supports_tools {
             body["tools"] = tools_json.clone();
         }
         gen.apply(&mut body);
-        if let Some(effort) = reasoning_effort {
+        if let Some(effort) = reasoning_effort.filter(|_| gen.model_supports_reasoning_effort) {
             body["reasoning_effort"] = json!(effort);
         }
         let resp = post_with_retry(|| transport.post_json(url, &headers, &body))?;
@@ -867,7 +934,12 @@ fn compress_messages_invisibly(
 
 /// Doğrulama + prompt hazırlığı (proje belleği, görünmez sıkıştırma, kod
 /// şeması). Hem tek seferlik hem akış yolu aynı hazırlığı kullanır.
-type PreparedPrompt = (Vec<Value>, Vec<(String, String, String)>, (usize, usize, usize));
+type PreparedPrompt = (
+    Vec<Value>,
+    Vec<(String, String, String)>,
+    (usize, usize, usize),
+    model_caps::ModelCaps,
+);
 
 /// Geçmişteki DESTEK assistant mesajlarını kırpar. Ajan yanıtları (SEARCH/
 /// REPLACE blokları, tam dosya gövdeleri) binlerce token taşıyabilir ve her
@@ -926,6 +998,26 @@ fn prepare_prompt(
             axum::http::StatusCode::BAD_REQUEST,
             "api_key gerekli".into(),
         ));
+    }
+    // MODEL YETENEKLERİ: laya/clef gibi modeller araç (tools) desteklemez;
+    // OCR/embedding/ASR modelleri sohbet uç noktasını hiç kullanmaz.
+    // Meta veri yoksa varsayılan (mevcut davranış) korunur.
+    let caps = if is_local_base {
+        None
+    } else {
+        model_caps::caps_for(base_url_of(&url), &api_key, &req.model)
+    };
+    if let Some(c) = &caps {
+        if !c.is_chat_capable() {
+            return Err((
+                axum::http::StatusCode::BAD_REQUEST,
+                format!(
+                    "'{}' bir {} modeli — sohbet için kullanılamaz. Sohbet için glm-5.3, deepseek-v4.1-flash veya qwen3.8-flash-next gibi bir model seçin.",
+                    req.model,
+                    c.task_label()
+                ),
+            ));
+        }
     }
     let mut messages = req.messages.as_array().cloned().unwrap_or_default();
     if messages.is_empty() {
@@ -990,11 +1082,11 @@ fn prepare_prompt(
             json!({"role": "system", "content": MINIMAL_DECODER_INSTRUCTION}),
         );
     }
-    if let Some(ctx) = build_code_context(&blocks) {
+    if let Some(ctx) = build_code_context(&blocks, &state.bpe) {
         let pos = messages.len().saturating_sub(1);
         messages.insert(pos, json!({"role": "system", "content": ctx}));
     }
-    Ok((messages, blocks, engine))
+    Ok((messages, blocks, engine, caps.unwrap_or_default()))
 }
 
 // ── Canlı akış (SSE) ────────────────────────────────────────────────────────
@@ -1047,14 +1139,14 @@ fn stream_one_round(
             "messages": messages,
             "stream": true,
         });
-        if gen.tools_enabled {
+        if gen.tools_enabled && gen.model_supports_tools {
             body["tools"] = tools_json.clone();
         }
         gen.apply(&mut body);
         if include_usage {
             body["stream_options"] = json!({"include_usage": true});
         }
-        if let Some(effort) = reasoning_effort {
+        if let Some(effort) = reasoning_effort.filter(|_| gen.model_supports_reasoning_effort) {
             body["reasoning_effort"] = json!(effort);
         }
         body
@@ -1237,6 +1329,12 @@ fn stream_tool_loop(
             );
             return;
         }
+        // İPTAL YAYILIMI: kullanıcı Stop'a bastıysa istemci bağlantıyı kapatır
+        // ve kanal kapanır. Bir sonraki tura girmeden dur — uzun bir araç
+        // çağrısının (ör. 60 sn'lik komut) sonucunu beklemeye devam etmeyiz.
+        if tx.is_closed() {
+            return;
+        }
         // Geçici hatalarda turu tekrarla: HTTP durum hataları akış
         // BAŞLAMADAN oluşur (emit yok), kısmi akış tekrarı riski yoktur.
         let round = post_with_retry(|| {
@@ -1332,12 +1430,12 @@ pub async fn ai_chat_stream(
         .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, e))?;
     // İstek boyunca sunucuyu meşgul işaretle: uykuya dalmışsa hemen uyandır.
     let local_use = begin_use(&url);
-    let (messages, blocks, engine) = prepare_prompt(&state, &req)?;
+    let (messages, blocks, engine, caps) = prepare_prompt(&state, &req)?;
     let url_for_task = url.clone();
     let api_key_for_task = resolve_api_key(&req)?;
     let model_for_task = req.model.clone();
     let effort_for_task = req.reasoning_effort.clone();
-    let gen_for_task = GenOptions::from_request(&req);
+    let gen_for_task = GenOptions::from_request(&req).with_caps(&caps);
     let permission_for_task = req.permission.clone();
     let root_for_task = state
         .workspace_root
@@ -1347,6 +1445,7 @@ pub async fn ai_chat_stream(
     let engine_for_task = tools::EngineCtx {
         bpe: Some(state.bpe.clone()),
         repo_cache: Some(state.repo_cache.clone()),
+        schema_cache: Some(state.schema_cache.clone()),
     };
 
     let (tx, rx) = tokio::sync::mpsc::channel::<String>(64);
@@ -1406,11 +1505,11 @@ pub async fn ai_chat(
     // Tüm yanıt (yedek whole-file denemesi dahil) bitene kadar meşgul say.
     let _local_use = begin_use(&url);
     let messages_before_context = req.messages.as_array().cloned().unwrap_or_default();
-    let (messages, blocks, engine) = prepare_prompt(&state, &req)?;
+    let (messages, blocks, engine, caps) = prepare_prompt(&state, &req)?;
     let (engine_original, engine_compressed, engine_count) = engine;
 
     let effort_for_task = req.reasoning_effort.clone();
-    let gen_for_task = GenOptions::from_request(&req);
+    let gen_for_task = GenOptions::from_request(&req).with_caps(&caps);
     let blocks_for_task = blocks.clone();
     let url_for_task = url.clone();
     let api_key_for_task = resolve_api_key(&req)?;
@@ -1424,6 +1523,7 @@ pub async fn ai_chat(
     let engine_for_task = tools::EngineCtx {
         bpe: Some(state.bpe.clone()),
         repo_cache: Some(state.repo_cache.clone()),
+        schema_cache: Some(state.schema_cache.clone()),
     };
     let result = tokio::task::spawn_blocking(move || {
         let transport = HttpTransport;
@@ -2158,7 +2258,8 @@ mod tests {
             "sample.py".into(),
             big_sample,
         )];
-        let ctx = build_code_context(&blocks).unwrap();
+        let bpe = tiktoken_rs::cl100k_base().unwrap();
+        let ctx = build_code_context(&blocks, &bpe).unwrap();
         assert!(ctx.contains("SCHEMA"));
         assert!(ctx.contains("class ConfigurationManager:"));
         // Gövdedeki benzersiz satır şemada OLMAMALI (bağlam tasarrufu kanıtı)

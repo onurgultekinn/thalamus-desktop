@@ -35,6 +35,31 @@ import { useToast } from './Toast';
 // on-device measurement summary; binary files are noted but omitted; oversized
 // text files are truncated.
 const MAX_TEXT_CHARS = 200_000;
+/** Klasör bırakıldığında tek seferde alınacak en fazla dosya. */
+const DROP_MAX_FILES = 20;
+/**
+ * YAPISAL VERİ KIRPMASI: JSON/CSV/JSONL gibi dosyalar kırpılırsa motorun
+ * kayıpsız sıkıştırması bozulur (yarım JSON geçersizdir). Bu türler için
+ * kırpma eşiği yükseltilir.
+ */
+const STRUCTURED_EXT = /\.(json|jsonl|ndjson|csv|tsv|logfmt|xml|ya?ml|toml|ini|sql)$/i;
+/** Kırpma yalnız metin türlerinde: baş %70 + son %30 (dosya sonu genelde
+ *  main/export içerir; salt `slice(0,N)` onu kaybediyordu). */
+function smartTruncate(text: string, limit: number): { text: string; truncated: boolean } {
+  if (text.length <= limit) return { text, truncated: false };
+  const headChars = Math.floor(limit * 0.7);
+  const tailChars = limit - headChars;
+  const removed = text.length - limit;
+  const marker = `
+
+[... ${removed.toLocaleString()} chars omitted (file is ${text.length.toLocaleString()} chars) — ask for a specific line range or a definition to see it ...]
+
+`;
+  return {
+    text: text.slice(0, headChars) + marker + text.slice(text.length - tailChars),
+    truncated: true,
+  };
+}
 const MAX_READ_BYTES = 8 * 1024 * 1024;
 
 export interface UploadedFile {
@@ -179,26 +204,59 @@ export function CommandBar({
     }
 
     let text = new TextDecoder().decode(buffer);
-    let truncated = false;
-    if (text.length > MAX_TEXT_CHARS) {
-      text = text.slice(0, MAX_TEXT_CHARS);
-      truncated = true;
-    }
-    setUploadedFiles(prev => [...prev, { name: file.name, size, kind: truncated ? 'large' : 'text', mime, body: text }]);
+    // Yapısal veri bozulmasın: bu türler için çok daha yüksek eşik (motor
+    // bunları kayıpsız sıkıştırabiliyor; kırpmak o kazancı yok eder).
+    const structured = STRUCTURED_EXT.test(file.name);
+    const limit = structured ? MAX_TEXT_CHARS * 4 : MAX_TEXT_CHARS;
+    const { text: body, truncated } = smartTruncate(text, limit);
+    setUploadedFiles(prev => [...prev, { name: file.name, size, kind: truncated ? 'large' : 'text', mime, body }]);
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    // ÇOKLU SEÇİM: eskiden yalnız ilk dosya alınıyordu; geri kalanı sessizce
+    // düşüyordu. input'ta `multiple` açık.
+    const files = Array.from(e.target.files ?? []);
     e.target.value = '';
-    if (file) await handleFile(file);
+    for (const f of files) await handleFile(f);
   };
 
   const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setIsDragging(false);
-    const file = e.dataTransfer.files?.[0];
-    if (file) await handleFile(file);
+    // Çoklu dosya + klasör: klasör bırakılırsa içindeki metin dosyaları
+    // (en fazla DROP_MAX_FILES adet) sırayla eklenir.
+    const items = Array.from(e.dataTransfer.items ?? []);
+    const files: File[] = Array.from(e.dataTransfer.files ?? []);
+    const hasDir = items.some(
+      (it) => it.kind === 'file' && typeof it.webkitGetAsEntry === 'function' && it.webkitGetAsEntry()?.isDirectory
+    );
+    if (!hasDir) {
+      for (const f of files) await handleFile(f);
+      return;
+    }
+    const collected: File[] = [];
+    const walk = async (entry: any): Promise<void> => {
+      if (collected.length >= DROP_MAX_FILES) return;
+      if (entry.isFile) {
+        const f: File | null = await new Promise((res) => entry.file(res, () => res(null)));
+        if (f) collected.push(f);
+      } else if (entry.isDirectory && entry.createReader) {
+        const reader = entry.createReader();
+        const readBatch = (): Promise<any[]> =>
+          new Promise((res) => reader.readEntries(res, () => res([])));
+        let batch = await readBatch();
+        while (batch.length > 0 && collected.length < DROP_MAX_FILES) {
+          for (const child of batch) await walk(child);
+          batch = await readBatch();
+        }
+      }
+    };
+    for (const it of items) {
+      const entry = typeof it.webkitGetAsEntry === 'function' ? it.webkitGetAsEntry() : null;
+      if (entry) await walk(entry);
+    }
+    for (const f of collected) await handleFile(f);
   };
 
   useEffect(() => {
@@ -554,9 +612,10 @@ export function CommandBar({
           </div>
           
           <input 
-            type="file" 
-            ref={fileInputRef} 
-            onChange={handleFileChange} 
+            type="file"
+            multiple
+            ref={fileInputRef}
+            onChange={handleFileChange}
             style={{ display: 'none' }} 
           />
           <div

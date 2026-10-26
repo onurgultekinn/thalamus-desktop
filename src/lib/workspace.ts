@@ -170,6 +170,63 @@ export async function pickFiles(title?: string): Promise<string[]> {
 }
 
 /**
+ * Seçilen dosyaların İÇERİĞİNİ okur (yol listesi modele yetmiyordu).
+ * Backend `thalamus_read_file` workspace köküne sınırlıdır ve 200 KB üstünü
+ * reddeder; burada dosya başına en fazla `perFileChars` alınır, toplam
+ * `totalChars` ile sınırlanır (token bütçesi). Okunamayan dosya sessizce
+ * atlanmaz — sonuçta `error` alanıyla döner ki arayüz dürüstçe göstersin.
+ */
+export interface AttachedFileContent {
+  name: string;
+  body: string;
+  truncated: boolean;
+  error?: string;
+}
+
+export async function readAttachedFiles(
+  paths: string[],
+  opts: { perFileChars?: number; totalChars?: number } = {}
+): Promise<AttachedFileContent[]> {
+  const perFile = opts.perFileChars ?? 60_000;
+  const total = opts.totalChars ?? 180_000;
+  const out: AttachedFileContent[] = [];
+  let used = 0;
+  for (const path of paths) {
+    const name = path.replace(/\\/g, '/').split('/').pop() || path;
+    try {
+      if (!inTauriDesktop()) {
+        out.push({ name, body: '', truncated: false, error: 'file reading needs the desktop app' });
+        continue;
+      }
+      const { invoke } = await import('@tauri-apps/api/core');
+      const raw = await invoke<string>('thalamus_read_file', { path });
+      const budget = Math.max(0, Math.min(perFile, total - used));
+      if (budget <= 0) {
+        out.push({ name, body: '', truncated: true, error: 'attachment budget exhausted' });
+        continue;
+      }
+      let text = raw;
+      let truncated = false;
+      if (text.length > budget) {
+        // Sondan da pay bırak (dosya sonundaki export/main kaybolmasın).
+        const head = Math.floor(budget * 0.7);
+        const tail = budget - head;
+        text =
+          text.slice(0, head) +
+          `\n\n[... ${(raw.length - budget).toLocaleString()} chars omitted ...]\n\n` +
+          text.slice(raw.length - tail);
+        truncated = true;
+      }
+      used += text.length;
+      out.push({ name, body: text, truncated });
+    } catch (err) {
+      out.push({ name, body: '', truncated: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  return out;
+}
+
+/**
  * Opens a project by switching the active workspace root.
  *
  * V6: masaüstünde backend'in BAŞARISI dogrulanir. Silinmis/tasinmis bir

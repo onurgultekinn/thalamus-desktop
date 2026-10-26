@@ -13,7 +13,7 @@ pub mod backend;
 // Sıkıştırma motoru, laboratuvar harness'ı (`examples/lab.rs`) tarafından
 // doğrudan ölçülsün diye public. Üretim yolu değişmez; yalnız görünürlük.
 pub mod engine;
-mod secrets;
+pub mod secrets;
 
 pub use engine::{CompressionMetrics, JsonCompressor};
 
@@ -926,6 +926,11 @@ fn backend_token() -> String {
 }
 
 #[tauri::command]
+fn secret_exists(provider: String) -> Result<bool, String> {
+    secrets::imp::secret_exists(provider.trim())
+}
+
+#[tauri::command]
 fn secret_get(provider: String) -> Result<Option<String>, String> {
     secrets::imp::secret_get(provider.trim())
 }
@@ -1015,6 +1020,7 @@ pub fn run() {
             thalamus_load_config,
             open_external,
             secret_set,
+            secret_exists,
             backend_token,
             secret_get,
             secret_delete,
@@ -1031,6 +1037,56 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    /// REGRESYON: `#[tauri::command]` ile tanımlanan HER fonksiyon
+    /// `generate_handler![...]` listesinde olmalı. Eksik kayıt çalışma anında
+    /// "command not found" olarak patlar ve sessizce yanlış davranışa yol açar
+    /// (ör. secret_exists kaydı düşünce her sağlayıcı "anahtarsız" göründü).
+    #[test]
+    fn every_tauri_command_is_registered() {
+        let src = include_str!("lib.rs");
+        let mut defined: Vec<String> = Vec::new();
+        let lines: Vec<&str> = src.lines().collect();
+        for (i, line) in lines.iter().enumerate() {
+            if line.trim() != "#[tauri::command]" {
+                continue;
+            }
+            // Sonraki birkaç satırda `fn ad(` ara (nitelikler arasına girebilir).
+            for l in lines.iter().skip(i + 1).take(4) {
+                let t = l.trim();
+                if let Some(rest) = t.strip_prefix("fn ") {
+                    let name: String = rest
+                        .chars()
+                        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                        .collect();
+                    if !name.is_empty() {
+                        defined.push(name);
+                    }
+                    break;
+                }
+            }
+        }
+        assert!(!defined.is_empty(), "hiç komut bulunamadı — ayrıştırma bozuk");
+        let handler_start = src
+            .find("generate_handler![")
+            .expect("generate_handler! bulunamadı");
+        let handler = &src[handler_start..];
+        let missing: Vec<&String> = defined
+            .iter()
+            .filter(|name| {
+                // Listede tam ad olarak geçmeli (satır bazlı, virgülle biten).
+                !handler.lines().any(|l| {
+                    let t = l.trim().trim_end_matches(',');
+                    t == name.as_str()
+                })
+            })
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "şu komutlar generate_handler! listesinde KAYITLI DEĞİL: {:?}",
+            missing
+        );
+    }
+
     use super::*;
 
     #[test]

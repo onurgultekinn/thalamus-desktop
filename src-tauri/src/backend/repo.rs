@@ -128,7 +128,7 @@ pub fn walk(
             if code.is_empty() {
                 continue;
             }
-            out.push(RepoFile { name: rel, code });
+            out.push(RepoFile { name: rel, code, mtime: Some(mtime) });
         }
     }
 }
