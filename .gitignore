@@ -37,6 +37,12 @@ hatalar.txt
 # @file-viewer offline asset kopyaları (üretilir)
 public/file-viewer/
 
+# MediaPipe vision WASM'ı (node_modules'tan üretilir)
+public/mediapipe/wasm/
+
+# Üretilen lisans metni (prebuild)
+public/legal/THIRD_PARTY_NOTICES.txt
+
 # Yerel derleme hız ayarları (makineye özel mutlak yollar: rust-lld, sccache)
 .cargo/config.toml
 

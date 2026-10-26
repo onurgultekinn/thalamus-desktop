@@ -8,7 +8,7 @@
 
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Status: beta](https://img.shields.io/badge/status-beta-orange.svg)](#status)
-[![Platform: Windows](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D4.svg)](#install)
+[![Platform: Windows](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D4.svg)](#requirements)
 [![Tauri 2](https://img.shields.io/badge/Tauri-2-24C8DB.svg)](https://tauri.app)
 [![Rust](https://img.shields.io/badge/Rust-engine-000000.svg?logo=rust)](src-tauri/src/engine)
 [![TypeScript](https://img.shields.io/badge/TypeScript-React%20%2B%20Vite-3178C6.svg?logo=typescript&logoColor=white)](src)
@@ -18,10 +18,10 @@
 ---
 
 Thalamus Desktop combines an AI chat, a project workspace (file explorer,
-editor, terminal), and an agent-mode copilot in a single desktop application.
-The centerpiece is a prompt-compression engine written in pure Rust: it
-converts JSON segments into a compact `@T` table, verifies every round trip,
-and reports exactly how many tokens and dollars each prompt saves.
+editor, terminal), and an agent-mode copilot in one desktop application. The
+centre of the project is a prompt-compression engine written in pure Rust: it
+rewrites structured parts of a prompt into a compact `@T` table, verifies the
+round trip, and reports how many tokens and dollars each prompt saved.
 
 Everything runs on your machine. The backend listens on `127.0.0.1` only,
 provider requests are made by the Rust process rather than the webview, API
@@ -29,76 +29,108 @@ keys live in the OS credential vault, and no telemetry is collected.
 
 ## Why
 
-Sending a prompt to a large model is expensive and most of the cost comes
-from structure the model does not need — repeated keys, boilerplate, and
-duplicated segments. Thalamus rewrites that structure losslessly before the
-request leaves your machine:
+Most of the cost of a large-model request comes from structure the model does
+not need — repeated keys, boilerplate, duplicated rows. Thalamus rewrites that
+structure losslessly before the request leaves your machine:
 
-- **Lossless by construction.** Only JSON segments are translated; every
-  conversion is round-trip verified, so the decompressed prompt is identical
-  to the original.
-- **No lossy shortcuts.** No summarization, paraphrase, or translation is
-  performed — code and prose are carried over word for word, in order.
-- **Visible savings.** Every message shows the token count before and after,
-  the savings percentage, and the cost delta.
+- **Lossless by construction.** Each candidate representation is expanded back
+  and compared with the original before it can be used. Anything that does not
+  reproduce byte-for-byte is dropped and the raw text is sent untouched.
+- **Nothing unexpected is touched.** Prose and fenced code blocks are never
+  compressed. The segment order never changes.
+- **Visible savings.** Every message shows tokens before and after, the savings
+  percentage, and the cost difference. If a candidate does not clear the
+  minimum savings threshold, it is not used.
 
 ## Features
 
 **Chat and compression**
-- Every prompt runs through the compression engine; the UI shows token counts, savings, cost, and a before/after diff.
-- Streaming responses, with stop, regenerate, and edit-and-resend.
+- Every prompt is segmented and compressed; the UI reports token counts,
+  savings, cost, and a before/after diff.
+- Structured formats handled by the engine: JSON, plus XML/SQL/INI/TOML/YAML
+  "plain table" rows for certified shapes.
+- Streaming responses with stop, regenerate, and edit-and-resend.
 - Chat history with search, rename, pin, and export to Markdown or JSON.
-- Per-message token usage and cost, with optional live model pricing.
-- File and image attachments; an on-device MediaPipe object detector classifies images locally (no upload) to choose the processing tier.
-- Ask-question cards: the model can request structured clarification instead of guessing.
-- Model router with automatic, fast, and deep modes.
+- Per-message token usage and cost. A small offline price table ships with the
+  app; optional live pricing is fetched once from the public LiteLLM catalogue
+  and cached for 12 hours.
+- File and image attachments. Screenshots are classified on-device with
+  MediaPipe (no upload) to pick a processing tier.
+- Ask-question cards: the model can request structured clarification instead of
+  guessing.
+- Model router with `auto`, `fast`, and `deep` modes; fast/deep model ids are
+  chosen by you in Settings, not hard-coded.
 
 **Projects (IDE)**
-- File explorer over the real workspace: create, rename, delete (to trash), and move files and folders.
-- Code editor with save (Ctrl+S), run, autosave, and configurable font size, line numbers, and tab size.
-- PowerShell terminal (portable-pty on the Rust side, xterm.js in the UI).
-- File preview for PDF, Office documents, spreadsheets, archives, media, EPUB, and Mermaid/PlantUML drawings.
-- Repository map: a compact summary of the workspace, generated for AI context.
+- File explorer over the real workspace: create, rename, delete (to trash), and
+  move files and folders.
+- Code editor with save (Ctrl+S), run, autosave, and configurable font size,
+  line numbers, and tab size.
+- Terminal powered by `portable-pty` and xterm.js. It launches Windows
+  PowerShell, which is why the app targets Windows.
+- Preview for PDF, Office documents, spreadsheets, archives, media, EPUB, and
+  Mermaid/PlantUML drawings (offline assets ship with the app).
+- Repository map: a compact structural summary of the workspace used as AI
+  context.
 
 **Agent tools**
-- Copilot agent mode with local tools: `read_file`, `write_file`, `edit_file`, `list_dir`, `find_files`, `grep_search`, `get_code_body`, `todo_write`, `dispatch_agent`, `run_command`.
-- Permission modes: read-only, plan, safe, auto, autonomous. `run_command` is active only in the last two.
-- File edits are recorded during the run and applied from a reviewable diff in the editor, so the editor state and undo chain stay intact.
-- Sub-agents via `dispatch_agent`; their token usage is added to the parent run.
-- All tool paths are pinned to the workspace root, outputs are size-capped, and no tool has network access.
+- Copilot agent mode with workspace-scoped tools: `read_file`, `write_file`,
+  `edit_file`, `list_dir`, `find_files`, `grep_search`, `get_code_body`,
+  `todo_write`, `dispatch_agent`, and `run_command`.
+- Permission modes: read-only, plan, safe, auto, autonomous. `run_command` is
+  exposed only in `auto` and `autonomous`.
+- File edits are recorded during a run and applied through a reviewable diff, so
+  the editor state and undo history stay intact.
+- Sub-agents via `dispatch_agent`; their token usage is rolled into the parent
+  run.
+- Every tool path is resolved inside the workspace root, tool output is size
+  capped, and no tool has network access.
 
 **Multi-agent runs**
-- Agent Mesh: a multi-agent pipeline in which agents exchange typed JSON envelopes; the envelope wire format passes through the same lossless `@T` encoder. A mock mode runs without a provider key.
-- Agent Company: plan, chart (node editor), and animate multi-agent setups; plans can be generated from templates through the configured provider.
+- Agent Mesh: agents exchange typed JSON envelopes, and those envelopes pass
+  through the same lossless `@T` encoder. A mock brain runs the pipeline without
+  a provider key.
+- Agent Company: a plan view, a node-based flow editor, and an animated office
+  view for multi-agent setups. Plans can be generated from templates through the
+  configured provider.
 
 **Providers and models**
-- Any OpenAI-compatible endpoint. Presets: OpenAI, DeepSeek, Google Gemini, xAI Grok, Mistral, Groq, OpenRouter, Together AI, Fireworks, Perplexity, Zhipu GLM, Moonshot Kimi, Qwen, SiliconFlow, DeepBricks, EVREN, Ollama, LM Studio, plus custom base URLs.
+- Any OpenAI-compatible endpoint. Presets: OpenAI, DeepSeek, Google Gemini,
+  xAI Grok, Mistral, Groq, OpenRouter, Together AI, Fireworks, Perplexity,
+  Zhipu GLM, Moonshot Kimi, Qwen (DashScope), SiliconFlow, DeepBricks, EVREN,
+  Ollama, LM Studio, plus a custom base URL.
 - API keys are stored in the OS credential vault, not in plain files.
-- Local model discovery: running OpenAI-compatible servers (Ollama, LM Studio, llama.cpp, vLLM, and others), installed inference engines, and model files on disk.
-- Local models can be started and stopped from Settings, with automatic idle shutdown.
+- Local model discovery: running OpenAI-compatible servers (Ollama, LM Studio,
+  llama.cpp, vLLM and others), installed inference engines, and model files on
+  disk.
+- Local models can be started and stopped from Settings, with automatic idle
+  shutdown.
 
 **Interface**
-- English and Turkish UI.
-- Themes: Obsidian (dark) and Nord Red.
-- Command palette and a secondary command bar for navigation and actions.
-- Settings for providers, default model, router mode, workspace root, editor behavior, and chat instructions.
+- English and Turkish UI, switchable at runtime.
+- Themes: Dark (Obsidian palette) and Nord Red.
+- Nucleus: a global command surface for asking a question or navigating the app
+  from anywhere.
+- Command palette and a second command bar in the project view.
+- Local profile screen on first launch. This is **not** an account system: the
+  name you enter stays in `localStorage` and personalises the interface only.
 
 ## Architecture
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │  Webview (React + TypeScript + Vite)                         │
-│  chat · project IDE · agent UI · settings · i18n             │
+│  chat · project IDE · agent views · Nucleus · settings · i18n │
 └───────────────────────────┬──────────────────────────────────┘
                             │ Tauri IPC / HTTP (127.0.0.1)
 ┌───────────────────────────┴──────────────────────────────────┐
 │  Rust backend (Tauri 2)                                      │
 │                                                              │
-│  engine/          lossless @T compression, round-trip check   │
+│  engine/          segmentation, @T encoder, round-trip check  │
 │  backend/ai.rs    streaming, tool loop, retries, budgets      │
 │  backend/tools.rs workspace-pinned file tools                 │
-│  backend/repo*    workspace map for AI context                │
-│  agent/           multi-agent envelopes                       │
+│  backend/repo.rs  workspace map for AI context                │
+│  agent/           multi-agent envelopes and orchestration     │
 │  secrets.rs       OS credential vault                         │
 └───────────────────────────┬──────────────────────────────────┘
                             │ HTTPS
@@ -107,78 +139,100 @@ request leaves your machine:
                 └────────────────────────┘
 ```
 
-The webview never contacts a provider directly. The Rust process owns
-provider credentials, request construction, and compression.
+The webview never contacts a provider directly. The Rust process owns provider
+credentials, request construction, and compression.
+
+## Security and privacy
+
+- The local backend binds to `127.0.0.1` and uses a session token, a CORS
+  allowlist, and a DNS-rebinding guard.
+- Provider keys are read from the OS credential vault. They are never written to
+  config files or logs.
+- Agent tools cannot leave the workspace root and have no network access.
+- No telemetry, no analytics, no crash reporting. Logs stay on disk; nothing is
+  sent unless you copy it into a report.
+
+See [SECURITY.md](SECURITY.md) for the vulnerability disclosure process.
 
 ## Status
 
-Early beta. The core engine, chat, project workspace, and agent tools are
-functional; builds are published under [Releases](../../releases). Expect
-breaking changes before `1.0`.
+Early beta. The engine, chat, project workspace, and agent tools are
+functional. Expect breaking changes before `1.0`. Windows 10/11 only for now;
+the terminal and the desktop shell are Windows-specific.
+
+## Requirements
+
+- Windows 10 or 11 (x64)
+- WebView2 runtime (preinstalled on current Windows)
+- Node.js 22+ and a Rust toolchain, for development and packaging
 
 ## Install
 
-Beta builds will be published under GitHub Releases. Package-manager
-channels (`winget`) are planned for the first public beta.
+Beta builds will be published under GitHub Releases. Package-manager channels
+(`winget`) are planned for the first public beta.
 
-> (first public beta — builds coming)
+> first public beta — builds coming
 
 ## Development
 
-Requires Node.js and a Rust toolchain.
-
-> Note: the file explorer and the terminal are enabled only in the desktop
-> app (they run through Tauri IPC with the Rust backend). In the browser,
-> backend-dependent features remain unavailable.
-
-Desktop app (window + backend):
 ```
 npm install
-npm run tauri:dev
+npm run tauri:dev      # desktop window + Rust backend
 ```
 
-Browser with the real backend (compression + health check over HTTP):
+Browser with the real backend (compression and health check over HTTP):
+
 ```
-npm run backend        # Rust HTTP backend starts (127.0.0.1:8277)
-npm run dev            # in a separate terminal: interface (http://localhost:1420)
+npm run backend        # Rust HTTP backend on 127.0.0.1:8277
+npm run dev            # separate terminal, interface on localhost:1420
 ```
 
-Interface only (browser, no backend features):
+Interface only, no backend features:
+
 ```
 npm run dev
 ```
 
 Packaging:
+
 ```
 npm run tauri:build
 ```
 
-## Contributing
+The file explorer and terminal are available only in the desktop app; they run
+through Tauri IPC with the Rust backend. In a plain browser those features stay
+unavailable.
 
-Bug reports, feature ideas, and pull requests are welcome. Please read
-[CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR. For security issues,
-see [SECURITY.md](SECURITY.md).
+Generated assets (`public/file-viewer/`, `public/mediapipe/wasm/`) are copied
+from `node_modules` by the `predev`/`prebuild` scripts and are not tracked.
 
-## Product principle
+## Fonts and assets
 
-- Compression is fully lossless. Only JSON segments are converted to the `@T` table, and every conversion is round-trip verified. Code blocks and text are carried over word for word, and the segment order never changes.
-- No lossy transformation — summarization, paraphrase, or translation — is performed. Translation (TR to EN) was evaluated and rejected (2026-10): it would pay off in tokens, but it breaks the lossless principle.
+Cascadia Code and Caveat ship under the SIL Open Font License; the licence text
+is in `public/legal/OFL-1.1.txt`. The MediaPipe object-detection model and WASM
+runtime ship under their upstream Apache-2.0 terms.
 
 ## Error codes
 
-Every user-visible error shows a stable code. The full registry — what each
-code means and what to do — is in [ERRORS.md](ERRORS.md).
+Every user-visible error shows a stable code. The registry — what each code
+means and what to do — is in [ERRORS.md](ERRORS.md).
+
+## Contributing
+
+Bug reports, feature ideas, and pull requests are welcome. Read
+[CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR. Security issues go
+through [SECURITY.md](SECURITY.md).
 
 ## Third-party notices
 
-See [ATTRIBUTIONS.md](ATTRIBUTIONS.md) for the full list of runtime
-dependencies, licenses, and design credits.
+See [ATTRIBUTIONS.md](ATTRIBUTIONS.md) for dependencies, licences, and design
+credits. The generated bundle notice is written to
+`public/legal/THIRD_PARTY_NOTICES.txt` during build.
 
 ## License
 
 Copyright 2026 Onur Gültekin. Licensed under the
-[Apache License, Version 2.0](LICENSE). In short: you may use, modify, and
-distribute this software, including commercially, as long as the license
-and attribution notices are preserved. The "Thalamus" name and branding
-are not covered by the license — see [TRADEMARK.md](TRADEMARK.md).
-
+[Apache License, Version 2.0](LICENSE): you may use, modify, and distribute this
+software, including commercially, provided the licence and attribution notices
+are preserved. The Thalamus name and branding are not covered by the licence —
+see [TRADEMARK.md](TRADEMARK.md).
