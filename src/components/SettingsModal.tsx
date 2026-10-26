@@ -56,7 +56,7 @@ import {
   undismissEndpoint,
   type Connection,
 } from '../lib/connections';
-import { hasStoredKey, setStoredKey, clearStoredKeys } from '../lib/secrets';
+import { getStoredKey, setStoredKey, clearStoredKeys } from '../lib/secrets';
 import { readShowReasoning, writeShowReasoning } from '../lib/reasoning';
 import { getWorkspaceRoot } from '../lib/workspace';
 import { explainError } from '../lib/errors';
@@ -505,16 +505,9 @@ export function SettingsModal({
         setActiveProvider(sel);
         setActiveLocal(false);
       }
-      // DEĞER OKUNMAZ: yalnız "kayıtlı mı" bilgisi. Anahtar hiçbir zaman
-      // webview'a alınmaz; input boş başlar, placeholder kayıtlı olduğunu
-      // söyler. Değiştirilmezse mevcut anahtar korunur.
       const map: Record<string, string> = {};
       try {
-        await Promise.all(
-          conns.map(async (c) => {
-            map[c.id] = (await hasStoredKey(c.id)) ? '__STORED__' : '';
-          })
-        );
+        await Promise.all(conns.map(async (c) => { map[c.id] = await getStoredKey(c.id); }));
       } catch {
         if (cancelled) return;
         // Anahtarlar okunamadı: inputlar BOŞ kalır ama bu "sil" demek değildir.
@@ -841,23 +834,17 @@ export function SettingsModal({
     }
     if (keysStatusRef.current === 'ok') {
       // Yalnizca kullaniciyi gercekten degistirdigi anahtarlari yaz.
-      // '__STORED__' = "dokunma" isareti: kullanici inputa bir sey yazmadiysa
-      // mevcut kasitli anahtar oldugu gibi kalir (silme kazasi imkansiz).
-      const STORED = '__STORED__';
       const changed = connections.filter(
         (c) => (keys[c.id] || '').trim() !== (loadedKeysRef.current[c.id] || '').trim()
       );
-      const writes = changed.filter((c) => (keys[c.id] || '').trim() !== STORED);
-      const unchangedStored = changed.length - writes.length;
-      const removed = writes.filter((c) => !(keys[c.id] || '').trim());
+      const removed = changed.filter((c) => !(keys[c.id] || '').trim());
       if (removed.length > 0) {
         const names = removed.map((c) => c.name).join(', ');
         if (!window.confirm(t('settings.removeKeyConfirm', { names }))) {
           return;
         }
       }
-      await Promise.all(writes.map((c) => setStoredKey(c.id, (keys[c.id] || '').trim())));
-      void unchangedStored;
+      await Promise.all(changed.map((c) => setStoredKey(c.id, (keys[c.id] || '').trim())));
     }
     localStorage.setItem(activeProviderStorageKey, activeProvider);
 
@@ -1264,21 +1251,11 @@ export function SettingsModal({
                         <div className="relative">
                           <input
                             type={visibleProvider === conn.id ? 'text' : 'password'}
-                            value={
-                              (keys[conn.id] || '') === '__STORED__'
-                                ? ''
-                                : keys[conn.id] || ''
-                            }
+                            value={keys[conn.id] || ''}
                             onChange={(e) =>
                               setKeys((prev) => ({ ...prev, [conn.id]: e.target.value }))
                             }
-                            placeholder={
-                              connIsLocal
-                                ? '—'
-                                : (keys[conn.id] || '') === '__STORED__'
-                                  ? t('settings.keySaved')
-                                  : 'sk-...'
-                            }
+                            placeholder={connIsLocal ? '—' : 'sk-...'}
                             className={inputCls}
                             autoComplete="off"
                             spellCheck={false}
