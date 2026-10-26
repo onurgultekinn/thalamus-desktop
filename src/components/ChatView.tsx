@@ -267,12 +267,18 @@ function ChatViewInner({
                 <div className="analytics-inner-content">
                   <div className="flex flex-col">
                     <div className="column-label">{t('chat.tokenSavings')}</div>
-                    <div className="flex items-center">
-                      <span className="analytics-text-green">{t('chat.reduced', { pct: msg.metrics.savingsPercentage })}</span>
-                      <span className="analytics-tokens-note">
-                        ({msg.metrics.originalTokens} → {msg.metrics.compressedTokens} tokens)
-                      </span>
-                    </div>
+                    {msg.metrics.savingsPercentage > 0 ? (
+                      <div className="flex items-center">
+                        <span className="analytics-text-green">{t('chat.reduced', { pct: msg.metrics.savingsPercentage })}</span>
+                        <span className="analytics-tokens-note">
+                          ({msg.metrics.originalTokens} → {msg.metrics.compressedTokens} tokens)
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center">
+                        <span className="analytics-tokens-note">{t('chat.savingsNone')}</span>
+                      </div>
+                    )}
                   </div>
 
                   {onlinePricing && (
