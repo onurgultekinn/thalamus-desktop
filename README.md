@@ -7,6 +7,8 @@
 **A local-first AI workbench built around a lossless prompt-compression engine.**
 
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![CI](https://github.com/onurgultekinn/thalamus-desktop/actions/workflows/ci.yml/badge.svg)](https://github.com/onurgultekinn/thalamus-desktop/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/onurgultekinn/thalamus-desktop/actions/workflows/codeql.yml/badge.svg)](https://github.com/onurgultekinn/thalamus-desktop/actions/workflows/codeql.yml)
 [![Status: beta](https://img.shields.io/badge/status-beta-orange.svg)](#status)
 [![Platform: Windows](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D4.svg)](#requirements)
 [![Tauri 2](https://img.shields.io/badge/Tauri-2-24C8DB.svg)](https://tauri.app)
@@ -220,8 +222,19 @@ means and what to do — is in [ERRORS.md](ERRORS.md).
 ## Contributing
 
 Bug reports, feature ideas, and pull requests are welcome. Read
-[CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR. Security issues go
-through [SECURITY.md](SECURITY.md).
+[CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR, and
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community expectations. Security
+issues go through [SECURITY.md](SECURITY.md) — please do not open a public
+issue for them.
+
+| Where | What goes there |
+|---|---|
+| [Issues](../../issues/new/choose) | Reproducible bugs and accepted feature work |
+| [Discussions · Q&A](../../discussions/categories/q-a) | Setup help, provider and local-model questions |
+| [Discussions · Ideas](../../discussions/categories/ideas) | Proposals and design discussion |
+| [Security advisories](../../security/advisories/new) | Private vulnerability reports |
+
+See [CHANGELOG.md](CHANGELOG.md) for what changed in each release.
 
 ## Third-party notices
 
