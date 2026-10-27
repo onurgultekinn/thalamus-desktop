@@ -64,7 +64,10 @@ fn assert_structured_roundtrip(name: &str, raw: &str, bpe: &CoreBPE) -> Outcome 
     let decoded = JsonCompressor::decompress(body)
         .unwrap_or_else(|e| panic!("{name}: @T çözümü başarısız ({e})\n{body}"));
     let expected = ingest_value(raw);
-    assert_eq!(decoded, expected, "{name}: JSON değeri round-trip'te değişti");
+    assert_eq!(
+        decoded, expected,
+        "{name}: JSON değeri round-trip'te değişti"
+    );
     Outcome::Applied
 }
 
@@ -334,7 +337,8 @@ fn prose_is_never_touched() {
                 Sohbet, proje calisma alani ve ajan modu tek pencerede toplanir. \
                 Motor yalnizca yapisal veriyi donusturur; duz yazi hic degismez. \
                 Bu paragraf 2000 karaktere yaklasana kadar uzatilir ki esik \
-                asilsa bile metin adayi uretilmesin. ".repeat(8);
+                asilsa bile metin adayi uretilmesin. "
+        .repeat(8);
     let b = bpe();
     let m = process_with_metrics(&text, &b, false);
     assert_eq!(m.processed_prompt, text, "duz yazi degismemeli");
@@ -380,10 +384,7 @@ fn single_record_array_is_not_corrupted() {
 fn turkish_unicode_survives_roundtrip() {
     let b = bpe();
     // JSON içinde Türkçe karakterler (ğüşiöçİ) ve kaçışlar.
-    let json = json_array(120).replace(
-        "\"active\"",
-        "\"ğüşiöçİ aktif\"",
-    );
+    let json = json_array(120).replace("\"active\"", "\"ğüşiöçİ aktif\"");
     assert_eq!(
         assert_structured_roundtrip("json-turkce", &json, &b),
         Outcome::Applied

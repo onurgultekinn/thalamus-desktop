@@ -68,10 +68,7 @@ impl Kind {
     /// ingest katmanindan gecen (kanonik JSON'a normallesen) turler.
     #[allow(dead_code)]
     pub fn structural(self) -> bool {
-        matches!(
-            self,
-            Kind::Jsonl | Kind::Csv | Kind::Logfmt | Kind::MdTable
-        )
+        matches!(self, Kind::Jsonl | Kind::Csv | Kind::Logfmt | Kind::MdTable)
     }
     #[allow(dead_code)]
     pub fn plain(self) -> bool {
@@ -145,7 +142,11 @@ fn json_array() -> Dataset {
                 q0_status,
             ),
             q("max", "What is the largest amount value?", num(max_amount)),
-            q("sum", "What is the sum of all amount values?", num(sum_amount)),
+            q(
+                "sum",
+                "What is the sum of all amount values?",
+                num(sum_amount),
+            ),
         ],
     }
 }
@@ -218,7 +219,11 @@ fn csv() -> Dataset {
                 "What is the status of the order with id 0?",
                 first_status,
             ),
-            q("sum", "What is the sum of all id values?", sum_id.to_string()),
+            q(
+                "sum",
+                "What is the sum of all id values?",
+                sum_id.to_string(),
+            ),
         ],
     }
 }
@@ -285,8 +290,16 @@ fn md_table() -> Dataset {
         text: s,
         questions: vec![
             q("count", "How many table rows are there?", "100"),
-            q("sum", "What is the sum of the population column?", sum.to_string()),
-            q("max", "What is the largest population value?", max.to_string()),
+            q(
+                "sum",
+                "What is the sum of the population column?",
+                sum.to_string(),
+            ),
+            q(
+                "max",
+                "What is the largest population value?",
+                max.to_string(),
+            ),
         ],
     }
 }
@@ -323,7 +336,11 @@ fn xml() -> Dataset {
                 "What is the largest price value (the number before .99)?",
                 max_price.to_string(),
             ),
-            q("sum", "What is the sum of all id values?", sum_id.to_string()),
+            q(
+                "sum",
+                "What is the sum of all id values?",
+                sum_id.to_string(),
+            ),
         ],
     }
 }
@@ -347,13 +364,21 @@ fn sql() -> Dataset {
         kind: Kind::Sql,
         text: s,
         questions: vec![
-            q("count", "How many rows does the INSERT statement have?", "200"),
+            q(
+                "count",
+                "How many rows does the INSERT statement have?",
+                "200",
+            ),
             q(
                 "lookup",
                 "What is the status of the order with id 5?",
                 status_of_5,
             ),
-            q("sum", "What is the sum of all id values?", sum_id.to_string()),
+            q(
+                "sum",
+                "What is the sum of all id values?",
+                sum_id.to_string(),
+            ),
         ],
     }
 }
@@ -361,7 +386,9 @@ fn sql() -> Dataset {
 fn ini() -> Dataset {
     let text: String = (0..16)
         .map(|i| {
-            format!("[profile_{i:02}]\nhost = db-{i:02}.internal\nport = 5432\nsslmode = require\n\n")
+            format!(
+                "[profile_{i:02}]\nhost = db-{i:02}.internal\nport = 5432\nsslmode = require\n\n"
+            )
         })
         .collect();
     Dataset {
@@ -393,11 +420,7 @@ fn toml() -> Dataset {
         text,
         questions: vec![
             q("count", "How many dependency entries are there?", "16"),
-            q(
-                "lookup",
-                "What is the name of dependency 3?",
-                "crate-03",
-            ),
+            q("lookup", "What is the name of dependency 3?", "crate-03"),
         ],
     }
 }
@@ -423,8 +446,16 @@ fn yaml() -> Dataset {
         text: s,
         questions: vec![
             q("count", "How many workers are listed?", "12"),
-            q("sum", "What is the sum of the replicas values?", sum.to_string()),
-            q("max", "What is the largest replicas value?", max.to_string()),
+            q(
+                "sum",
+                "What is the sum of the replicas values?",
+                sum.to_string(),
+            ),
+            q(
+                "max",
+                "What is the largest replicas value?",
+                max.to_string(),
+            ),
         ],
     }
 }
