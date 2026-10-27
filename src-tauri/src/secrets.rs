@@ -29,6 +29,71 @@ pub mod imp {
     fn target_name(provider: &str) -> String {
         format!("{}{}", TARGET_PREFIX, provider)
     }
+    /// Yedek slot: her başarılı yazım İKİ bağımsız DPAPI kaydına gider.
+    /// Ana slot bozulursa (yaşandı) yedekten kendini onarır — veri kaybı olmaz.
+    fn backup_target(provider: &str) -> String {
+        format!("{}backup:{}", TARGET_PREFIX, provider)
+    }
+    /// Karantina: çözülemeyen blob SİLİNMEZ, adli kurtarma için saklanır.
+    fn quarantine_target(provider: &str) -> String {
+        format!("{}quarantine:{}", TARGET_PREFIX, provider)
+    }
+
+    /// Ham blob okur (çözme YOK). Yedek sloyu dahil arar.
+    fn read_raw_blob(target: &str) -> Option<Vec<u8>> {
+        use windows_sys::Win32::Foundation::ERROR_NOT_FOUND;
+        use windows_sys::Win32::Security::Credentials::{
+            CredFree, CredReadW, CREDENTIALW, CRED_TYPE_GENERIC,
+        };
+        let t = to_wide(target);
+        let mut cred: *mut CREDENTIALW = std::ptr::null_mut();
+        let ok = unsafe { CredReadW(t.as_ptr(), CRED_TYPE_GENERIC, 0, &mut cred) };
+        if ok == 0 {
+            let err = unsafe { windows_sys::Win32::Foundation::GetLastError() };
+            if err == ERROR_NOT_FOUND {
+                return None;
+            }
+            return None;
+        }
+        let out = unsafe {
+            let size = (*cred).CredentialBlobSize as usize;
+            let bytes = std::slice::from_raw_parts((*cred).CredentialBlob, size).to_vec();
+            CredFree(cred as *mut core::ffi::c_void);
+            bytes
+        };
+        Some(out)
+    }
+
+    /// DPAPI çözme; GEÇİCİ hatalara karşı üç deneme (eşzamanlı erişimde
+    /// tek seferlik başarısızlık kayıp zincirini başlatmıştı).
+    fn unprotect_retry(bytes: &[u8]) -> Option<String> {
+        for attempt in 0..3 {
+            if let Some(v) = unprotect(bytes) {
+                return Some(v);
+            }
+            if attempt < 2 {
+                std::thread::sleep(std::time::Duration::from_millis(30 * (attempt + 1)));
+            }
+        }
+        None
+    }
+
+    /// Bir slotu çözer ve sonucun KULLANILABİLİR bir sır olduğunu doğrular.
+    ///
+    /// Neden gerekli: CredUnprotectW, bozulmuş bir blob'u bazen "başarılı"
+    /// sayıp çöp metin döndürüyor (gözlemlendi: karışık CJK/özel karakterler).
+    /// Bu çöp, ana slot yolu "çözüldü" sayılırsa YEDEK SLOT'a hiç bakılmaz ve
+    /// gerçek anahtar kaybolmuş gibi görünür. Bu yüzden çözüm sonucu
+    /// `looks_like_secret` ile doğrulanır; geçmezse slot "okunamadı" sayılır
+    /// ve çağıran bir sonraki kaynağa (yedek) düşer.
+    fn decode_slot(bytes: &[u8]) -> Option<String> {
+        let value = unprotect_retry(bytes)?;
+        if looks_like_secret(&value) {
+            Some(value)
+        } else {
+            None
+        }
+    }
 
     fn to_wide(s: &str) -> Vec<u16> {
         s.encode_utf16().chain(std::iter::once(0)).collect()
@@ -188,7 +253,13 @@ pub mod imp {
             );
         }
         let blob = protect(secret)?;
-        write_blob(&target_name(provider), &blob)
+        write_blob(&target_name(provider), &blob)?;
+        // YEDEK SLOT: aynı değer ikinci bağımsız kayda da yazılır. Ana slot
+        // bozulursa (çözme hatası) yedekten onarılır — kayıp olmaz. Aynı
+        // DPAPI koruması: güvenlik seviyesi değişmez.
+        let backup = protect(secret)?;
+        let _ = write_blob(&backup_target(provider), &backup);
+        Ok(())
     }
 
     pub fn secret_get(provider: &str) -> Result<Option<String>, String> {
@@ -212,32 +283,67 @@ pub mod imp {
             ));
         }
 
-        let (result, was_legacy) = unsafe {
-            let blob_size = (*cred).CredentialBlobSize as usize;
-            let blob_ptr = (*cred).CredentialBlob;
-            let (secret, legacy) = if blob_ptr.is_null() || blob_size == 0 {
-                (String::new(), false)
+        let main_blob = unsafe {
+            let size = (*cred).CredentialBlobSize as usize;
+            let ptr = (*cred).CredentialBlob;
+            let bytes = if ptr.is_null() || size == 0 {
+                Vec::new()
             } else {
-                let bytes = std::slice::from_raw_parts(blob_ptr, blob_size);
-                if let Some(s) = unprotect(bytes) {
-                    (s, false)
-                } else {
-                    // Eski düz biçim: UTF-16 çöz; işaretle ki çağırma sonrası
-                    // şifreli biçime yükseltilsin.
-                    let wide: Vec<u16> = bytes
-                        .chunks_exact(2)
-                        .map(|c| u16::from_ne_bytes([c[0], c[1]]))
-                        .collect();
-                    (from_wide(wide.as_ptr(), wide.len()), true)
-                }
+                std::slice::from_raw_parts(ptr, size).to_vec()
             };
             CredFree(cred as *mut core::ffi::c_void);
-            (secret, legacy)
+            bytes
         };
-        // BOZUK KAYIT KORUMASI: değer kullanılabilir görünmüyorsa (kontrol
-        // karakteri vb.) ASLA geri yazma — temizle ve "yok" dön. Böylece bir
-        // çözme hatası gerçek anahtarı kalıcı olarak yok edemez.
+
+        // Çözme: ana slot -> retry -> YEDEK SLOT. Yedekten gelirse ana slot
+        // onarılır (kendi kendini iyileştiren kasa).
+        let mut decoded: Option<(String, bool)> = None;
+        if let Some(s) = decode_slot(&main_blob) {
+            decoded = Some((s, false));
+        } else if let Some(backup_blob) = read_raw_blob(&backup_target(provider)) {
+            if let Some(s) = decode_slot(&backup_blob) {
+                // Onarım: yedekten ana slota geri yaz (sessiz).
+                if let Ok(blob) = protect(&s) {
+                    let _ = write_blob(&target_name(provider), &blob);
+                }
+                decoded = Some((s, false));
+            }
+        }
+        if decoded.is_none() && !main_blob.is_empty() {
+            // LEGACY YOLU: DPAPI öneki olmayan düz UTF-16 kayıt (eski sürüm).
+            // Yalnız "makul sır" görünüyorsa kabul edilir; çöp karantinaya gider.
+            let wide: Vec<u16> = main_blob
+                .chunks_exact(2)
+                .map(|c| u16::from_ne_bytes([c[0], c[1]]))
+                .collect();
+            let candidate = from_wide(wide.as_ptr(), wide.len());
+            if looks_like_secret(&candidate) {
+                decoded = Some((candidate, true));
+            }
+        }
+        let (result, was_legacy) = match decoded {
+            Some((s, legacy)) => (s, legacy),
+            None => {
+                // ÇÖZÜLEMEYEN BLOB: silmek yerine KARANTİNAYA alınır — adli
+                // kurtarma mümkün kalır (yaşanan kaybın tekrarı engellenir).
+                if !main_blob.is_empty() {
+                    // Ham blob DOĞRUDAN karantinaya yazılır (bayt-bayt aynı;
+                    // ileride kod düzelince kurtarma mümkün olur).
+                    let _ = write_blob(&quarantine_target(provider), &main_blob);
+                    let _ = secret_delete(provider);
+                }
+                return Ok(None);
+            }
+        };
+        // BOZUK DEĞER KORUMASI: çözülen değer kullanılabilir değilse karantina
+        // + temizle (asla geri yazma — gerçek anahtarı ezme).
         if !result.is_empty() && !looks_like_secret(&result) {
+            // Çözülmüş çöp metin de kaybolmasın: UTF-16 baytları olarak sakla.
+            let bytes: Vec<u8> = result
+                .encode_utf16()
+                .flat_map(|c| c.to_ne_bytes())
+                .collect();
+            let _ = write_blob(&quarantine_target(provider), &bytes);
             let _ = secret_delete(provider);
             return Ok(None);
         }
@@ -279,6 +385,10 @@ pub mod imp {
     pub fn secret_delete(provider: &str) -> Result<(), String> {
         use windows_sys::Win32::Foundation::ERROR_NOT_FOUND;
         use windows_sys::Win32::Security::Credentials::{CredDeleteW, CRED_TYPE_GENERIC};
+
+        // Yedek slotu da temizle (tam silme istenir).
+        let bt = to_wide(&backup_target(provider));
+        unsafe { CredDeleteW(bt.as_ptr(), CRED_TYPE_GENERIC, 0) };
 
         let target = to_wide(&target_name(provider));
         let ok = unsafe { CredDeleteW(target.as_ptr(), CRED_TYPE_GENERIC, 0) };
@@ -393,6 +503,88 @@ pub mod imp {
                 !secret_exists(provider).unwrap(),
                 "bozuk kayıt kasadan SİLİNMELİ (yoksa her açılışta tekrar çöp üretir)"
             );
+        }
+
+        /// KENDİ KENDİNİ ONARMA: ana slot bozulursa (geçersiz DPAPI blob)
+        /// değer YEDEK SLOTTAN kurtarılır ve ana slot sessizce onarılır.
+        /// Bu, yaşanan kaybın (evren anahtarı) tekrarını engelleyen temel
+        /// mekanizmadır — bozulsa bile kayıp olmaz.
+        #[test]
+        fn corrupted_main_is_recovered_from_backup() {
+            use windows_sys::Win32::Security::Credentials::{
+                CredWriteW, CREDENTIALW, CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC,
+            };
+
+            let provider = "__cargo_test_heal__";
+            let secret = "sk-recover-98765";
+            secret_set(provider, secret).unwrap();
+
+            // Ana slota GEÇERSİZ DPAPI blob yaz (magic + çöp): bozulma simülasyonu.
+            let mut blob: Vec<u8> = MAGIC_PROTECTED.to_vec();
+            blob.extend((0u16..300).map(|i| (i.wrapping_mul(6551) % 65535) as u8));
+            let mut target = to_wide(&target_name(provider));
+            let cred = CREDENTIALW {
+                Flags: 0,
+                Type: CRED_TYPE_GENERIC,
+                TargetName: target.as_mut_ptr(),
+                Comment: std::ptr::null_mut(),
+                LastWritten: unsafe { std::mem::zeroed() },
+                CredentialBlobSize: blob.len() as u32,
+                CredentialBlob: blob.as_ptr() as *mut u8,
+                Persist: CRED_PERSIST_LOCAL_MACHINE,
+                AttributeCount: 0,
+                Attributes: std::ptr::null_mut(),
+                TargetAlias: std::ptr::null_mut(),
+                UserName: std::ptr::null_mut(),
+            };
+            assert_ne!(unsafe { CredWriteW(&cred, 0) }, 0);
+
+            // Okuma: yedekten kurtarmalı.
+            let got = secret_get(provider).expect("okuma hata vermemeli");
+            assert_eq!(got.as_deref(), Some(secret), "yedekten kurtarılmalı");
+
+            // Ana slot ONARILMIŞ olmalı (yeniden okuma da çalışmalı).
+            let again = secret_get(provider).expect("ikinci okuma");
+            assert_eq!(again.as_deref(), Some(secret));
+            secret_delete(provider).unwrap();
+        }
+
+        /// Karantina: çözülemeyen blob SİLİNMEZ — adli kurtarma için saklanır.
+        #[test]
+        fn undecryptable_main_is_quarantined_not_deleted() {
+            use windows_sys::Win32::Security::Credentials::{
+                CredWriteW, CREDENTIALW, CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC,
+            };
+
+            let provider = "__cargo_test_quar__";
+            // Yedek YOK + ana slot çözülemez → None döner ama blob karantinada.
+            let mut blob: Vec<u8> = MAGIC_PROTECTED.to_vec();
+            blob.extend((0u16..200).map(|i| (i.wrapping_mul(7919) % 65535) as u8));
+            let mut target = to_wide(&target_name(provider));
+            let cred = CREDENTIALW {
+                Flags: 0,
+                Type: CRED_TYPE_GENERIC,
+                TargetName: target.as_mut_ptr(),
+                Comment: std::ptr::null_mut(),
+                LastWritten: unsafe { std::mem::zeroed() },
+                CredentialBlobSize: blob.len() as u32,
+                CredentialBlob: blob.as_ptr() as *mut u8,
+                Persist: CRED_PERSIST_LOCAL_MACHINE,
+                AttributeCount: 0,
+                Attributes: std::ptr::null_mut(),
+                TargetAlias: std::ptr::null_mut(),
+                UserName: std::ptr::null_mut(),
+            };
+            assert_ne!(unsafe { CredWriteW(&cred, 0) }, 0);
+
+            let got = secret_get(provider).expect("okuma hata vermemeli");
+            assert_eq!(got, None);
+            // Karantina kaydı VAR olmalı (ham baytlar saklandı).
+            let q = read_raw_blob(&quarantine_target(provider));
+            assert!(q.is_some(), "karantina kaydı oluşturulmalı");
+            // Ana kayıt temizlenmiş olmalı (bozuk değer tekrar okunmasın).
+            assert!(!secret_exists(provider).unwrap());
+            secret_delete(provider).unwrap();
         }
 
         /// Kontrol karakteri içeren değer yazılmamalı (başlık bozulmasının kökü).
