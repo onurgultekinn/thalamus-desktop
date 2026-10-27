@@ -16,7 +16,8 @@
     "predev": "node scripts/copy-file-viewer-assets.mjs && node scripts/copy-mediapipe-assets.mjs",
     "prebuild": "node scripts/copy-file-viewer-assets.mjs && node scripts/copy-mediapipe-assets.mjs && node scripts/generate-notices.mjs",
     "postbuild": "node scripts/check-bundle-licenses.mjs",
-    "attributions": "node scripts/gen-attributions.mjs"
+    "attributions": "node scripts/gen-attributions.mjs",
+    "test": "vitest run"
   },
   "dependencies": {
     "@antv/x6": "^3.1.8",
@@ -82,7 +83,8 @@
     "postcss": "^8.5.25",
     "tailwindcss": "^3.4.19",
     "typescript": "~6.0.2",
-    "vite": "^8.1.1"
+    "vite": "^8.1.1",
+    "vitest": "^5.0.5"
   },
   "overrides": {
     "dompurify": "3.4.17"

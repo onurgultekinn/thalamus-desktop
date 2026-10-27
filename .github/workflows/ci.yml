@@ -23,6 +23,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run lint
+      - name: Unit tests (pure functions)
+        run: npm test
       - name: License gate
         run: npm run license:check
       # Advisory at first: the advisory database changes daily and one known
