@@ -18,14 +18,28 @@ the ground rules are still simple:
 ## Ground rules for pull requests
 
 - Keep PRs small and focused; one concern per PR.
-- Rust code must pass `cargo check` / existing tests; frontend must pass
-  `npm run build`.
+- Run the checks before opening a PR:
+
+  ```bash
+  npm run lint            # oxlint
+  npm run build           # tsc + vite build
+  npm test                # vitest (pure functions)
+  npm run i18n:check      # TR/EN key parity
+  npm run license:check   # dependency licence gate
+  cd src-tauri
+  cargo check --all-targets
+  cargo test --lib
+  ```
+
 - Follow the existing style of the file you are touching. Comments in the
   codebase are a mix of Turkish and English; either is fine — clarity
   matters more.
 - Product principle: compression features must be **lossless** (round-trip
   verified). Proposals that trade fidelity for savings belong behind an
   explicit opt-in, never a default.
+- Read [docs/security-model.md](docs/security-model.md) before touching the
+  backend's auth, CORS, host guard, `safe_join`, SSRF guard, or the credential
+  vault — those layers must not be weakened, only strengthened.
 
 ## Licensing
 
