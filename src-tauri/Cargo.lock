@@ -73,6 +73,7 @@ dependencies = [
  "dirs",
  "fancy-regex",
  "futures-util",
+ "getrandom 0.3.4",
  "log",
  "portable-pty",
  "rayon",

@@ -43,6 +43,9 @@ fancy-regex = "0.12"
 # tiktoken-rs'in rank tablosuyla ayni hasher (byte_pair_encode imzasi bunu ister).
 rustc-hash = "1"
 
+# Isletim sisteminin CSPRNG'si: yerel API oturum tokeni (backend/mod.rs).
+getrandom = "0.3"
+
 # HTTP backend — a local axum server for browser preview and desktop
 axum = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "net"] }

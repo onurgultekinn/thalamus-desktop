@@ -123,21 +123,29 @@ async fn compress(
 /// bulup kullanicinin (kasadaki) anahtarlariyla istek atabilir — token
 /// zorunlulugu bu yolu kapatir: token yalniz uygulamanin kendi webview'ina
 /// Tauri komutuyla verilir.
-static SESSION_TOKEN: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+///
+/// Kaynak isletim sisteminin CSPRNG'sidir (`getrandom`): 32 bayt, 64 karakter
+/// hex. Uretim basarisiz olursa `None` saklanir ve `session_token()` bos
+/// string doner; `auth_mw` bos token'i hicbir istekle eslestirmez (fail-closed).
+static SESSION_TOKEN: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+
+fn generate_session_token() -> Option<String> {
+    let mut bytes = [0u8; 32];
+    getrandom::fill(&mut bytes).ok()?;
+    let mut out = String::with_capacity(64);
+    for b in bytes {
+        use std::fmt::Write as _;
+        // String'e yazmak paniklemez; `let _` yalnizca imzayi susturur.
+        let _ = write!(out, "{:02x}", b);
+    }
+    Some(out)
+}
 
 pub fn session_token() -> &'static str {
-    SESSION_TOKEN.get_or_init(|| {
-        // RandomState hasher'i isletim sistemi entropisiyle tohumlanir
-        // (rand bagimliligi eklemeden guclu rastgelelik standart hilesi).
-        use std::collections::hash_map::RandomState;
-        use std::hash::{BuildHasher, Hasher};
-        let mut out = String::with_capacity(32);
-        for _ in 0..2 {
-            let h = RandomState::new().build_hasher().finish();
-            out.push_str(&format!("{:016x}", h));
-        }
-        out
-    })
+    SESSION_TOKEN
+        .get_or_init(generate_session_token)
+        .as_deref()
+        .unwrap_or("")
 }
 
 /// Middleware: x-thalamus-token dogru degilse 401. /api/health muaf.
@@ -150,12 +158,16 @@ async fn auth_mw(
     if path == "/api/health" {
         return next.run(req).await;
     }
-    let ok = req
-        .headers()
-        .get("x-thalamus-token")
-        .and_then(|v| v.to_str().ok())
-        .map(|v| v == session_token())
-        .unwrap_or(false);
+    let expected = session_token();
+    // Fail-closed: token uretilemediyse (bos) hicbir istek kimlik dogrulamis
+    // sayilmaz — bos basligi eslestirip korumayi acmak yerine hepsi 401.
+    let ok = !expected.is_empty()
+        && req
+            .headers()
+            .get("x-thalamus-token")
+            .and_then(|v| v.to_str().ok())
+            .map(|v| v == expected)
+            .unwrap_or(false);
     if !ok {
         return (StatusCode::UNAUTHORIZED, "local api token missing or invalid").into_response();
     }
@@ -300,6 +312,111 @@ mod tests {
         )
         .await
         .unwrap()
+    }
+
+    #[test]
+    fn session_token_is_64_hex_chars_and_stable() {
+        let t = session_token();
+        assert!(!t.is_empty(), "token uretilmeli");
+        assert_eq!(t.len(), 64, "32 bayt = 64 hex karakter: {}", t);
+        assert!(
+            t.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()),
+            "yalnizca kucuk harf hex olmali: {}",
+            t
+        );
+        // OnceLock: ayni surecte her cagri ayni degeri dondurur.
+        assert_eq!(t, session_token());
+        // Iki bagimsiz uretim ayni olmamali (entropi duman testi).
+        let other = generate_session_token().expect("csprng");
+        assert_ne!(other, t);
+        assert_eq!(other.len(), 64);
+    }
+
+    #[test]
+    fn requests_without_or_with_wrong_token_are_unauthorized() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            for token in [None, Some("wrong-token")] {
+                let mut req = Request::builder()
+                    .method("POST")
+                    .uri("/api/compress")
+                    .header("host", "127.0.0.1:8277")
+                    .header("Content-Type", "application/json");
+                if let Some(t) = token {
+                    req = req.header("x-thalamus-token", t);
+                }
+                let res = router(test_state())
+                    .oneshot(req.body(Body::from(r#"{"prompt":"merhaba"}"#)).unwrap())
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    res.status(),
+                    axum::http::StatusCode::UNAUTHORIZED,
+                    "token={:?}",
+                    token
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn health_is_exempt_from_token() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let res = router(test_state())
+                .oneshot(
+                    Request::builder()
+                        .method("GET")
+                        .uri("/api/health")
+                        .header("host", "127.0.0.1:8277")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(res.status(), axum::http::StatusCode::OK);
+        });
+    }
+
+    #[test]
+    fn requests_without_origin_header_are_served() {
+        // CORS yalnizca tarayici baglaminda devreye girer; Origin basligi
+        // olmayan (Tauri IPC / curl benzeri) istekler token ile gecebilmeli.
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let res = router(test_state())
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/compress")
+                        .header("host", "127.0.0.1:8277")
+                        .header("x-thalamus-token", session_token())
+                        .header("Content-Type", "application/json")
+                        .body(Body::from(r#"{"prompt":"merhaba"}"#))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(res.status(), axum::http::StatusCode::OK);
+        });
+    }
+
+    #[test]
+    fn localhost_lookalike_host_is_rejected() {
+        // "localhost.evil.com" bir alt alan adidir; loopback degildir.
+        assert!(!host_allowed(Some("localhost.evil.com")));
+        assert!(!host_allowed(Some("localhost.evil.com:8277")));
+        assert!(!host_allowed(Some("127.0.0.1.nip.io:8277")));
+        assert!(!host_allowed(Some("notlocalhost")));
     }
 
     #[test]
