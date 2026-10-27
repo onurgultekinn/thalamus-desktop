@@ -22,3 +22,4 @@ Notes:
 - Token counts use the `cl100k_base` tokenizer; other tokenizers (Claude, Gemini, Llama) will differ.
 - Prose and fenced code are control cases: the expected saving is 0 and the text must come back unchanged.
 - `round-trip` = the compressed form decodes back to the original data (`n/a` when the engine left it untouched).
+- Markdown tables are currently not segmented by the engine (see the ignored test in engine/roundtrip_tests.rs), so they pass through untouched.
