@@ -51,7 +51,7 @@ Ollama, llama.cpp, LM Studio, or a cloud provider.
 | Source | Datasets | Questions |
 |---|---|---|
 | `bench_public` (token only) | 12 (10 structured + 2 control) | — |
-| `bench_dump` (quality) | 10 | 29 |
+| `bench_dump` (quality) | 10 | 30 |
 
 (The markdown-table dataset contributes questions but currently passes through
 uncompressed; see Limitations.)

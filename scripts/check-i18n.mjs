@@ -83,9 +83,48 @@ const problems = {
   extraInTr,
   emptyInTr,
   emptyInEn,
+  placeholderMismatch: [],
 };
+
+// Yer tutucu denetimi: `{done}` gibi parametreler iki dilde ayni kumede
+// olmali. Olmazsa translate() eksik parametrede "{key}" birakir — sessiz
+// bozulma. Bu kontrol onu yakalar.
+//
+// ISTISNA: Ingilizce'ye ozgu cogul eki parametreleri ({s}) Turkce'de karsiligi
+// olmadigi icin bilincli olarak yok. Bu tur anahtarlar burada gerekcesiyle
+// listelenir; baska bir yer tutucu eksikse hata verilir.
+const OPTIONAL_PLACEHOLDERS = {
+  // EN: 'Load {n} older message{s}' — TR sayidan sonra cogul eki almaz.
+  'chat.loadOlder': ['s'],
+};
+
+const PLACEHOLDER = /\{(\w+)\}/g;
+function setOf(value) {
+  const out = new Set();
+  if (typeof value !== 'string') return out;
+  for (const m of value.matchAll(PLACEHOLDER)) out.add(m[1]);
+  return out;
+}
+for (const [key, enValue] of en) {
+  const trValue = tr.get(key);
+  if (trValue == null) continue;
+  const optional = new Set(OPTIONAL_PLACEHOLDERS[key] ?? []);
+  const a = setOf(enValue);
+  const b = setOf(trValue);
+  const missing = [...a].filter((p) => !b.has(p) && !optional.has(p));
+  const extra = [...b].filter((p) => !a.has(p));
+  if (missing.length || extra.length) {
+    problems.placeholderMismatch.push({ key, missing, extra });
+  }
+}
+
 const failed =
-  missingInTr.length + extraInTr.length + emptyInTr.length + emptyInEn.length > 0;
+  missingInTr.length +
+    extraInTr.length +
+    emptyInTr.length +
+    emptyInEn.length +
+    problems.placeholderMismatch.length >
+  0;
 
 if (process.argv.includes('--json')) {
   console.log(JSON.stringify({ en: en.size, tr: tr.size, ...problems }, null, 2));
@@ -106,6 +145,14 @@ if (process.argv.includes('--json')) {
   if (emptyInEn.length) {
     console.error(`\nEN'de BOS ceviri (${emptyInEn.length}):`);
     for (const k of emptyInEn) console.error(`  - ${k}`);
+  }
+  if (problems.placeholderMismatch.length) {
+    console.error(`\nYER TUTUCU UYUSMAZLIGI (${problems.placeholderMismatch.length}):`);
+    for (const row of problems.placeholderMismatch) {
+      console.error(
+        `  - ${row.key}: eksik=${JSON.stringify(row.missing)} fazla=${JSON.stringify(row.extra)}`
+      );
+    }
   }
   console.log(failed ? '\ni18n: BASARISIZ' : '\ni18n: temiz');
 }
