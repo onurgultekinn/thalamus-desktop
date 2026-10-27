@@ -29,6 +29,24 @@ Everything runs on your machine. The backend listens on `127.0.0.1` only,
 provider requests are made by the Rust process rather than the webview, API
 keys live in the OS credential vault, and no telemetry is collected.
 
+## Screenshots
+
+<!--
+Screenshots belong in docs/assets/ and are not committed yet. Capture these at
+1600x1000 with the Dark (Obsidian) theme and no personal data in view, then
+replace each placeholder with an <img> tag:
+
+  1. chat.png            — a chat with the compression bar (tokens before/after)
+  2. compression.png      — the before/after diff panel for a large JSON prompt
+  3. project.png          — project/IDE view: explorer, editor, terminal
+  4. agent-company.png    — Agent Company plan + flow editor
+  5. pixel-office.png     — PixelOffice animation
+  6. nucleus.png          — Nucleus command surface
+  7. settings.png         — Settings → Providers (keys masked)
+-->
+
+_Screenshots are being prepared — see [docs/assets/README.md](docs/assets/README.md)._
+
 ## Why
 
 Most of the cost of a large-model request comes from structure the model does
@@ -46,11 +64,20 @@ structure losslessly before the request leaves your machine:
 
 ## Features
 
+Everything below is split by maturity. **Stable** means the code path is used
+every day and covered by tests. **Experimental** means it works but the shape
+may change before beta ends, or it is a prototype rather than the intended
+final design.
+
+### Stable
+
 **Chat and compression**
 - Every prompt is segmented and compressed; the UI reports token counts,
   savings, cost, and a before/after diff.
-- Structured formats handled by the engine: JSON, plus XML/SQL/INI/TOML/YAML
-  "plain table" rows for certified shapes.
+- Structured formats handled by the engine: JSON (`@T` table), plus
+  JSONL/CSV/logfmt/markdown-table through the ingest layer, and
+  XML/SQL/INI/TOML/YAML "plain table" rows for certified shapes. Prose and
+  fenced code are never compressed.
 - Streaming responses with stop, regenerate, and edit-and-resend.
 - Chat history with search, rename, pin, and export to Markdown or JSON.
 - Per-message token usage and cost. A small offline price table ships with the
@@ -94,14 +121,6 @@ structure losslessly before the request leaves your machine:
   size capped. Sensitive environment variables (`*_API_KEY`, `*_TOKEN`,
   `*_SECRET`, `*_PASSWORD`, …) are stripped from the child process.
 
-**Multi-agent runs**
-- Agent Mesh: agents exchange typed JSON envelopes, and those envelopes pass
-  through the same lossless `@T` encoder. A mock brain runs the pipeline without
-  a provider key.
-- Agent Company: a plan view, a node-based flow editor, and an animated office
-  view for multi-agent setups. Plans can be generated from templates through the
-  configured provider.
-
 **Providers and models**
 - Any OpenAI-compatible endpoint. Presets: OpenAI, DeepSeek, Google Gemini,
   xAI Grok, Mistral, Groq, OpenRouter, Together AI, Fireworks, Perplexity,
@@ -132,6 +151,21 @@ structure losslessly before the request leaves your machine:
 - Command palette and a second command bar in the project view.
 - Local profile screen on first launch. This is **not** an account system: the
   name you enter stays in `localStorage` and personalises the interface only.
+
+### Experimental
+
+These surfaces exist in the build and are usable, but they are prototypes: the
+API, the data model, or the UI may still change. Please report bugs, but do not
+build workflows that depend on their current shape.
+
+**Multi-agent runs**
+- Agent Mesh: agents exchange typed JSON envelopes, and those envelopes pass
+  through the same lossless `@T` encoder. A mock brain runs the pipeline without
+  a provider key.
+- Agent Company: a plan view, a node-based flow editor, and an animated office
+  view for multi-agent setups. Plans can be generated from templates through the
+  configured provider. The office view is an **animation**: it is not wired to a
+  live orchestrator yet (see Roadmap).
 
 ## Architecture
 
@@ -183,9 +217,33 @@ See [SECURITY.md](SECURITY.md) for the vulnerability disclosure process.
 
 ## Status
 
-Early beta. The engine, chat, project workspace, and agent tools are
-functional. Expect breaking changes before `1.0`. Windows 10/11 only for now;
-the terminal and the desktop shell are Windows-specific.
+Early beta (`0.1.0-beta`). The engine, chat, project workspace, and agent tools
+are functional and tested. Expect breaking changes before `1.0`.
+
+### Roadmap
+
+- **PixelOffice is an animation today.** It renders agents as sprites driven by
+  static scripts; a live connection to the orchestrator (real status and task
+  fields per agent) is planned but not implemented. Nothing in the UI should be
+  read as claiming otherwise.
+- macOS and Linux builds are planned; the terminal and desktop shell are
+  Windows-specific today.
+- Code signing for the Windows installers (see [docs/install.md](docs/install.md)).
+- Benchmarks and quality measurements are in progress; see
+  [docs/benchmarks.md](docs/benchmarks.md).
+
+### Known limitations
+
+- **Windows 10/11 only.** macOS and Linux are planned, not supported.
+- **Prose and code are not compressed.** Savings come only from structured
+  data; a plain-English prompt or a code block comes out exactly as it went in.
+- **PixelOffice is an animation**, not a live view of a running orchestrator.
+- **`run_command` is not sandboxed.** It is a real shell in the workspace root,
+  protected by the permission gate (`auto`/`autonomous` only) and by you
+  watching the run. Sensitive environment variables are stripped from the child
+  process, but the command itself can do anything the shell can.
+- **The installers are unsigned**, so Windows SmartScreen will warn on first
+  launch. See [docs/install.md](docs/install.md) for the verification steps.
 
 ## Requirements
 
@@ -195,10 +253,12 @@ the terminal and the desktop shell are Windows-specific.
 
 ## Install
 
-Beta builds will be published under GitHub Releases. Package-manager channels
-(`winget`) are planned for the first public beta.
+Download the installer from [GitHub Releases](../../releases) and run it. The
+installers are not code-signed yet, so Windows SmartScreen will warn on first
+launch — see [docs/install.md](docs/install.md) for the steps and how to verify
+your download against `SHA256SUMS.txt`.
 
-> first public beta — builds coming
+Package-manager channels (`winget`) are planned.
 
 ## Development
 
@@ -232,6 +292,24 @@ unavailable.
 
 Generated assets (`public/file-viewer/`, `public/mediapipe/wasm/`) are copied
 from `node_modules` by the `predev`/`prebuild` scripts and are not tracked.
+
+Other useful scripts:
+
+```
+npm test               # vitest: pure frontend functions
+npm run i18n:check     # TR/EN key parity and empty translations
+npm run license:check  # dependency licence gate
+npm run attributions   # regenerate ATTRIBUTIONS.md
+```
+
+More documentation:
+
+- [docs/architecture.md](docs/architecture.md) — components, request flow, engine pipeline
+- [docs/privacy.md](docs/privacy.md) — every network destination and where data lives
+- [docs/security-model.md](docs/security-model.md) — each protection and its honest limits
+- [docs/install.md](docs/install.md) — install, first run, SmartScreen, local models
+- [docs/benchmarks.md](docs/benchmarks.md) — how measurements are made and what is not measured yet
+- [docs/footprint.md](docs/footprint.md) — memory, startup, and disk measurement method
 
 ## Fonts and assets
 
