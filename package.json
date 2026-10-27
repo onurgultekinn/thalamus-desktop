@@ -17,7 +17,8 @@
     "prebuild": "node scripts/copy-file-viewer-assets.mjs && node scripts/copy-mediapipe-assets.mjs && node scripts/generate-notices.mjs",
     "postbuild": "node scripts/check-bundle-licenses.mjs",
     "attributions": "node scripts/gen-attributions.mjs",
-    "test": "vitest run"
+    "test": "vitest run",
+    "i18n:check": "node scripts/check-i18n.mjs"
   },
   "dependencies": {
     "@antv/x6": "^3.1.8",
