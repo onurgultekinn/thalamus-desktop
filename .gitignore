@@ -50,3 +50,10 @@ public/legal/THIRD_PARTY_NOTICES.txt
 public/file-viewer/
 public/vendor/
 public/flyfish-viewer-*.json
+
+# bench_dump ciktisi (uretilir; yeniden uretilebilir)
+bench/out/
+
+# bench-quality ham kosu ciktilari (makineye/model'e ozel)
+bench/results/quality-*.csv
+bench/results/quality-*.md
