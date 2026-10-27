@@ -911,10 +911,32 @@ production tree.
   `THIRD_PARTY_LICENSES.assets.json`.
 - **PDF.js** (`pdfjs-dist`) — Apache-2.0.
 - **MediaPipe Tasks Vision** and the bundled EfficientDet/EfficientNet models —
-  Apache-2.0 (Google).
-- **Fonts and icons** — the licenses shipped with their original packages
-  (Lucide: ISC; Cascadia Code and Noto Sans SC: OFL-1.1; see
-  `public/legal/OFL-1.1.txt`).
+  Apache-2.0 (Google). Notice: `public/mediapipe/LICENSE`.
+- **mp4v decoder** (`@file-viewer/renderer-media` vendor, Android AOSP) —
+  Apache-2.0; built with Emscripten (MIT/NCSA). Notices:
+  `public/legal/AOSP-NOTICE.txt`, `public/legal/EMSCRIPTEN-LICENSE.txt`.
+- **Fonts and icons**
+
+  | Font | Copyright | License | Text |
+  |---|---|---|---|
+  | Cascadia Code | (c) 2019-Present Microsoft Corporation (Reserved Font Name) | OFL-1.1 | `public/legal/OFL-1.1.txt` |
+  | Caveat | (c) 2014 The Caveat Project Authors | OFL-1.1 | `public/legal/OFL-1.1.txt` |
+  | Ubuntu Sans Mono | (c) 2011, 2022, 2023 Canonical Ltd. (Dalton Maag) | Ubuntu Font Licence 1.0 | `public/legal/UFL-1.0.txt` |
+  | Noto Sans SC | (c) Google Inc. | OFL-1.1 | `public/legal/OFL-1.1.txt` |
+  | Lucide (icons) | ISC | ISC | the package `LICENSE` |
+
+## File-level (MPL-2.0) components
+
+The following packages are licensed under MPL-2.0, a file-level copyleft
+license. They are used **unmodified**, and their complete corresponding source
+code is publicly available at the upstream repositories listed above and in the
+registry distribution (crates.io / npm). No MPL-covered file has been modified,
+so the source-availability obligation is satisfied by the published originals.
+
+- Rust: `cssparser`, `cssparser-macros`, `selectors`, `dtoa-short`, `option-ext`
+- npm: `lightningcss`, `lightningcss-win32-x64-msvc` (build-time only; not shipped in `dist/`)
+- npm: `dompurify` (dual MPL-2.0 OR Apache-2.0; the Apache-2.0 option applies)
+
 
 ## Application code
 

@@ -69,3 +69,9 @@ bench/results/quality-*.md
 
 # Yerel bench korpuslari (uretilir; bench/README.md'ye bakin)
 lab/corpora/local/
+
+# Notice uretimi (generate-notices.mjs) ciktilari
+public/legal/AOSP-NOTICE.txt
+public/legal/EMSCRIPTEN-LICENSE.txt
+public/mediapipe/LICENSE
+public/legal/LIBARCHIVE-COPYING.txt

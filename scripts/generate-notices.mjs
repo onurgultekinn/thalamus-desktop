@@ -148,7 +148,7 @@ try {
     lines.push(`${license} — ${list.length} crate`);
     for (const c of list) lines.push(`  - ${c.name} ${c.version}`);
   }
-} catch (err) {
+} catch {
   lines.push('  (cargo metadata çalıştırılamadı; src-tauri/Cargo.lock dosyasına bakın.)');
 }
 
@@ -176,28 +176,130 @@ lines.push('4) Varlık bildirimleri');
 lines.push('----------------------');
 lines.push('- public/file-viewer/THIRD_PARTY_LICENSES.assets.json');
 lines.push('  (File Viewer asset/worker/font bildirimleri; releaseApproval alanı ayrıca incelenmeli.)');
+lines.push('- public/legal/AOSP-NOTICE.txt + EMSCRIPTEN-LICENSE.txt');
+lines.push('  (public/file-viewer/vendor/media/mp4v-decoder.wasm — Android AOSP mp4v çözücüsü,');
+lines.push('  Apache-2.0; Emscripten araç zinciri, MIT/NCSA.)');
+lines.push('- public/mediapipe/LICENSE (MediaPipe Tasks Vision ve paketlenen model dosyaları,');
+lines.push('  Apache-2.0, Google).');
 lines.push('');
 lines.push('5) Fontlar');
 lines.push('----------');
-lines.push('- Cascadia Code: SIL Open Font License 1.1');
+lines.push('Aşağıdaki font dosyaları public/fonts/ altında dağıtılır. Her birinin kendi');
+lines.push('telif bildirimi ve lisans metni korunmuştur.');
+lines.push('');
+lines.push('- Cascadia Code — Copyright (c) 2019-Present, Microsoft Corporation,');
+lines.push('  with Reserved Font Name Cascadia Code. SIL Open Font License 1.1.');
+lines.push('- Caveat — Copyright 2014 The Caveat Project Authors');
+lines.push('  (https://github.com/googlefonts/caveat). SIL Open Font License 1.1.');
+lines.push('- Ubuntu Sans Mono — Copyright 2011, 2022, 2023 Canonical Ltd.');
+lines.push('  Typeset by Dalton Maag Ltd. Ubuntu Font Licence 1.0.');
+lines.push('  Metin: public/legal/UFL-1.0.txt (https://ubuntu.com/legal/font-licence).');
 lines.push('- Noto Sans SC (@fontsource-variable/noto-sans-sc): SIL Open Font License 1.1');
 lines.push('- caniuse-lite (yalnız derleme zamanı): CC-BY-4.0');
+lines.push('');
+lines.push('Not: MPL-2.0 kapsamındaki dosya bazlı lisanslı bileşenler (cssparser,');
+lines.push('selectors, dtoa-short, option-ext, dompurify, lightningcss) DEĞİŞTİRİLMEMİŞ');
+lines.push('haliyle kullanılır; her birinin kaynağı crates.io / npm kayıt defterinde ve');
+lines.push('yukarıdaki upstream adreslerde erişilebilir durumdadır.');
 lines.push('');
 
 mkdirSync(OUT_DIR, { recursive: true });
 writeFileSync(OUT_FILE, lines.join('\n'), 'utf8');
 
-// Font lisanslarını da paketle (varsa kopyala, yoksa OFL metnini kısa notla bırak).
-const fontLicenseSources = [
+// OFL metni: gövde tek, ama BAŞLIK font bazında ayrı olmalı (OFL §1 telif
+// bildiriminin korunmasını ister). Daha önce yalnız Noto'nun "Google Inc."
+// başlığı kopyalanıyordu; Cascadia (Microsoft) ve Caveat (Impallari/Caveat
+// Project) bildirimi kayboluyordu.
+const oflBodySources = [
   path.join(ROOT, 'node_modules', '@fontsource-variable', 'noto-sans-sc', 'LICENSE'),
+  path.join(ROOT, 'node_modules', '@file-viewer', 'assets-standard', 'viewer', 'vendor', 'pdf', 'fonts', 'OFL-1.1.txt'),
   path.join(ROOT, 'public', 'file-viewer', 'vendor', 'pdf', 'fonts', 'OFL-1.1.txt'),
 ];
-const target = path.join(OUT_DIR, 'OFL-1.1.txt');
-const source = fontLicenseSources.find((p) => existsSync(p));
-if (source) {
-  writeFileSync(target, readFileSync(source));
-} else {
-  writeFileSync(target, 'SIL Open Font License 1.1\nhttps://openfontlicense.org/\n');
+const oflBody = (() => {
+  for (const p of oflBodySources) {
+    if (!existsSync(p)) continue;
+    const text = readFileSync(p, 'utf8');
+    // Gövdeyi "SIL OPEN FONT LICENSE" başlığından itibaren al; önceki
+    // font-spesifik telif satırlarını at, yerine kendi listemizi yazacağız.
+    const idx = text.search(/SIL OPEN FONT LICENSE/i);
+    return idx >= 0 ? text.slice(idx) : text;
+  }
+  return 'SIL Open Font License 1.1\nhttps://openfontlicense.org/\n';
+})();
+writeFileSync(
+  path.join(OUT_DIR, 'OFL-1.1.txt'),
+  [
+    'This application bundles the following fonts under the SIL Open Font License 1.1.',
+    'Each copyright notice is reproduced verbatim from its upstream source.',
+    '',
+    'Cascadia Code',
+    '  Copyright (c) 2019 - Present, Microsoft Corporation,',
+    '  with Reserved Font Name Cascadia Code.',
+    '',
+    'Caveat',
+    '  Copyright 2014 The Caveat Project Authors (https://github.com/googlefonts/caveat)',
+    '',
+    'Noto Sans SC',
+    '  Copyright Google Inc.',
+    '',
+    '---------------------------------------------------------------------------',
+    '',
+    oflBody.trim(),
+    '',
+  ].join('\n'),
+  'utf8'
+);
+
+// AOSP (mp4v) ve Emscripten bildirimlerini dağıtıma taşı. Bunlar
+// @file-viewer/renderer-media içindeki vendor dizininde duruyor ama paket
+// ağacına kopyalanmıyordu; Apache-2.0 §4(d) NOTICE metnini ister.
+const extraNotices = [
+  ['AOSP-NOTICE.txt', 'node_modules/@file-viewer/renderer-media/dist/vendor/mp4v/AOSP-NOTICE.txt'],
+  ['EMSCRIPTEN-LICENSE.txt', 'node_modules/@file-viewer/renderer-media/dist/vendor/mp4v/EMSCRIPTEN-LICENSE.txt'],
+  // assets-standard, libarchive.wasm'in yaninda hic bildirim tasimiyor
+  // (upstream'e bildirildi). BSD-2-Clause metni cevrimici kaynaktan alinir.
+  ['LIBARCHIVE-COPYING.txt', null],
+];
+for (const [targetName, sourceRel] of extraNotices) {
+  const outPath = path.join(OUT_DIR, targetName);
+  if (sourceRel === null) {
+    // Kaynagi pakette olmayan bildirim: repo'da isaretlenmis kopya varsa koru.
+    if (!existsSync(outPath)) {
+      console.warn(
+        `uyarı: ${targetName} yok — libarchive BSD metnini public/legal/ altına koyun ` +
+          '(https://github.com/libarchive/libarchive/blob/master/COPYING)'
+      );
+    }
+    continue;
+  }
+  const from = path.join(ROOT, sourceRel);
+  if (existsSync(from)) {
+    writeFileSync(outPath, readFileSync(from));
+  } else {
+    console.warn(`uyarı: ${sourceRel} bulunamadı — ${targetName} yazılmadı`);
+  }
+}
+
+// MediaPipe (Tasks Vision + model dosyaları) Apache-2.0: lisans metni
+// public/mediapipe/ altında modelle birlikte dursun.
+const mediapipeLicense = path.join(ROOT, 'public', 'mediapipe', 'LICENSE');
+if (!existsSync(mediapipeLicense)) {
+  mkdirSync(path.dirname(mediapipeLicense), { recursive: true });
+  writeFileSync(
+    mediapipeLicense,
+    [
+      'MediaPipe Tasks Vision and the bundled model files (object_detector.tflite)',
+      'are Copyright Google LLC and licensed under the Apache License, Version 2.0.',
+      '',
+      'License: https://www.apache.org/licenses/LICENSE-2.0',
+      'Upstream: https://github.com/google-ai-edge/mediapipe',
+      '',
+      'The full Apache-2.0 text also ships in LICENSE at the application root and in',
+      'public/legal/THIRD_PARTY_NOTICES.txt.',
+      '',
+    ].join('\n'),
+    'utf8'
+  );
 }
 
 console.log(`Yazıldı: ${path.relative(ROOT, OUT_FILE)} (${packages.length} npm paketi)`);

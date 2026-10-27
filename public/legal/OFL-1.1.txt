@@ -1,6 +1,19 @@
-Google Inc.
+This application bundles the following fonts under the SIL Open Font License 1.1.
+Each copyright notice is reproduced verbatim from its upstream source.
 
-This Font Software is licensed under the SIL Open Font License, Version 1.1.
+Cascadia Code
+  Copyright (c) 2019 - Present, Microsoft Corporation,
+  with Reserved Font Name Cascadia Code.
+
+Caveat
+  Copyright 2014 The Caveat Project Authors (https://github.com/googlefonts/caveat)
+
+Noto Sans SC
+  Copyright Google Inc.
+
+---------------------------------------------------------------------------
+
+SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:
 http://scripts.sil.org/OFL
 

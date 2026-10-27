@@ -27,7 +27,10 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": [
+      "nsis",
+      "msi"
+    ],
     "publisher": "Onur Gultekin",
     "copyright": "Copyright (c) 2026 Onur Gultekin",
     "shortDescription": "Local-first AI workbench with lossless prompt compression",
@@ -49,7 +52,10 @@
       }
     },
     "resources": [
-      "../ATTRIBUTIONS.md"
+      "../ATTRIBUTIONS.md",
+      "../LICENSE",
+      "../NOTICE",
+      "../TRADEMARK.md"
     ]
   }
 }
