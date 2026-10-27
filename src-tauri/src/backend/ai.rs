@@ -365,7 +365,7 @@ fn build_code_context(
         // ya da çok sayıda kısa fonksiyon içeren dosyada şema TAM GÖVDEDEN
         // BÜYÜK olabilir. Token'la ölçülür; kazanç %25'in (certification
         // eşiği) altındaysa tam gövde gönderilir. Anlama tarafının ölçümü
-        // lab/tools/comprehension_probe.py code_schema yöntemiyle çalışır.
+        // iç ölçüm günlüğündeki code_schema yöntemiyle çalışır.
         match schema::extract_schema_for(name, body) {
             Some(sch) => {
                 let rendered = schema::render_schema(&sch);
