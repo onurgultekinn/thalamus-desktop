@@ -28,6 +28,11 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "publisher": "Onur Gultekin",
+    "copyright": "Copyright (c) 2026 Onur Gultekin",
+    "shortDescription": "Local-first AI workbench with lossless prompt compression",
+    "longDescription": "Thalamus Desktop combines an AI chat, a project workspace (file explorer, editor, terminal) and an agent-mode copilot in one desktop application. A pure-Rust prompt-compression engine rewrites structured parts of a prompt into a compact table, verifies the round trip, and reports the tokens and cost saved. The backend listens on 127.0.0.1 only and API keys stay in the Windows credential vault.",
+    "category": "DeveloperTool",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -35,8 +40,13 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "android": {
-      "debugApplicationIdSuffix": ".debug"
+    "windows": {
+      "nsis": {
+        "languages": [
+          "English",
+          "Turkish"
+        ]
+      }
     },
     "resources": [
       "../ATTRIBUTIONS.md"
