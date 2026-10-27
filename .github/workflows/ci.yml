@@ -23,6 +23,14 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run lint
+      - name: License gate
+        run: npm run license:check
+      # Advisory at first: the advisory database changes daily and one known
+      # transitive advisory should not block every build. Make it blocking
+      # once the tree has stayed clean for a while.
+      - name: npm audit (high and above)
+        run: npm audit --audit-level=high
+        continue-on-error: true
       - run: npm run build
 
   rust:
@@ -32,12 +40,35 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
       - name: cargo check
         working-directory: src-tauri
         run: cargo check --all-targets
+      # Advisory: the tree is not rustfmt-clean yet (one wide, mechanical
+      # reformat is pending). Flip to blocking after that commit.
+      - name: cargo fmt (advisory)
+        working-directory: src-tauri
+        run: cargo fmt --check
+        continue-on-error: true
+      # Advisory: six pre-existing warnings, several inside engine code that
+      # is frozen for the beta. Flip to blocking once they are fixed.
+      - name: cargo clippy (advisory)
+        working-directory: src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+        continue-on-error: true
       - name: cargo test
         working-directory: src-tauri
         run: cargo test --lib
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      # Advisory: an advisory in a transitive dependency opens a Dependabot
+      # PR; it should not fail an otherwise green build on its own.
+      - name: cargo audit (advisory)
+        working-directory: src-tauri
+        run: cargo audit
+        continue-on-error: true
