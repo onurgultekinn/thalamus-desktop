@@ -35,6 +35,31 @@ jobs:
         with:
           workspaces: src-tauri
 
+      # A tag that disagrees with package.json would publish installers whose
+      # version does not match the release name. Compare only the numeric part
+      # (v0.1.0-beta -> 0.1.0).
+      - name: Verify tag matches package.json
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $tagVersion = ($tag -replace '^v', '') -replace '-.*$', ''
+          $pkgVersion = (Get-Content package.json | ConvertFrom-Json).version
+          Write-Host "tag=$tag tagVersion=$tagVersion package.json=$pkgVersion"
+          if ($tagVersion -ne $pkgVersion) {
+            throw "Tag $tag (=$tagVersion) does not match package.json version $pkgVersion"
+          }
+
+      # Fast checks only: the full suite already runs in CI on every push.
+      # This catches a tag pointing at a commit that never passed CI.
+      - name: Quick checks (lint + rust tests)
+        shell: pwsh
+        run: |
+          npm ci
+          npm run lint
+          Push-Location src-tauri
+          cargo test --lib
+          Pop-Location
+
       - name: Build installers (NSIS + MSI)
         run: npm run tauri:build
 
@@ -48,10 +73,76 @@ jobs:
           $files | ForEach-Object { Write-Host "artifact: $($_.FullName)" }
           "paths=$($files.FullName -join ';')" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
-      - name: Upload to release (draft)
+      # Checksums let a user verify a download that Windows SmartScreen flagged.
+      - name: Write SHA256SUMS.txt
+        shell: pwsh
+        run: |
+          $dir = "src-tauri/target/release/bundle"
+          $files = Get-ChildItem -Path "$dir/nsis/*.exe", "$dir/msi/*.msi" -ErrorAction SilentlyContinue
+          $lines = foreach ($f in $files) {
+            $hash = (Get-FileHash -Algorithm SHA256 -Path $f.FullName).Hash.ToLower()
+            "$hash  $($f.Name)"
+          }
+          $lines | Out-File -FilePath "SHA256SUMS.txt" -Encoding utf8
+          Get-Content SHA256SUMS.txt
+
+      # Release body = the CHANGELOG section for this version, plus the
+      # unsigned-installer note. If the section is missing, fall back to
+      # GitHub's generated notes in the next step.
+      - name: Extract CHANGELOG section
+        id: changelog
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $version = ($tag -replace '^v', '')
+          $lines = Get-Content CHANGELOG.md
+          $start = ($lines | Select-String -Pattern "^## \[$([regex]::Escape($version))\]").LineNumber
+          if (-not $start) {
+            Write-Host "No CHANGELOG section for $version"
+            "found=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            exit 0
+          }
+          $rest = $lines[$start..($lines.Count - 1)]
+          $nextSection = ($rest | Select-String -Pattern "^## \[").LineNumber
+          $body = if ($nextSection) { $rest[0..($nextSection - 2)] } else { $rest }
+          $note = @(
+            '',
+            '***',
+            '',
+            '### About the SmartScreen warning',
+            '',
+            'The Windows installers are not code-signed yet, so SmartScreen may show',
+            '"Windows protected your PC" on first launch. Choose **More info** and then',
+            '**Run anyway**. You can verify your download against `SHA256SUMS.txt`',
+            'attached to this release:',
+            '',
+            '```',
+            'Get-FileHash -Algorithm SHA256 .\Thalamus_*.msi',
+            '```',
+            '',
+            'The hash must match the line for that file in `SHA256SUMS.txt`.'
+          ) -join "`n"
+          ($body -join "`n") + "`n" + $note | Out-File -FilePath "release-body.md" -Encoding utf8
+          "found=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Upload to release (draft, with CHANGELOG body)
+        if: steps.changelog.outputs.found == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          prerelease: ${{ contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
+          body_path: release-body.md
+          files: |
+            ${{ steps.collect.outputs.paths }}
+            SHA256SUMS.txt
+
+      - name: Upload to release (draft, generated notes)
+        if: steps.changelog.outputs.found != 'true'
         uses: softprops/action-gh-release@v2
         with:
           draft: true
           prerelease: ${{ contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
           generate_release_notes: true
-          files: ${{ steps.collect.outputs.paths }}
+          files: |
+            ${{ steps.collect.outputs.paths }}
+            SHA256SUMS.txt
