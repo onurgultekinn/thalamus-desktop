@@ -10,6 +10,8 @@ pub mod jscompress;
 pub mod pipeline;
 pub mod plain_table;
 pub mod repo_map;
+#[cfg(test)]
+mod roundtrip_tests;
 pub mod schema;
 pub mod segments;
 pub mod tokencache;
