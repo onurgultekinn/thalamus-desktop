@@ -577,6 +577,16 @@ fn round_budget_error(fresh_chars: usize) -> Option<String> {
     }
 }
 
+/// `run_command` çıktısındaki `[exit code: N]` satırından kodu okur.
+/// Zaman aşımında çıktı bu satırı taşımaz; o durumda `None`.
+fn parse_exit_code(result: &str) -> Option<i32> {
+    let marker = "[exit code: ";
+    let start = result.rfind(marker)? + marker.len();
+    let rest = &result[start..];
+    let end = rest.find(']')?;
+    rest[..end].trim().parse::<i32>().ok()
+}
+
 /// Sağlayıcı hatası tekrarlanmaya değer mi? Yalnızca yanıt GÖNDERİLMEDEN
 /// oluşan hatalar (HTTP durum satırı, bağlantı kurulamadı) — akış ortasında
 /// üretilmez, bu yüzden kısmi akışı tekrar basma riski yoktur.
@@ -1389,6 +1399,7 @@ fn stream_tool_loop(
                         }));
                         continue;
                     }
+                    let started = std::time::Instant::now();
                     let result = if name == "dispatch_agent" && !ctx.read_only {
                         let transport = HttpTransport;
                         run_dispatch_agent(
@@ -1398,6 +1409,21 @@ fn stream_tool_loop(
                     } else {
                         tools::execute(&name, &args, &ctx)
                     };
+                    let elapsed_ms = started.elapsed().as_millis() as u64;
+                    // run_command kaydı: komut metni, çıkış kodu ve süre
+                    // arayüzde görünür — otomatik modda çalışan kabuğun ne
+                    // yaptığı sessiz kalmamalı.
+                    if name == "run_command" {
+                        let command = args["command"].as_str().unwrap_or("");
+                        let exit_code = parse_exit_code(&result);
+                        let _ = emit_event(tx, json!({
+                            "type": "tool_result",
+                            "name": name,
+                            "command": command,
+                            "exit_code": exit_code,
+                            "duration_ms": elapsed_ms,
+                        }));
+                    }
                     fresh_chars += result.chars().count();
                     messages.push(json!({
                         "role": "tool",

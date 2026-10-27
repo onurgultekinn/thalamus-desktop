@@ -328,6 +328,41 @@ function ChatViewInner({
                   </div>
                 </div>
 
+                {/* run_command kayıtları (auto/autonomous): komut metni, çıkış
+                    kodu ve süre. Kabuk komutu sessizce çalışmaz. */}
+                {msg.role === 'assistant' && !!msg.toolRuns?.length && (
+                  <div className="flex flex-col gap-1 px-1">
+                    {msg.toolRuns.map((run, i) => (
+                      <details
+                        key={`${run.command}-${i}`}
+                        className="rounded border border-white/10 bg-white/[0.03] text-[10px] leading-tight"
+                      >
+                        <summary className="flex cursor-pointer items-center gap-1.5 px-2 py-1 font-mono text-white/50">
+                          <span className="text-[#4385BE]">$</span>
+                          <span className="truncate">{run.command}</span>
+                          <span
+                            className={`ml-auto shrink-0 ${
+                              run.exitCode === 0
+                                ? 'text-emerald-400/80'
+                                : run.exitCode == null
+                                  ? 'text-amber-400/80'
+                                  : 'text-red-400/80'
+                            }`}
+                          >
+                            {run.exitCode == null ? 'exit ?' : `exit ${run.exitCode}`}
+                          </span>
+                          {typeof run.durationMs === 'number' && (
+                            <span className="shrink-0 text-white/30">{run.durationMs} ms</span>
+                          )}
+                        </summary>
+                        <pre className="max-h-40 overflow-auto whitespace-pre-wrap px-2 pb-1 font-mono text-white/40">
+                          {run.command}
+                        </pre>
+                      </details>
+                    ))}
+                  </div>
+                )}
+
                 {/* Ajan araç etkinliği: tool-loop sırasında çağrılan araçlar.
                     Akış sırasında canlı ("çalışıyor" hissi), bitince kompakt
                     çip geçmişi — metinden ayrı, gürültü değil. */}

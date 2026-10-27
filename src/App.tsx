@@ -1085,6 +1085,7 @@ export default function App() {
         let streamed = '';
         let reasoningAcc = '';
         let toolCalls: string[] = [];
+        let toolRuns: NonNullable<Message['toolRuns']> = [];
         let engineMeta: Message['engine'];
         let flushTimer: number | undefined;
         const paint = () => {
@@ -1092,6 +1093,7 @@ export default function App() {
           const contentSnapshot = streamed;
           const reasoningSnapshot = reasoningAcc;
           const toolsSnapshot = toolCalls.length ? [...toolCalls] : undefined;
+          const runsSnapshot = toolRuns.length ? [...toolRuns] : undefined;
           applyMessages(prev => {
             const copy = [...prev];
             for (let i = copy.length - 1; i >= 0; i--) {
@@ -1101,6 +1103,7 @@ export default function App() {
                   content: contentSnapshot,
                   reasoning: reasoningSnapshot || undefined,
                   toolActivity: toolsSnapshot,
+                  toolRuns: runsSnapshot,
                 };
                 break;
               }
@@ -1125,12 +1128,14 @@ export default function App() {
           // Son araç çağrısı 40 ms'lik boyamaya sığmamış olabilir: bitiş
           // yaması araç geçmişini de kesin taşır.
           const toolsFinal = toolCalls.length ? [...toolCalls] : undefined;
+          const runsFinal = toolRuns.length ? [...toolRuns] : undefined;
           applyMessages(prev => {
             const copy = [...prev];
             for (let i = copy.length - 1; i >= 0; i--) {
               if (copy[i].streaming) {
                 copy[i] = { ...copy[i], ...patch, streaming: false };
                 if (toolsFinal) copy[i] = { ...copy[i], toolActivity: toolsFinal };
+                if (runsFinal) copy[i] = { ...copy[i], toolRuns: runsFinal };
                 break;
               }
             }
@@ -1189,6 +1194,15 @@ export default function App() {
             },
             onToolCall: (name) => {
               toolCalls = [...toolCalls, name];
+              schedulePaint();
+            },
+            onToolResult: (info) => {
+              if (info.name !== 'run_command' || !info.command) return;
+              toolRuns = [...toolRuns, {
+                command: info.command,
+                exitCode: info.exitCode ?? null,
+                durationMs: info.durationMs,
+              }];
               schedulePaint();
             },
           });

@@ -987,6 +987,46 @@ fn output_with_timeout(
     }
 }
 
+/// Cocuk surece gecmemesi gereken ortam degiskeni adlari. Ana surec
+/// (kullanici kabugundan baslatilmissa) saglayici anahtarlarini ortamda
+/// tasiyor olabilir; ajanin calistirdigi komut bunlari gormemeli.
+/// Yalnizca ADA gore elenir: PATH/SystemRoot/TEMP/USERPROFILE gibi sistem
+/// degiskenleri korunur.
+fn is_sensitive_env_name(name: &str) -> bool {
+    const SUFFIXES: &[&str] = &[
+        "_API_KEY",
+        "_ACCESS_KEY",
+        "_PRIVATE_KEY",
+        "_SECRET_KEY",
+        "_TOKEN",
+        "_SECRET",
+        "_PASSWORD",
+        "_PASSWD",
+        "_CREDENTIALS",
+        "_CREDENTIAL",
+    ];
+    const EXACT: &[&str] = &["API_KEY", "TOKEN", "SECRET", "PASSWORD", "OPENAI_API_KEY"];
+    let upper = name.to_ascii_uppercase();
+    EXACT.contains(&upper.as_str()) || SUFFIXES.iter().any(|s| upper.ends_with(s))
+}
+
+/// `cmd`den hassas ortam degiskenlerini cikarir (ada gore, degeri okumadan).
+fn strip_sensitive_env(cmd: &mut std::process::Command) {
+    let names: Vec<std::ffi::OsString> = std::env::vars_os()
+        .filter_map(|(k, _)| {
+            let name = k.to_string_lossy().into_owned();
+            if is_sensitive_env_name(&name) {
+                Some(k)
+            } else {
+                None
+            }
+        })
+        .collect();
+    for name in names {
+        cmd.env_remove(name);
+    }
+}
+
 fn tool_run_command(ctx: &ToolCtx, args: &Value) -> String {
     if !ctx.allow_shell {
         return "run_command is disabled in this permission mode (read-only/ask). Ask the user to switch to auto/autonomous mode.".into();
@@ -1010,6 +1050,7 @@ fn tool_run_command(ctx: &ToolCtx, args: &Value) -> String {
     };
     let mut cmd = std::process::Command::new(prog);
     cmd.arg(flag).arg(command).current_dir(&root);
+    strip_sensitive_env(&mut cmd);
     let out = output_with_timeout(cmd, std::time::Duration::from_millis(timeout_ms));
     match out {
         Ok(o) => {
@@ -1474,6 +1515,70 @@ c
             &c,
         );
         assert_eq!(c.todos.borrow().len(), 1);
+    }
+
+    #[test]
+    fn run_command_hides_sensitive_env_vars() {
+        let tmp = std::env::temp_dir().join(format!("thx_{}env", std::process::id()));
+        let _ = std::fs::create_dir_all(&tmp);
+        // Test degiskenleri ana surece eklenir; cocuk surece GECMEMELI.
+        std::env::set_var("THALAMUS_TEST_API_KEY", "s3cr3t-value");
+        std::env::set_var("THALAMUS_TEST_TOKEN", "tok-value");
+        std::env::set_var("THALAMUS_TEST_VISIBLE", "visible-value");
+        let blocks: Vec<(String, String, String)> = vec![];
+        let mut c = ctx(&tmp, &blocks);
+        c.allow_shell = true;
+        let (show_key, show_token, show_visible) = if cfg!(windows) {
+            (
+                "echo key=[%THALAMUS_TEST_API_KEY%]",
+                "echo tok=[%THALAMUS_TEST_TOKEN%]",
+                "echo vis=[%THALAMUS_TEST_VISIBLE%]",
+            )
+        } else {
+            (
+                "echo key=[$THALAMUS_TEST_API_KEY]",
+                "echo tok=[$THALAMUS_TEST_TOKEN]",
+                "echo vis=[$THALAMUS_TEST_VISIBLE]",
+            )
+        };
+        for (cmd, needle) in [
+            (show_key, "s3cr3t-value"),
+            (show_token, "tok-value"),
+        ] {
+            let out = execute("run_command", &json!({ "command": cmd }), &c);
+            assert!(
+                !out.contains(needle),
+                "hassas degisken cocuga gecmemeli: {}",
+                out
+            );
+        }
+        let out = execute("run_command", &json!({ "command": show_visible }), &c);
+        assert!(
+            out.contains("visible-value"),
+            "hassas olmayan degisken korunmali: {}",
+            out
+        );
+        std::env::remove_var("THALAMUS_TEST_API_KEY");
+        std::env::remove_var("THALAMUS_TEST_TOKEN");
+        std::env::remove_var("THALAMUS_TEST_VISIBLE");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn sensitive_env_name_matching_is_suffix_based() {
+        for name in [
+            "OPENAI_API_KEY",
+            "DEEPSEEK_API_KEY",
+            "GITHUB_TOKEN",
+            "AWS_SECRET_ACCESS_KEY",
+            "DB_PASSWORD",
+            "APP_CLIENT_SECRET",
+        ] {
+            assert!(is_sensitive_env_name(name), "{} elenmeli", name);
+        }
+        for name in ["PATH", "SYSTEMROOT", "TEMP", "USERPROFILE", "HOME", "KEYBOARD_LAYOUT"] {
+            assert!(!is_sensitive_env_name(name), "{} korunmali", name);
+        }
     }
 
     #[test]

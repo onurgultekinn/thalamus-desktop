@@ -49,6 +49,11 @@ export interface Message {
   /** Ajan koşusu sırasında çağrılan araç adları (read_file, repo_map…).
    *  Akış sırasında canlı gösterilir; bitince geçmiş olarak kalır. */
   toolActivity?: string[];
+  /**
+   * `run_command` (auto/autonomous) kayıtları: komut metni, çıkış kodu, süre.
+   * Kabuk komutu sessizce çalışmaz — ne çalıştığı ve nasıl bittiği görünür.
+   */
+  toolRuns?: { command: string; exitCode?: number | null; durationMs?: number }[];
   /** Akış yarıda kaldıysa sebep — cevap silinmez, küçük bir not düşülür. */
   stopped?: 'stop' | 'timeout' | 'error' | 'length';
   /**

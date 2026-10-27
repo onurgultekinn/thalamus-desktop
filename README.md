@@ -85,10 +85,14 @@ structure losslessly before the request leaves your machine:
   the editor state and undo history stay intact.
 - Sub-agents via `dispatch_agent`; their token usage is rolled into the parent
   run. Sub-agents are read-only and cannot spawn further sub-agents.
-- **Network access is limited to two tools**: `web_search` (keyless search) and
-  `read_page` (fetch a page as text). Every other tool is filesystem-only. File
-  tool paths are resolved inside the workspace root, and tool output is size
-  capped.
+- **Network-capable tools**: `web_search` (keyless search) and `read_page`
+  (fetch a page as text) are the only tools that deliberately make outbound
+  requests. `run_command` is not sandboxed: in `auto` and `autonomous` mode it
+  runs a real shell in the workspace root, so a command like `curl` or
+  `npm install` reaches the network too. Every other tool is filesystem-only.
+  File tool paths are resolved inside the workspace root, and tool output is
+  size capped. Sensitive environment variables (`*_API_KEY`, `*_TOKEN`,
+  `*_SECRET`, `*_PASSWORD`, …) are stripped from the child process.
 
 **Multi-agent runs**
 - Agent Mesh: agents exchange typed JSON envelopes, and those envelopes pass
@@ -162,11 +166,14 @@ credentials, request construction, and compression.
   allowlist, and a DNS-rebinding guard.
 - Provider keys are read from the OS credential vault. They are never written to
   config files or logs.
-- Agent file tools cannot leave the workspace root. The only network-capable
-  tools are `web_search` and `read_page`; they receive the model's query or URL
-  and nothing else from your machine. `read_page` URLs are screened before
-  fetch: only public http/https hosts are allowed — loopback, private, and
-  link-local addresses are rejected (SSRF guard, DNS-rebinding safe).
+- Agent file tools cannot leave the workspace root. `web_search` and `read_page`
+  are the only tools that deliberately make outbound requests; they receive the
+  model's query or URL and nothing else from your machine. `read_page` URLs are
+  screened before fetch: only public http/https hosts are allowed — loopback,
+  private, and link-local addresses are rejected (SSRF guard, DNS-rebinding
+  safe). `run_command` is a real, unsandboxed shell in `auto`/`autonomous` mode:
+  it can reach the network and is protected only by the permission gate and the
+  user watching the run.
 - Provider requests leave only after local compression, and only to the endpoint
   you configured.
 - No telemetry, no analytics, no crash reporting. Logs stay on disk; nothing is

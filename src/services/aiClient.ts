@@ -386,6 +386,16 @@ export interface AiChatStreamHandlers {
   }) => void;
   /** Backend bir araç çağrısını yürütmeden hemen önce (ajan döngüsü görünürlüğü). */
   onToolCall?: (name: string) => void;
+  /**
+   * Yürütme bitti: şu an yalnız `run_command` için gelir. Otomatik modda
+   * çalışan kabuğun komutu, çıkış kodu ve süresi arayüzde görünür.
+   */
+  onToolResult?: (info: {
+    name: string;
+    command?: string;
+    exitCode?: number | null;
+    durationMs?: number;
+  }) => void;
 }
 
 /**
@@ -488,6 +498,9 @@ export async function aiChatStream(
           type?: string;
           content?: string;
           name?: string;
+          command?: string;
+          exit_code?: number | null;
+          duration_ms?: number;
           edits?: AiEditResult[];
           todos?: { content: string; status: string }[];
           message?: string;
@@ -515,6 +528,13 @@ export async function aiChatStream(
           handlers.onMeta?.({ engine: event.engine });
         } else if (event.type === 'tool_call' && event.name) {
           handlers.onToolCall?.(event.name);
+        } else if (event.type === 'tool_result' && event.name) {
+          handlers.onToolResult?.({
+            name: event.name,
+            command: event.command,
+            exitCode: event.exit_code ?? null,
+            durationMs: event.duration_ms,
+          });
         } else if (event.type === 'done') {
           usage = event.usage;
           rounds = event.rounds;
