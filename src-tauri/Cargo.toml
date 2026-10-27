@@ -72,8 +72,6 @@ windows-sys = { version = "0.61", features = ["Win32_Security_Credentials", "Win
 [dev-dependencies]
 # For the HTTP router integration tests (CORS origin checks).
 tower = { version = "0.5", features = ["util"] }
-# Compression lab harness (`examples/lab.rs`): corpus manifest doğrulaması (sha256).
-sha2 = "0.10"
 
 # Dev builds are unoptimized by default, which makes the local tokenizer and
 # compression engine feel sluggish. Optimize dependencies even in dev, while

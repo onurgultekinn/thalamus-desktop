@@ -10,8 +10,9 @@ use tiktoken_rs::cl100k_base;
 
 mod agent;
 pub mod backend;
-// Sıkıştırma motoru, laboratuvar harness'ı (`examples/lab.rs`) tarafından
-// doğrudan ölçülsün diye public. Üretim yolu değişmez; yalnız görünürlük.
+// Motor `pub`: herkese açık ölçüm örnekleri (examples/bench_public.rs,
+// bench_dump.rs, bench_engine.rs) ve entegrasyon testleri doğrudan kullanır.
+// Üretim yolu değişmez; yalnız görünürlük.
 pub mod engine;
 pub mod secrets;
 

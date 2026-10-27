@@ -353,9 +353,6 @@ b
 ", "zzz", "x").is_err());
     }
 
-
-    use super::*;
-
     #[test]
     fn parses_multiple_blocks_with_filenames() {
         let content = "İki dosyada da düzeltme yaptım.\n\

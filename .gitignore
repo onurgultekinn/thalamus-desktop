@@ -67,8 +67,8 @@ bench/results/quality-*.md
 *.pfx
 *.p12
 
-# Yerel bench korpuslari (uretilir; bench/README.md'ye bakin)
-lab/corpora/local/
+# Ic olcum alani (private; _private/lab altinda da bir kopyasi var)
+lab/
 
 # Notice uretimi (generate-notices.mjs) ciktilari
 public/legal/AOSP-NOTICE.txt
