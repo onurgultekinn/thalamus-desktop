@@ -160,7 +160,7 @@ export default function App() {
     // 20–50 sn). Tek GGUF blob'u olan modelleri kendi llama-server'ımızla
     // mmap üzerinden aç: aynı model, ~4–10 sn. Görsel/parçalı modellerde
     // backend otomatik olarak Ollama'ya düşer.
-    const file = /:11434\/v1$/.test(normalizeBaseUrl(baseUrl))
+    const file = normalizeBaseUrl(baseUrl).endsWith(':11434/v1')
       ? getCachedLocalScan()?.files.find(
           (f) => f.kind === 'ollama' && f.model === model && f.servable
         )

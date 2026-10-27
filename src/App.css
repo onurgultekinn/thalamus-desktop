@@ -29,14 +29,12 @@
   font-display: swap;
 }
 
-/* Ink Free — sketchbook handwriting fallback (inside public/fonts, offline) */
-@font-face {
-  font-family: 'Ink Free';
-  src: url('/fonts/Inkfree.ttf') format('truetype');
-  font-weight: 400 700;
-  font-style: normal;
-  font-display: swap;
-}
+/* Ink Free: yalnizca SISTEM fontu olarak kullanilir (Windows ile gelir).
+   Daha once burada `/fonts/Inkfree.ttf` isaret eden bir @font-face vardi, ama
+   dosya depoya hic eklenmemisti: her acilista 404 uretiyor, font yine de
+   yuklenmiyordu. Microsoft fontu yeniden dagitilamadigi icin @font-face
+   kaldirildi; `--sketch-hand` yigini kurulu sistem fontunu kullanmaya devam
+   eder, yoksa Segoe Print/cursive'e duser. */
 
 /* Caveat — primary handwriting (self-host, OFL; Turkish characters in latin-ext) */
 @font-face {

@@ -175,8 +175,10 @@ function drawTo(
 export async function prepareImageFile(file: File, mode: ImageMode = DEFAULT_IMAGE_MODE): Promise<AttachedImage> {
   const t0 = performance.now();
   const mark = (stage: string) => {
-    (window as unknown as { __prepTiming?: Record<string, number> }).__prepTiming =
-      { ...((window as unknown as { __prepTiming?: Record<string, number> }).__prepTiming ?? {}), [stage]: Math.round(performance.now() - t0) };
+    (window as unknown as { __prepTiming?: Record<string, number> }).__prepTiming = {
+      ...(window as unknown as { __prepTiming?: Record<string, number> }).__prepTiming,
+      [stage]: Math.round(performance.now() - t0),
+    };
   };
   const source = await decodeFile(file);
   mark('decode');

@@ -426,8 +426,8 @@ export function formatSize(bytes: number): string {
 /** `served_by` listesinden hangi sağlayıcıya yazılacağını çıkarır. */
 export function providerForBase(baseUrl: string): string {
   const base = normalizeBaseUrl(baseUrl);
-  if (/:11434\/v1$/.test(base)) return 'ollama';
-  if (/:1234\/v1$/.test(base)) return 'lmstudio';
+  if (base.endsWith(':11434/v1')) return 'ollama';
+  if (base.endsWith(':1234/v1')) return 'lmstudio';
   return 'custom';
 }
 
