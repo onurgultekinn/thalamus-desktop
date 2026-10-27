@@ -292,15 +292,15 @@ pub fn read_only_specs() -> Value {
     let full = specs(false);
     Value::Array(
         full.as_array()
-            .unwrap()
-            .iter()
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
             .filter(|t| {
                 t["function"]["name"]
                     .as_str()
                     .map(|n| names.contains(&n))
                     .unwrap_or(false)
             })
-            .cloned()
             .collect(),
     )
 }
