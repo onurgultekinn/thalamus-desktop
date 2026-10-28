@@ -5,7 +5,7 @@
 // gibi okur. Geri çözüm kural tabanlıdır ve `compress` içinde birebir
 // doğrulanır — doğrulanmayan hiçbir çıktı döndürülmez.
 //
-// Anlama kapısı: TRIALS-018 (43 eşleştirilmiş soru, yerel 7B, 3 tekrar):
+// Anlama kapısı (43 eşleştirilmiş soru, yerel 7B, 3 tekrar):
 // ham %100 / tablo %100. Token: XML %65-77, SQL %26-37.
 
 /// Dönüşümün kaynak biçimi.
@@ -899,11 +899,11 @@ pub fn xml_plain_encode(text: &str) -> Option<String> {
         let attr_names: Vec<&str> = attrs.iter().map(|(n, _)| n.as_str()).collect();
         let child_names: Vec<&str> = children.iter().map(|(n, _)| n.as_str()).collect();
         // Doğal dilde şema: "attrs=id,role" modelde sütun eşlemesini bozuyordu
-        // (TRIALS-018: min id 0 yerine 1). "attrs: id role | children: ..."
+        // (ölçümde: min id 0 yerine 1). "attrs: id role | children: ..."
         // hem insan hem model için okunur, ayrıştırması da basit.
         // "@" öneki: adın DEĞER değil KOLON olduğunu model için açık kılar.
         // "(int)" tipi: "en büyük id" sorusunda model metin sütununa kayıyordu
-        // (TRIALS-018: id yerine P-049). Tip, kolonun sayı olduğunu söyler.
+        // (ölçümde: id yerine P-049). Tip, kolonun sayı olduğunu söyler.
         let col_type = |k: usize| -> &'static str {
             let vals: Vec<&str> = rows.iter().map(|r| r[k].as_str()).collect();
             if vals.iter().all(|v| !v.is_empty() && v.parse::<i64>().is_ok()) {

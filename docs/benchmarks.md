@@ -93,10 +93,9 @@ shapes will produce different savings.
 ### Comprehension (earlier internal measurement)
 
 The only comprehension evidence that exists is the measurement recorded in the
-comment at the top of `src-tauri/src/engine/plain_table.rs` (**TRIALS-018**).
-Its exact wording:
+comment at the top of `src-tauri/src/engine/plain_table.rs`. Its wording:
 
-> Anlama kapısı: TRIALS-018 (43 eşleştirilmiş soru, yerel 7B, 3 tekrar):
+> Anlama kapısı (43 eşleştirilmiş soru, yerel 7B, 3 tekrar):
 > ham %100 / tablo %100. Token: XML %65-77, SQL %26-37.
 
 Read that carefully:

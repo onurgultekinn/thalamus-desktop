@@ -126,7 +126,7 @@ pub fn process(raw_prompt: &str, bpe: &CoreBPE, veto_override: bool) -> String {
 
     // KAYIPSIZLIK BEKÇİSİ: segmentler girdiyi birebir kaplamıyorsa (boşluk ya da
     // örtüşme) birleştirme sessizce karakter kaybedebilir. Gerçek kod
-    // dosyalarında gözlendi (iç ölçüm günlüğü, TRIALS-003). Böyle bir durumda
+    // dosyalarında gözlendi. Böyle bir durumda
     // sıkıştırma tamamen iptal edilir ve ham metin döner: kayıpsızlık kazançtan
     // önce gelir.
     if !PromptSegmenter::tiles_exactly(&segments, raw_prompt) {
@@ -151,7 +151,7 @@ pub fn process(raw_prompt: &str, bpe: &CoreBPE, veto_override: bool) -> String {
             .filter_map(|seg| match seg {
                 // Metin (talimat/prose) hiçbir zaman sıkıştırılmaz ve niyet
                 // tahmini yapılmaz. Koruma kararı yalnız çağıranın `preserve`
-                // ayarından gelir (D-040).
+                // ayarından gelir.
                 Segment::Text(_) => None,
                 // Fenced/inline kod: asla dokunulmaz.
                 Segment::Verbatim(_) => None,
@@ -164,7 +164,7 @@ pub fn process(raw_prompt: &str, bpe: &CoreBPE, veto_override: bool) -> String {
                     let raw_tokens = count_tokens(bpe, raw);
                     let candidate_tokens = count_tokens(bpe, compressed);
                     // SERTİFİKASYON EŞİĞİ: anlama kapısından geçmemiş veya bu
-                    // aday için kazanç eşiğin altındaysa ham kalır (D-031).
+                    // aday için kazanç eşiğin altındaysa ham kalır.
                     let savings_pct = if raw_tokens == 0 {
                         0.0
                     } else {

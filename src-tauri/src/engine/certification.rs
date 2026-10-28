@@ -7,7 +7,7 @@
 //
 // Bu sabitler yazarın ayrı tuttuğu ölçüm harness'ı tarafından ölçüm
 // sonuçlarıyla karşılaştırılır. Harness ve korpuslar bu depoda yayınlanmaz;
-// buradaki `evidence` alanları (ör. TRIALS-019) o iç ölçüm günlüğüne atıftır.
+// buradaki `evidence` alanları yazarın ayrı tuttuğu ölçüm kaydına atıftır.
 // "Sertifikalı" etiketi elle yazılmış bir iddia değil, eşik kuralına bağlıdır.
 use crate::engine::plain_table::PlainKind;
 
@@ -24,14 +24,14 @@ pub struct Certification {
     pub evidence: &'static str,
 }
 
-/// XML/SQL/INI/TOML/YAML düz tablosu — TRIALS-019: %57 toplam tasarruf,
-/// 53 eşleştirilmiş soruda 0,0 delta (19 vaka, 0 kayıpsız hata).
+/// XML/SQL/INI/TOML/YAML düz tablosu — ölçülen toplam tasarruf %57,
+/// 53 eşleştirilmiş soruda 0,0 anlama deltası (19 vaka, 0 kayıpsız hata).
 pub const PLAIN_TABLE: Certification = Certification {
     method: "plain_table",
     min_savings_pct: MIN_SAVINGS_PCT,
     comprehension_delta: 0.0,
     paired_questions: 53,
-    evidence: "TRIALS-019 / D-032",
+    evidence: "plain-table measurement (2026)",
 };
 
 impl Certification {

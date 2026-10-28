@@ -511,6 +511,9 @@ pub mod imp {
         /// mekanizmadır — bozulsa bile kayıp olmaz.
         #[test]
         fn corrupted_main_is_recovered_from_backup() {
+            // Kasa testleri kimlik deposunu PAYLASIR; kilit olmadan paralel
+            // kosuda CredWrite/CredRead ic ice girip gecici hata uretiyordu.
+            let _guard = lock_vault();
             use windows_sys::Win32::Security::Credentials::{
                 CredWriteW, CREDENTIALW, CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC,
             };
@@ -552,6 +555,7 @@ pub mod imp {
         /// Karantina: çözülemeyen blob SİLİNMEZ — adli kurtarma için saklanır.
         #[test]
         fn undecryptable_main_is_quarantined_not_deleted() {
+            let _guard = lock_vault();
             use windows_sys::Win32::Security::Credentials::{
                 CredWriteW, CREDENTIALW, CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC,
             };

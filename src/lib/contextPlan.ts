@@ -5,7 +5,7 @@
  * yeniden göndermek yerine tek satır referans gönderilir. Model içeriği zaten
  * yukarıdaki mesajda görmüştür; kayıpsızlık korunur (bilgi bağlamda durur).
  *
- * ÖLÇÜM (iç ölçüm günlüğü, TRIALS-006/010/014): 20 turluk oturumda gönderilen girdi
+ * ÖLÇÜM: 20 turluk oturumda gönderilen girdi
  * 1.746.558 → 193.400 token (%88,9). Kalite: diff/referans biçimi, tam dosyaya
  * karşı 96 eşleştirilmiş soruda −2,1 puan (güven aralıkları örtüşük → anlamlı
  * fark yok).
