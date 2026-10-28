@@ -1135,6 +1135,7 @@ export function ThalamusCopilot({
                   <span className="truncate">@{file}</span>
                   <button
                     type="button"
+                    aria-label={t('common.remove')}
                     onClick={() => setSelectedFiles(selectedFiles.filter(f => f !== file))}
                     className="hover:text-red-400 ml-0.5 cursor-pointer flex-shrink-0"
                   >
@@ -1199,6 +1200,7 @@ export function ThalamusCopilot({
             <button 
               type="button"
               onClick={handleSend}
+              aria-label={t('cop.send')}
               disabled={!input.trim()}
               className={`p-1 rounded transition-all ${
                 input.trim() 

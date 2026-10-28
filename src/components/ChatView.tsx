@@ -319,7 +319,7 @@ function ChatViewInner({
                         >
                           {(msg.modelName || t('chat.localMessage')).split(' · ').pop()}
                         </span>
-                        <span className="dot-separator">·</span>
+                        <span className="dot-separator" aria-hidden="true">·</span>
                         <span title={msg.streaming ? t('chat.streaming') : t('chat.latency')}>
                           {msg.streaming ? t('chat.streaming') : latencyMs ? fmtLatency(latencyMs) : '—'}
                         </span>
@@ -516,7 +516,7 @@ function ChatViewInner({
                     </span>
                     {!!msg.usage?.cachedTokens && (
                       <>
-                        <span className="dot-separator">·</span>
+                        <span className="dot-separator" aria-hidden="true">·</span>
                         <span className="text-[#3AA99F]" title="prompt cache">
                           {t('chat.usageCached', { n: msg.usage.cachedTokens })}
                         </span>
@@ -524,7 +524,7 @@ function ChatViewInner({
                     )}
                     {!!msg.usage?.creditsRemaining && (
                       <>
-                        <span className="dot-separator">·</span>
+                        <span className="dot-separator" aria-hidden="true">·</span>
                         <span className="text-[#D0A215]" title="EVREN">
                           {t('chat.usageCredits', { n: msg.usage.creditsRemaining })}
                         </span>
@@ -532,13 +532,13 @@ function ChatViewInner({
                     )}
                     {msg.engine && msg.engine.compressedTokens > 0 && msg.engine.compressedTokens < msg.engine.originalTokens && (
                       <>
-                        <span className="dot-separator">·</span>
+                        <span className="dot-separator" aria-hidden="true">·</span>
                         <span className="text-[#3AA99F]" title={t('chat.engineTitle')}>
                           {t('chat.engineBadge', { from: msg.engine.originalTokens, to: msg.engine.compressedTokens })}
                         </span>
                       </>
                     )}
-                    <span className="dot-separator">·</span>
+                    <span className="dot-separator" aria-hidden="true">·</span>
                     <span>{msg.timestamp}</span>
                   </div>
                 </div>

@@ -186,13 +186,15 @@ export function Sidebar({
 
   return (
     <aside 
-      className={`h-full bg-obsidian-bg border-r border-obsidian-border flex flex-col justify-between p-4 flex-shrink-0 text-[11px] text-obsidian-muted transition-all duration-200 ease-in-out relative select-none ${
+      className={`h-full bg-obsidian-bg border-r border-obsidian-border flex flex-col justify-between p-4 flex-shrink-0 text-[11px] text-obsidian-muted transition-all duration-200 ease-in-out relative select-none overflow-x-hidden ${
         isOpen ? 'w-[220px]' : 'w-[64px]'
       }`}
     >
       <button 
         type="button"
         onClick={() => setIsOpen(!isOpen)} 
+        aria-label={isOpen ? t('sidebar.collapse') : t('sidebar.expand')}
+        aria-expanded={isOpen}
         className="absolute top-1/2 -right-2.5 -translate-y-1/2 w-5 h-5 bg-obsidian-panel border border-obsidian-border rounded-full flex items-center justify-center text-obsidian-muted hover:border-obsidian-muted/40 hover:text-obsidian-text cursor-pointer z-50 transition-colors duration-150"
         title={isOpen ? t('sidebar.collapse') : t('sidebar.expand')}
       >
@@ -274,7 +276,7 @@ export function Sidebar({
         {/* PROJECTS Group — most recently opened first */}
         <div className="flex flex-col gap-0.5 w-full mt-1">
           {isOpen && (
-            <span className="px-1.5 mb-2 text-[11px] font-semibold uppercase tracking-widest text-obsidian-muted/50">
+            <span className="px-1.5 mb-2 text-[11px] font-semibold uppercase tracking-widest text-obsidian-muted">
               {t('sidebar.projects')}
             </span>
           )}
@@ -382,7 +384,7 @@ export function Sidebar({
         <div className="flex flex-col gap-0.5 w-full mt-4">
           {/* Başlık ile arama arasında dengeli nefes payı: başlık 8px, arama
               kutusundan sonra da aynı ritim korunur. */}
-          {isOpen && <span className="px-1.5 mb-2 text-[11px] font-semibold uppercase tracking-widest text-obsidian-muted/50">{t('sidebar.chats')}</span>}
+          {isOpen && <span className="px-1.5 mb-2 text-[11px] font-semibold uppercase tracking-widest text-obsidian-muted">{t('sidebar.chats')}</span>}
 
           {/* Arama: başlık + mesaj içeriği; sonuçlar aşağıda listelenir.
               Kutu kompakt: listeye baskın gelmesin. */}
@@ -482,6 +484,7 @@ export function Sidebar({
                   />
                   <button
                     type="button"
+                    aria-label={t('sidebar.renameSave')}
                     className="text-emerald-400 hover:text-emerald-300 p-0.5 cursor-pointer"
                     onMouseDown={(e) => {
                       e.preventDefault();
@@ -542,6 +545,9 @@ export function Sidebar({
                   className={`flex-1 min-w-0 flex items-center gap-2 px-2 py-1.5 rounded-md transition-colors duration-150 cursor-pointer ${
                     isOpen ? 'justify-start' : 'justify-center'
                   }`}
+                  // Başlıksız (henüz adlandırılmamış) sohbetlerde düğme
+                  // tamamen isimsiz kalıyordu; ekran okuyucu için fallback.
+                  aria-label={chat.title || t('sidebar.untitledChat')}
                   title={chat.title}
                 >
                   {/* Aktif sohbet: pop animasyonlu ikon. Digerleri: sade, soluk. */}

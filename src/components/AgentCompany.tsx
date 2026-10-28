@@ -1662,6 +1662,7 @@ export function AgentCompany({ active = true }: { active?: boolean }) {
               <button
                 type="button"
                 onClick={closeAi}
+                aria-label={t('common.close')}
                 className={TBI}
               >
                 <X size={13} />

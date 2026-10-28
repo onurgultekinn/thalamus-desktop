@@ -50,7 +50,7 @@ export function Header({
                 <span
                   className={
                     isRoot
-                      ? "text-[#575654]"
+                      ? "text-[#87857F]"
                       : isLast
                       ? "text-[#CECDC3] font-medium"
                       : "text-[#87857F]"
@@ -59,7 +59,7 @@ export function Header({
                   {segment}
                 </span>
                 {!isLast && (
-                  <span className="text-[#4A4845] select-none">/</span>
+                  <span className="text-[#87857F] select-none" aria-hidden="true">/</span>
                 )}
               </div>
             );
@@ -78,7 +78,7 @@ export function Header({
               className="group flex items-center gap-1.5 text-[11px] text-[#87857F] transition-colors hover:text-[#CECDC3] cursor-pointer"
             >
               <span className="leading-none font-medium">Nucleus</span>
-              <span className="text-[10px] leading-none text-[#575654] group-hover:text-[#87857F] transition-colors select-none">
+              <span className="text-[10px] leading-none text-[#87857F] group-hover:text-[#CECDC3] transition-colors select-none">
                 Alt N
               </span>
             </button>
@@ -91,7 +91,7 @@ export function Header({
               className="group flex items-center gap-1.5 text-[11px] text-[#87857F] transition-colors hover:text-[#CECDC3] cursor-pointer"
             >
               <span className="leading-none font-medium">{t('nav.search')}</span>
-              <span className="text-[10px] leading-none text-[#575654] group-hover:text-[#87857F] transition-colors select-none">
+              <span className="text-[10px] leading-none text-[#87857F] group-hover:text-[#CECDC3] transition-colors select-none">
                 Ctrl K
               </span>
             </button>

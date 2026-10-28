@@ -286,7 +286,7 @@ export function CopilotDiffModal({
                       : 'border-l-2 border-transparent'
                     }`}
                   >
-                    <span className="w-10 flex-shrink-0 text-right pr-2 text-[#575654] select-none">
+                    <span className="w-10 flex-shrink-0 text-right pr-2 text-[#87857F] select-none">
                       {l.type === 'removed' ? '-' : l.type === 'added' ? '+' : ' '}
                     </span>
                     <span className="whitespace-pre-wrap break-all pr-3">
@@ -359,7 +359,7 @@ export function CopilotDiffModal({
                       : 'border-l-2 border-transparent'
                   }`}
                 >
-                  <span className="w-10 flex-shrink-0 text-right pr-2 text-[#575654] select-none">
+                  <span className="w-10 flex-shrink-0 text-right pr-2 text-[#87857F] select-none">
                     {l.type === 'removed' ? '-' : l.type === 'added' ? '+' : ' '}
                   </span>
                   <span className="whitespace-pre-wrap break-all pr-3">{l.text || ' '}</span>
@@ -400,10 +400,10 @@ export function CopilotDiffModal({
           <div onMouseDown={(e) => handleStartResizeModal(e, 'ne')} className="absolute -top-1 -right-1 w-3.5 h-3.5 cursor-ne-resize z-30" />
           <div onMouseDown={(e) => handleStartResizeModal(e, 'nw')} className="absolute -top-1 -left-1 w-3.5 h-3.5 cursor-nw-resize z-30" />
           <div onMouseDown={(e) => handleStartResizeModal(e, 'se')} className="absolute -bottom-1 -right-1 w-3.5 h-3.5 cursor-se-resize z-30 flex items-end justify-end p-0.5">
-            <div className="w-1.5 h-1.5 border-r-2 border-b-2 border-[#575654]" />
+            <div className="w-1.5 h-1.5 border-r-2 border-b-2 border-[#87857F]" />
           </div>
           <div onMouseDown={(e) => handleStartResizeModal(e, 'sw')} className="absolute -bottom-1 -left-1 w-3.5 h-3.5 cursor-sw-resize z-30 flex items-end justify-start p-0.5">
-            <div className="w-1.5 h-1.5 border-l-2 border-b-2 border-[#575654]" />
+            <div className="w-1.5 h-1.5 border-l-2 border-b-2 border-[#87857F]" />
           </div>
         </>
       )}

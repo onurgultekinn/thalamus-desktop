@@ -2736,7 +2736,7 @@ export function PixelOffice({ agents, selected, onSelect, onActivate }: Props) {
               <div className="text-[12px] font-semibold text-[#F2F0E5] truncate">{selAgent.name}</div>
               <div className="text-[10px] text-[#87857F] truncate">{selAgent.role}</div>
             </div>
-            <button type="button" onClick={() => onSelect(null)} className="text-[#87857F] hover:text-[#F2F0E5] cursor-pointer leading-none text-[14px]">
+            <button type="button" onClick={() => onSelect(null)} aria-label={t('common.close')} className="text-[#87857F] hover:text-[#F2F0E5] cursor-pointer leading-none text-[14px]">
               ×
             </button>
           </div>
@@ -2832,8 +2832,8 @@ export function PixelOffice({ agents, selected, onSelect, onActivate }: Props) {
         )}
         {/* Zoom: çubuğun sağında, net çizgiyle ayrık kendi segmenti */}
         <div className="ml-auto flex shrink-0 items-center gap-1.5 self-center border-l border-[#2A2825] pl-1.5">
-          <button type="button" onClick={() => zoomAt(1 / 1.25, (wrapRef.current?.clientWidth || 0) / 2, (wrapRef.current?.clientHeight || 0) / 2)} className="w-6 h-6 rounded text-[13px] leading-none bg-[#34332F] text-[#CECDC3] hover:bg-[#3d3c37] cursor-pointer">−</button>
-          <button type="button" onClick={() => zoomAt(1.25, (wrapRef.current?.clientWidth || 0) / 2, (wrapRef.current?.clientHeight || 0) / 2)} className="w-6 h-6 rounded text-[13px] leading-none bg-[#34332F] text-[#CECDC3] hover:bg-[#3d3c37] cursor-pointer">+</button>
+          <button type="button" aria-label={t('office.zoomOut')} onClick={() => zoomAt(1 / 1.25, (wrapRef.current?.clientWidth || 0) / 2, (wrapRef.current?.clientHeight || 0) / 2)} className="w-6 h-6 rounded text-[13px] leading-none bg-[#34332F] text-[#CECDC3] hover:bg-[#3d3c37] cursor-pointer">−</button>
+          <button type="button" aria-label={t('office.zoomIn')} onClick={() => zoomAt(1.25, (wrapRef.current?.clientWidth || 0) / 2, (wrapRef.current?.clientHeight || 0) / 2)} className="w-6 h-6 rounded text-[13px] leading-none bg-[#34332F] text-[#CECDC3] hover:bg-[#3d3c37] cursor-pointer">+</button>
           <button type="button" onClick={() => { setView({ zoom: 1, x: 0, y: 0 }); setZone(''); setGliding(false); }} className="px-1.5 h-6 rounded text-[10px] bg-[#34332F] text-[#CECDC3] hover:bg-[#3d3c37] cursor-pointer">{t('office.zoneAll')}</button>
         </div>
       </div>

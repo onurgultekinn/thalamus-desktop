@@ -252,12 +252,23 @@ function ThemeSwatches({
   );
 }
 
-function Switch({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+function Switch({
+  checked,
+  onChange,
+  label,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  /** Erişilebilir ad; verilmezse yanındaki görünür etiketten miras alınır. */
+  label?: string;
+}) {
+  const t = useT();
   return (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
+      aria-label={label ?? t('common.toggle')}
       onClick={() => onChange(!checked)}
       className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors duration-200 ${
         checked ? 'bg-[#3AA99F]' : 'bg-white/15'

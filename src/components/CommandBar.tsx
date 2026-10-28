@@ -606,7 +606,7 @@ export function CommandBar({
         <div className="absolute bottom-full left-0 mb-2 bg-obsidian-panel border border-obsidian-border rounded-lg w-[260px] z-50 shadow-2xl p-3 flex flex-col gap-2.5 animate-in fade-in slide-in-from-bottom-2 duration-150">
           <div className="flex items-center justify-between text-[11px] font-semibold text-obsidian-muted/60 tracking-wider uppercase">
             <span>{t('composer.uploadFile')}</span>
-            <button type="button" onClick={() => setIsFileMenuOpen(false)} className="text-obsidian-muted hover:text-obsidian-text cursor-pointer">
+            <button type="button" onClick={() => setIsFileMenuOpen(false)} aria-label={t('common.close')} className="text-obsidian-muted hover:text-obsidian-text cursor-pointer">
               <X size={12} />
             </button>
           </div>
