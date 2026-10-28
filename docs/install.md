@@ -10,7 +10,7 @@ to a code in [ERRORS.md](../ERRORS.md).
 | Item | Requirement | Where it comes from |
 |---|---|---|
 | OS | Windows 10 or 11 (x64) | The terminal uses Windows PowerShell via `portable-pty` (`src-tauri/src/lib.rs`) |
-| WebView2 runtime | Version 125.0.2535.41 or higher recommended | `tauri.conf.json` does not pin a minimum (`minimumWebview2Version` is unset); the schema notes that some webview options need 125+. Current Windows ships a suitable runtime. |
+| WebView2 runtime | Any current version | `tauri.conf.json` does not pin a minimum (`minimumWebview2Version` is unset), and the app sets no webview option that needs a specific build. Windows 10/11 ships a suitable runtime; if it is missing, install it from Microsoft. |
 | Disk | A few hundred MB for the app plus your models | — |
 | Network | Needed only for remote providers | Local models work offline |
 

@@ -67,14 +67,44 @@ function normalize(value) {
     .trim();
   // Yalnizca ilk satiri al: model bazen aciklama ekliyor.
   s = s.split('\n')[0].trim();
-  // "1,234.50" / "1234,50" / "1 234" gibi bicimleri sadelestir.
-  s = s.replace(/\s+(?=\d{3}\b)/g, '').replace(/,/g, '.');
+  s = normalizeNumber(s);
   const numeric = Number(s);
   if (s !== '' && Number.isFinite(numeric)) {
     // Tam sayiysa ondalik sifirlarini at ("200" == "200.0").
     return String(Number(numeric.toFixed(6)));
   }
   return s.toLowerCase();
+}
+
+/**
+ * Sayi bicimini tek bir kanonik yazima indirger.
+ *
+ * Zor olan nokta ayiricilar: "95,028" (Ingilizce binlik) ile "95,028"in
+ * ondalik okunusu ayni karakterleri paylasir; "1.234,56" (Avrupa) ile
+ * "1,234.56" (ABD) da oyle. Kural: son ayiricidan sonra TAM 3 hane varsa ve
+ * daha once baska bir ayirici yoksa bu bir BINLIK ayiricidir; kaldirilir.
+ * Aksi halde son ayirici ondalik kabul edilir.
+ */
+function normalizeNumber(input) {
+  let s = input.replace(/\s+(?=\d{3}\b)/g, ''); // "1 234" -> "1234"
+  const m = s.match(/^-?\d{1,3}([,.]\d{3})+$/);
+  if (m) {
+    // Yalniz binlik ayiricilari: hepsini sil.
+    return s.replace(/[,.]/g, '');
+  }
+  // Tek bir ayirici ve 3 hane: "95,028" -> 95028 (binlik).
+  const single = s.match(/^-?\d+([,.])(\d{3})$/);
+  if (single) {
+    return s.replace(single[1], '');
+  }
+  // "1.234,56" -> 1234.56  |  "1,234.56" -> 1234.56
+  const eu = s.match(/^-?\d{1,3}(?:\.\d{3})+,\d+$/);
+  if (eu) return s.replace(/\./g, '').replace(',', '.');
+  const us = s.match(/^-?\d{1,3}(?:,\d{3})+\.\d+$/);
+  if (us) return s.replace(/,/g, '');
+  // "1234,50" -> 1234.50 (tek virgul = ondalik)
+  if (/^-?\d+,\d+$/.test(s)) return s.replace(',', '.');
+  return s;
 }
 
 /** %95 Wilson guven araligi. */
