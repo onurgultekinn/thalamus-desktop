@@ -186,9 +186,15 @@ export function Sidebar({
 
   return (
     <aside 
-      className={`h-full bg-obsidian-bg border-r border-obsidian-border flex flex-col justify-between p-4 flex-shrink-0 text-[11px] text-obsidian-muted transition-all duration-200 ease-in-out relative select-none overflow-x-hidden ${
-        isOpen ? 'w-[220px]' : 'w-[64px]'
-      }`}
+      className="h-full bg-obsidian-bg border-r border-obsidian-border flex flex-col justify-between p-4 flex-shrink-0 text-[11px] text-obsidian-muted transition-all duration-200 ease-in-out relative select-none"
+      /* Genişlik inline style ile veriliyor, Tailwind sınıfıyla değil:
+         `w-[220px]`/`w-[64px]` sınıfları çalışırken aynı anda üretilen
+         `max-w-*` kuralı eski değeri tutup daralmayı engelliyordu (ölçüldü:
+         sınıf w-[64px] iken hesaplanan genişlik 220px kalıyordu). Inline
+         style sınıf sırasından bağımsız ve deterministik. minWidth: 0 ise
+         flex öğesinin varsayılan `min-width: auto` dayatmasını kaldırır —
+         onsuz içerik 220px'in altına inmiyordu. */
+      style={{ width: isOpen ? 220 : 64, minWidth: 0, maxWidth: isOpen ? 220 : 64 }}
     >
       <button 
         type="button"
