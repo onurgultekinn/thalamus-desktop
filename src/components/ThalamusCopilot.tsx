@@ -147,8 +147,8 @@ function HeaderAction({
   const stateClass = disabled
     ? 'text-[#575654] cursor-not-allowed opacity-40'
     : active
-      ? `${activeClassName ?? 'bg-white/[0.06] text-[#F2F0E5]'} cursor-pointer`
-      : 'text-[#87857F] hover:bg-white/[0.04] hover:text-[#CECDC3] cursor-pointer';
+      ? `${activeClassName ?? 'bg-white/[0.06] text-obsidian-text'} cursor-pointer`
+      : 'text-obsidian-muted hover:bg-white/[0.04] hover:text-obsidian-soft cursor-pointer';
   return (
     <button
       type="button"
@@ -158,7 +158,7 @@ function HeaderAction({
       className={`group relative flex h-6 w-6 items-center justify-center rounded-md transition-colors ${stateClass}`}
     >
       <Icon size={15} strokeWidth={1.75} className="flex-shrink-0" />
-      <span className="pointer-events-none absolute right-full top-1/2 z-20 mr-1 max-w-0 -translate-y-1/2 overflow-hidden whitespace-nowrap rounded-md border border-[#34332F] bg-[#282726] px-0 py-1 text-[10px] font-medium leading-none text-[#CECDC3] opacity-0 shadow-lg transition-all duration-200 ease-out group-hover:max-w-[160px] group-hover:px-2 group-hover:opacity-100">
+      <span className="pointer-events-none absolute right-full top-1/2 z-20 mr-1 max-w-0 -translate-y-1/2 overflow-hidden whitespace-nowrap rounded-md border border-obsidian-raise bg-obsidian-surface px-0 py-1 text-[10px] font-medium leading-none text-obsidian-soft opacity-0 shadow-lg transition-all duration-200 ease-out group-hover:max-w-[160px] group-hover:px-2 group-hover:opacity-100">
         {label}
       </span>
     </button>
@@ -654,7 +654,7 @@ export function ThalamusCopilot({
           console.warn('edit could not be applied:', e.file, e.message)
         );
 
-        let text = explanation || (isAgent ? "Patch package prepared:" : "");
+        let text = explanation || (isAgent ? t('cop.patchPrepared') : "");
         // Ajanın adım listesi (todo_write) — mesajın başında kompakt gösterim.
         const todos = res.todos || [];
         if (todos.length > 0) {
@@ -738,7 +738,7 @@ export function ThalamusCopilot({
   };
 
   return (
-    <div className="w-full h-full bg-[#1C1B1A] flex flex-col font-sans select-none text-xs relative overflow-hidden">
+    <div className="w-full h-full bg-obsidian-panel flex flex-col font-sans select-none text-xs relative overflow-hidden">
       {/* Code inspection modal */}
       {activeModalMessage && activeModalMessage.actionPayload && (
         <CopilotDiffModal
@@ -757,16 +757,16 @@ export function ThalamusCopilot({
       <div
         ref={headerRef}
         onPointerDown={floating ? onHeaderPointerDown : undefined}
-        className={`h-10 px-2 bg-[#282726] border-b border-[#34332F] flex items-center gap-2 overflow-hidden whitespace-nowrap flex-shrink-0 ${floating ? 'cursor-move' : ''}`}
+        className={`h-10 px-2 bg-obsidian-surface border-b border-obsidian-raise flex items-center gap-2 overflow-hidden whitespace-nowrap flex-shrink-0 ${floating ? 'cursor-move' : ''}`}
       >
-        <span className="flex-shrink-0 text-[12.5px] font-medium tracking-tight text-[#CECDC3]">Nucleus</span>
+        <span className="flex-shrink-0 text-[12.5px] font-medium tracking-tight text-obsidian-soft">Nucleus</span>
 
-        <div className="flex items-center bg-[#1C1B1A] p-[3px] rounded-md border border-[#34332F] flex-shrink-0 whitespace-nowrap">
+        <div className="flex items-center bg-obsidian-panel p-[3px] rounded-md border border-obsidian-raise flex-shrink-0 whitespace-nowrap">
           <button
             type="button"
             onClick={() => setMode('chat')}
             className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors cursor-pointer ${
-              mode === 'chat' ? 'bg-[#34332F] text-[#F2F0E5]' : 'text-[#87857F] hover:text-[#CECDC3]'
+              mode === 'chat' ? 'bg-[#34332F] text-obsidian-text' : 'text-obsidian-muted hover:text-obsidian-soft'
             }`}
           >
             {t('cop.chat')}
@@ -775,7 +775,7 @@ export function ThalamusCopilot({
             type="button"
             onClick={() => setMode('agent')}
             className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors cursor-pointer ${
-              mode === 'agent' ? 'bg-[#34332F] text-[#F2F0E5]' : 'text-[#87857F] hover:text-[#CECDC3]'
+              mode === 'agent' ? 'bg-[#34332F] text-obsidian-text' : 'text-obsidian-muted hover:text-obsidian-soft'
             }`}
           >
             {t('cop.agent')}
@@ -832,7 +832,7 @@ export function ThalamusCopilot({
             {showPermMenu && (
               <>
                 <div className="fixed inset-0 z-40" onClick={() => setShowPermMenu(false)} />
-                <div className="absolute right-0 top-full mt-1.5 w-[250px] bg-[#282726] border border-[#34332F] rounded-md shadow-2xl z-50 overflow-hidden p-1">
+                <div className="absolute right-0 top-full mt-1.5 w-[250px] bg-obsidian-surface border border-obsidian-raise rounded-md shadow-2xl z-50 overflow-hidden p-1">
                   {PERMISSION_MODES.map(opt => {
                     const OptIcon = opt.icon;
                     const selected = permission === opt.id;
@@ -841,15 +841,15 @@ export function ThalamusCopilot({
                         key={opt.id}
                         type="button"
                         onClick={() => { setPermission(opt.id); setShowPermMenu(false); }}
-                        className="w-full flex items-start gap-2 rounded px-2 py-1.5 text-left hover:bg-[#1C1B1A] transition-colors cursor-pointer"
+                        className="w-full flex items-start gap-2 rounded px-2 py-1.5 text-left hover:bg-obsidian-panel transition-colors cursor-pointer"
                       >
-                        <OptIcon size={14} strokeWidth={1.75} className={`mt-0.5 flex-shrink-0 ${selected ? 'text-[#3AA99F]' : 'text-[#87857F]'}`} />
+                        <OptIcon size={14} strokeWidth={1.75} className={`mt-0.5 flex-shrink-0 ${selected ? 'text-[#3AA99F]' : 'text-obsidian-muted'}`} />
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-1.5">
-                            <span className="text-[11px] font-medium text-[#F2F0E5]">{t(opt.labelKey)}</span>
+                            <span className="text-[11px] font-medium text-obsidian-text">{t(opt.labelKey)}</span>
                             {selected && <Check size={11} className="text-[#3AA99F] flex-shrink-0" />}
                           </div>
-                          <div className="text-[10px] leading-snug text-[#87857F]">{t(opt.descKey)}</div>
+                          <div className="text-[10px] leading-snug text-obsidian-muted">{t(opt.descKey)}</div>
                         </div>
                       </button>
                     );
@@ -886,7 +886,7 @@ export function ThalamusCopilot({
       <div className="flex-1 overflow-y-auto p-2.5 space-y-2.5 pretty-scrollbar">
         {messages.map((msg) => (
           <div key={msg.id} className={`flex flex-col gap-0.5 ${msg.sender === 'user' ? 'items-end' : 'items-start'}`}>
-            <div className="flex items-center gap-1 text-[11px] text-[#87857F] px-1 font-mono">
+            <div className="flex items-center gap-1 text-[11px] text-obsidian-muted px-1 font-mono">
               {msg.sender === 'user' && <User size={9} className="text-[#4385BE]" />}
               <span className="text-[#A8A49E] font-medium">
                 {msg.sender === 'user' ? userName : t('cop.sender')}
@@ -901,7 +901,7 @@ export function ThalamusCopilot({
             <div className={`p-2 rounded-md max-w-[98%] text-[11px] leading-normal border ${
               msg.sender === 'user' 
                 ? 'bg-[#1E3A52] border-[#35639E] text-white' 
-                : 'bg-[#282726] border-[#34332F] text-[#CECDC3]'
+                : 'bg-obsidian-surface border-obsidian-raise text-obsidian-soft'
             }`}>
               <MarkdownMessage content={msg.text} />
 
@@ -909,7 +909,7 @@ export function ThalamusCopilot({
                 <div className="mt-2 rounded border border-[#2a2a2c] bg-[#0E0E0E] p-2 flex items-center justify-between gap-2 overflow-hidden">
                   <div className="flex items-center gap-1.5 min-w-0 font-mono text-[11px]">
                     <Terminal size={12} className="text-[#3AA99F] flex-shrink-0" />
-                    <span className="text-[#CECDC3] truncate">{msg.actionPayload.command}</span>
+                    <span className="text-obsidian-soft truncate">{msg.actionPayload.command}</span>
                   </div>
                   <div className="flex items-center gap-1 flex-shrink-0">
                     {executedActions[msg.id] ? (
@@ -930,10 +930,10 @@ export function ThalamusCopilot({
               )}
 
               {msg.actionPayload && msg.actionPayload.type === 'APPLY_PATCH' && (
-                <div className="mt-2 rounded border border-[#2a2a2c] bg-[#1C1B1A] p-2 flex items-center justify-between gap-2 overflow-hidden">
+                <div className="mt-2 rounded border border-[#2a2a2c] bg-obsidian-panel p-2 flex items-center justify-between gap-2 overflow-hidden">
                   <div className="flex items-center gap-1.5 min-w-0 font-mono text-[11px]">
                     <GitPullRequest size={12} className="text-[#3AA99F] flex-shrink-0" />
-                    <span className="font-medium text-[#CECDC3] truncate max-w-[100px]">
+                    <span className="font-medium text-obsidian-soft truncate max-w-[100px]">
                       {msg.actionPayload.targetFile}
                     </span>
                     <div className="flex items-center gap-1 flex-shrink-0 text-[8.5px]">
@@ -983,10 +983,10 @@ export function ThalamusCopilot({
       </div>
 
       {/* 3. INPUT AREA */}
-      <div className="p-2 border-t border-[#34332F] bg-[#1C1B1A] flex flex-col gap-1 flex-shrink-0 z-10 relative">
+      <div className="p-2 border-t border-obsidian-raise bg-obsidian-panel flex flex-col gap-1 flex-shrink-0 z-10 relative">
         {pendingImages.length > 0 && (
           <div className="flex flex-wrap items-center gap-1 px-0.5">
-            <span className="text-[11px] font-mono uppercase tracking-wider text-[#87857F]">{t('cop.image')}</span>
+            <span className="text-[11px] font-mono uppercase tracking-wider text-obsidian-muted">{t('cop.image')}</span>
             {(IMAGE_MODE_ORDER).map((m) => (
               <button
                 key={m}
@@ -996,7 +996,7 @@ export function ThalamusCopilot({
                 className={`rounded border px-1.5 py-0.5 text-[11px] transition-colors cursor-pointer ${
                   imageMode === m
                     ? 'border-[#dcb67a]/50 bg-[#dcb67a]/10 text-[#dcb67a]'
-                    : 'border-[#34332F] text-[#87857F] hover:text-[#CECDC3]'
+                    : 'border-obsidian-raise text-obsidian-muted hover:text-obsidian-soft'
                 }`}
               >
                 {t(IMAGE_LABEL_KEY[m])}
@@ -1012,9 +1012,9 @@ export function ThalamusCopilot({
                   src={img.url}
                   alt={img.name}
                   title={`${img.name} · ${img.width}×${img.height} · detail:${img.detail} · ${img.reason}${img.visionDiag ? ' · ' + img.visionDiag : ''}\n${img.options.map((o) => `${o.label}: ${Math.round(o.ratio * 100)}% · ≈${o.tokens} tok · ${o.retention}% detail`).join('\n')}`}
-                  className="h-10 w-10 rounded-md object-cover border border-[#34332F]"
+                  className="h-10 w-10 rounded-md object-cover border border-obsidian-raise"
                 />
-                <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 rounded bg-[#1C1B1A]/90 px-1 text-[8px] font-mono text-[#dcb67a] whitespace-nowrap">
+                <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 rounded bg-obsidian-panel/90 px-1 text-[8px] font-mono text-[#dcb67a] whitespace-nowrap">
                   ≈{img.estTokens} · %{img.retention}
                 </span>
                 <button
@@ -1024,7 +1024,7 @@ export function ThalamusCopilot({
                     pendingImagesRef.current = next;
                     setPendingImages(next);
                   }}
-                  className="absolute -top-1.5 -right-1.5 bg-[#1C1B1A] border border-[#34332F] rounded-full p-0.5 text-[#87857F] hover:text-rose-400 cursor-pointer"
+                  className="absolute -top-1.5 -right-1.5 bg-obsidian-panel border border-obsidian-raise rounded-full p-0.5 text-obsidian-muted hover:text-rose-400 cursor-pointer"
                   title={t('cop.removeImage')}
                 >
                   <X size={9} />
@@ -1076,9 +1076,9 @@ export function ThalamusCopilot({
           </div>
         )}
         {showFileMentionMenu && (
-          <div className="absolute bottom-full left-2 mb-1.5 w-[260px] bg-[#282726] border border-[#34332F] rounded-md shadow-2xl z-50 overflow-hidden flex flex-col">
-            <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-[#34332F]">
-              <Search size={12} className="text-[#87857F] flex-shrink-0" />
+          <div className="absolute bottom-full left-2 mb-1.5 w-[260px] bg-obsidian-surface border border-obsidian-raise rounded-md shadow-2xl z-50 overflow-hidden flex flex-col">
+            <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-obsidian-raise">
+              <Search size={12} className="text-obsidian-muted flex-shrink-0" />
               <input
                 ref={mentionInputRef}
                 value={mentionSearch}
@@ -1095,21 +1095,21 @@ export function ThalamusCopilot({
                   }
                 }}
                 placeholder={t('cop.searchFiles')}
-                className="w-full bg-transparent text-[11px] text-[#F2F0E5] placeholder-[#87857F] outline-none"
+                className="w-full bg-transparent text-[11px] text-obsidian-text placeholder-[#87857F] outline-none"
               />
             </div>
             <div className="max-h-[220px] overflow-y-auto pretty-scrollbar p-1">
               {filteredWorkspaceFiles.length === 0 ? (
-                <div className="px-2 py-3 text-center text-[11px] text-[#87857F]">{t('cop.noFiles')}</div>
+                <div className="px-2 py-3 text-center text-[11px] text-obsidian-muted">{t('cop.noFiles')}</div>
               ) : (
                 filteredWorkspaceFiles.slice(0, 100).map(file => (
                   <button
                     key={file}
                     type="button"
                     onClick={() => handleSelectFileMention(file)}
-                    className="w-full flex items-center gap-1.5 px-1.5 py-1 rounded hover:bg-[#1C1B1A] text-[#CECDC3] hover:text-white font-mono text-[11px] text-left cursor-pointer transition-colors"
+                    className="w-full flex items-center gap-1.5 px-1.5 py-1 rounded hover:bg-obsidian-panel text-obsidian-soft hover:text-white font-mono text-[11px] text-left cursor-pointer transition-colors"
                   >
-                    <FileText size={11} className="text-[#87857F] flex-shrink-0" />
+                    <FileText size={11} className="text-obsidian-muted flex-shrink-0" />
                     <span className="truncate">{file}</span>
                   </button>
                 ))
@@ -1118,7 +1118,7 @@ export function ThalamusCopilot({
             <button
               type="button"
               onClick={handleBrowseFiles}
-              className="flex items-center gap-1.5 px-2 py-1.5 border-t border-[#34332F] text-[11px] text-[#CECDC3] hover:bg-[#1C1B1A] hover:text-white transition-colors cursor-pointer"
+              className="flex items-center gap-1.5 px-2 py-1.5 border-t border-obsidian-raise text-[11px] text-obsidian-soft hover:bg-obsidian-panel hover:text-white transition-colors cursor-pointer"
             >
               <FolderOpen size={12} className="text-[#4385BE] flex-shrink-0" />
               {t('cop.chooseFiles')}
@@ -1126,11 +1126,11 @@ export function ThalamusCopilot({
           </div>
         )}
 
-        <div className="relative bg-[#100F0F] border border-[#34332F] focus-within:border-[#4385BE] rounded p-1.5 transition-all">
+        <div className="relative bg-obsidian-bg border border-obsidian-raise focus-within:border-[#4385BE] rounded p-1.5 transition-all">
           {selectedFiles.length > 0 && (
             <div className="flex items-center gap-1 flex-wrap mb-1 pb-1 border-b border-[#282726]">
               {selectedFiles.map(file => (
-                <span key={file} className="flex items-center gap-1 max-w-[190px] bg-[#282726] border border-[#34332F] text-[#3AA99F] px-1.5 py-0.5 rounded text-[11px] font-mono">
+                <span key={file} className="flex items-center gap-1 max-w-[190px] bg-obsidian-surface border border-obsidian-raise text-[#3AA99F] px-1.5 py-0.5 rounded text-[11px] font-mono">
                   <FileText size={9} className="flex-shrink-0" />
                   <span className="truncate">@{file}</span>
                   <button
@@ -1161,12 +1161,12 @@ export function ThalamusCopilot({
               }
             }}
             placeholder={mode === 'agent' ? t('cop.placeholderAgent') : t('cop.placeholderChat')}
-            className="w-full bg-transparent text-[#F2F0E5] placeholder-[#87857F] text-[11px] resize-none overflow-hidden outline-none min-h-[36px] max-h-[120px] leading-relaxed pretty-scrollbar"
+            className="w-full bg-transparent text-obsidian-text placeholder-[#87857F] text-[11px] resize-none overflow-hidden outline-none min-h-[36px] max-h-[120px] leading-relaxed pretty-scrollbar"
             rows={2}
           />
 
           <div className="flex items-center justify-between pt-1 border-t border-[#1C1B1A]">
-            <div className="flex items-center gap-0.5 text-[#87857F]">
+            <div className="flex items-center gap-0.5 text-obsidian-muted">
               <button
                 type="button"
                 title={t('cop.attachFile')}
@@ -1175,7 +1175,7 @@ export function ThalamusCopilot({
                   setShowFileMentionMenu(true);
                   textareaRef.current?.focus();
                 }}
-                className="p-1 rounded hover:bg-[#282726] text-[#87857F] hover:text-[#CECDC3] transition-colors cursor-pointer"
+                className="p-1 rounded hover:bg-obsidian-surface text-obsidian-muted hover:text-obsidian-soft transition-colors cursor-pointer"
               >
                 <Paperclip size={13} />
               </button>
@@ -1183,7 +1183,7 @@ export function ThalamusCopilot({
                 type="button"
                 title={t('cop.attachImage')}
                 onClick={() => imageInputRef.current?.click()}
-                className="p-1 rounded hover:bg-[#282726] text-[#87857F] hover:text-[#CECDC3] transition-colors cursor-pointer"
+                className="p-1 rounded hover:bg-obsidian-surface text-obsidian-muted hover:text-obsidian-soft transition-colors cursor-pointer"
               >
                 <ImagePlus size={13} />
               </button>
@@ -1205,7 +1205,7 @@ export function ThalamusCopilot({
               className={`p-1 rounded transition-all ${
                 input.trim() 
                   ? 'bg-[#205EA6] text-white hover:bg-[#4385BE] cursor-pointer' 
-                  : 'bg-[#282726] text-[#575654] cursor-not-allowed'
+                  : 'bg-obsidian-surface text-[#575654] cursor-not-allowed'
               }`}
             >
               <Send size={11} />

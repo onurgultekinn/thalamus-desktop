@@ -35,12 +35,12 @@ export function AuthScreen({ onLogin }: AuthScreenProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-[#100F0F] flex items-center justify-center p-4 font-sans text-[#F2F0E5]">
+    <div className="fixed inset-0 z-50 bg-obsidian-bg flex items-center justify-center p-4 font-sans text-obsidian-text">
       {/* Technological background grid */}
       <div className="absolute inset-0 bg-[linear-gradient(to_right,#100F0F_1px,transparent_1px),linear-gradient(to_bottom,#100F0F_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_50%,#000_70%,transparent_100%)] opacity-30 pointer-events-none" />
 
       {/* Card */}
-      <div className="w-full max-w-[360px] bg-[#1C1B1A] border border-[#34332F] rounded-xl shadow-2xl overflow-hidden p-6 flex flex-col gap-6 relative z-10">
+      <div className="w-full max-w-[360px] bg-obsidian-panel border border-obsidian-raise rounded-xl shadow-2xl overflow-hidden p-6 flex flex-col gap-6 relative z-10">
 
         {/* Header */}
         <div className="flex flex-col gap-1 text-center">
@@ -58,13 +58,13 @@ export function AuthScreen({ onLogin }: AuthScreenProps) {
           <div className="flex flex-col gap-1.5">
             <label className="text-[#A8A49E] font-mono text-[11px] tracking-wider uppercase">{t('auth.nameLabel')}</label>
             <div className="relative">
-              <UserIcon size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#87857F]" />
+              <UserIcon size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-obsidian-muted" />
               <input
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder={t('sidebar.anonymous')}
-                className="w-full bg-[#100F0F] border border-[#34332F] focus:border-[#403E3C] rounded-md pl-9 pr-3 py-2 text-[#F2F0E5] text-xs focus:outline-none transition-all"
+                className="w-full bg-obsidian-bg border border-obsidian-raise focus:border-[#403E3C] rounded-md pl-9 pr-3 py-2 text-obsidian-text text-xs focus:outline-none transition-all"
                 autoFocus
               />
             </div>
@@ -77,7 +77,7 @@ export function AuthScreen({ onLogin }: AuthScreenProps) {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@local"
-              className="w-full bg-[#100F0F] border border-[#34332F] focus:border-[#403E3C] rounded-md px-3 py-2 text-[#F2F0E5] text-xs focus:outline-none transition-all"
+              className="w-full bg-obsidian-bg border border-obsidian-raise focus:border-[#403E3C] rounded-md px-3 py-2 text-obsidian-text text-xs focus:outline-none transition-all"
             />
           </div>
 

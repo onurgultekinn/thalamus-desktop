@@ -354,7 +354,7 @@ export function NucleusCommand({ open, onClose, context, onAction }: NucleusComm
     <div
       ref={float.frameRef}
       style={frameStyle}
-      className={`${FLOATING_CHROME} animate-in bg-[#1C1B1A] font-sans`}
+      className={`${FLOATING_CHROME} animate-in bg-obsidian-panel font-sans`}
       role="dialog"
       aria-label={t('nucleus.title')}
       data-nucleus-panel
@@ -362,9 +362,9 @@ export function NucleusCommand({ open, onClose, context, onAction }: NucleusComm
       <div
         ref={float.headerRef}
         onPointerDown={float.onDragStart}
-        className="flex h-11 flex-shrink-0 cursor-move select-none items-center gap-2 overflow-hidden whitespace-nowrap border-b border-[#282726] bg-[#100F0F] px-3"
+        className="flex h-11 flex-shrink-0 cursor-move select-none items-center gap-2 overflow-hidden whitespace-nowrap border-b border-[#282726] bg-obsidian-bg px-3"
       >
-        <span className="flex-shrink-0 font-sans text-[13px] font-semibold tracking-tight text-[#F2F0E5]">
+        <span className="flex-shrink-0 font-sans text-[13px] font-semibold tracking-tight text-obsidian-text">
           {t('nucleus.title')}
         </span>
         <span className="min-w-0 flex-1 truncate text-[11px] text-[#6F6C66]">
@@ -376,7 +376,7 @@ export function NucleusCommand({ open, onClose, context, onAction }: NucleusComm
             onClick={clearConversation}
             title={t('nucleus.clear')}
             aria-label={t('nucleus.clear')}
-            className="flex h-7 w-7 flex-shrink-0 cursor-pointer items-center justify-center rounded-md text-[#87857F] transition-colors hover:bg-white/[0.05] hover:text-[#CECDC3] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#dcb67a]/50"
+            className="flex h-7 w-7 flex-shrink-0 cursor-pointer items-center justify-center rounded-md text-obsidian-muted transition-colors hover:bg-white/[0.05] hover:text-obsidian-soft focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#dcb67a]/50"
           >
             <RotateCcw size={13} />
           </button>
@@ -386,7 +386,7 @@ export function NucleusCommand({ open, onClose, context, onAction }: NucleusComm
           onClick={onClose}
           title={t('common.close')}
           aria-label={t('common.close')}
-          className="flex h-7 w-7 flex-shrink-0 cursor-pointer items-center justify-center rounded-md text-[#87857F] transition-colors hover:bg-white/[0.05] hover:text-[#CECDC3] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#dcb67a]/50"
+          className="flex h-7 w-7 flex-shrink-0 cursor-pointer items-center justify-center rounded-md text-obsidian-muted transition-colors hover:bg-white/[0.05] hover:text-obsidian-soft focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#dcb67a]/50"
         >
           <X size={14} />
         </button>
@@ -413,9 +413,9 @@ export function NucleusCommand({ open, onClose, context, onAction }: NucleusComm
                     key={suggestion.id}
                     type="button"
                     onClick={suggestion.run}
-                    className="flex cursor-pointer items-center gap-1.5 rounded-md border border-white/[0.06] bg-white/[0.02] px-2.5 py-1 text-[11.5px] text-[#A8A49E] transition-colors hover:border-[#dcb67a]/40 hover:bg-white/[0.04] hover:text-[#F2F0E5] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#dcb67a]/50"
+                    className="flex cursor-pointer items-center gap-1.5 rounded-md border border-white/[0.06] bg-white/[0.02] px-2.5 py-1 text-[11.5px] text-[#A8A49E] transition-colors hover:border-[#dcb67a]/40 hover:bg-white/[0.04] hover:text-obsidian-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#dcb67a]/50"
                   >
-                    <Icon size={12} className="flex-shrink-0 text-[#87857F]" />
+                    <Icon size={12} className="flex-shrink-0 text-obsidian-muted" />
                     <span className="truncate">{suggestion.label}</span>
                   </button>
                 );
@@ -439,16 +439,16 @@ export function NucleusCommand({ open, onClose, context, onAction }: NucleusComm
                     </button>
                   </div>
                 ) : turn.quiet ? (
-                  <div className="flex items-center gap-1.5 text-[11.5px] text-[#87857F]">
+                  <div className="flex items-center gap-1.5 text-[11.5px] text-obsidian-muted">
                     <Check size={11} strokeWidth={2.2} className="flex-shrink-0 text-[#dcb67a]" />
                     {turn.text}
                   </div>
                 ) : turn.role === 'user' ? (
-                  <div className="max-w-[88%] whitespace-pre-wrap rounded-lg bg-[#242321] px-3 py-2 text-[13px] leading-relaxed text-[#F2F0E5]">
+                  <div className="max-w-[88%] whitespace-pre-wrap rounded-lg bg-[#242321] px-3 py-2 text-[13px] leading-relaxed text-obsidian-text">
                     {turn.text}
                   </div>
                 ) : (
-                  <div className="w-full rounded-lg border border-white/[0.05] bg-[#201F1D] px-3 py-2 text-[13px] leading-relaxed text-[#CECDC3]">
+                  <div className="w-full rounded-lg border border-white/[0.05] bg-[#201F1D] px-3 py-2 text-[13px] leading-relaxed text-obsidian-soft">
                     <MarkdownMessage content={turn.text} />
                   </div>
                 )}
@@ -459,7 +459,7 @@ export function NucleusCommand({ open, onClose, context, onAction }: NucleusComm
               <div className="nucleus-msg flex justify-start" role="status" aria-label={t('nucleus.thinking')}>
                 <div className="w-full rounded-lg border border-white/[0.05] bg-[#201F1D] px-3 py-2.5">
                   {visibleStream ? (
-                    <div className="text-[13px] leading-relaxed text-[#CECDC3]">
+                    <div className="text-[13px] leading-relaxed text-obsidian-soft">
                       <MarkdownMessage content={visibleStream} />
                     </div>
                   ) : (
@@ -481,7 +481,7 @@ export function NucleusCommand({ open, onClose, context, onAction }: NucleusComm
       </div>
 
       <div className="flex-shrink-0 border-t border-[#282726] p-2.5">
-        <div className="flex items-end gap-2 rounded-lg border border-[#34332F] bg-[#100F0F] py-2 pl-3 pr-2 transition-colors focus-within:border-[#dcb67a]/50">
+        <div className="flex items-end gap-2 rounded-lg border border-obsidian-raise bg-obsidian-bg py-2 pl-3 pr-2 transition-colors focus-within:border-[#dcb67a]/50">
           <textarea
             ref={inputRef}
             data-nucleus-input
@@ -491,7 +491,7 @@ export function NucleusCommand({ open, onClose, context, onAction }: NucleusComm
             onKeyDown={handleKeyDown}
             placeholder={t('nucleus.placeholder')}
             rows={1}
-            className="max-h-[132px] min-h-[24px] flex-1 resize-none overflow-hidden bg-transparent text-[13px] leading-relaxed text-[#F2F0E5] caret-[#dcb67a] outline-none placeholder:text-[#575654] pretty-scrollbar"
+            className="max-h-[132px] min-h-[24px] flex-1 resize-none overflow-hidden bg-transparent text-[13px] leading-relaxed text-obsidian-text caret-[#dcb67a] outline-none placeholder:text-[#575654] pretty-scrollbar"
           />
           {busy ? (
             <button
@@ -499,7 +499,7 @@ export function NucleusCommand({ open, onClose, context, onAction }: NucleusComm
               onClick={stop}
               aria-label={t('nucleus.stop')}
               title={t('nucleus.stop')}
-              className="flex h-6 w-6 flex-shrink-0 cursor-pointer items-center justify-center rounded-md text-[#CECDC3] transition-colors hover:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#dcb67a]/50"
+              className="flex h-6 w-6 flex-shrink-0 cursor-pointer items-center justify-center rounded-md text-obsidian-soft transition-colors hover:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#dcb67a]/50"
             >
               <Square size={9} />
             </button>

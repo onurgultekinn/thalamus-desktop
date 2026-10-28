@@ -61,6 +61,7 @@ import { readShowReasoning, writeShowReasoning } from '../lib/reasoning';
 import { getWorkspaceRoot } from '../lib/workspace';
 import { explainError } from '../lib/errors';
 import { useT, LANGUAGES, getLang, setLang, type TranslationKey } from '../lib/i18n';
+import { useDialog } from '../lib/useDialog';
 
 export type SettingsTab =
   | 'general'
@@ -136,8 +137,8 @@ function Row({ label, hint, control }: { label: string; hint?: string; control: 
   return (
     <div className="flex items-center justify-between gap-6 py-3.5">
       <div className="flex min-w-0 flex-col gap-0.5">
-        <span className="text-[12.5px] text-[#CECDC3]">{label}</span>
-        {hint && <span className="text-[11px] leading-snug text-[#87857F]">{hint}</span>}
+        <span className="text-[12.5px] text-obsidian-soft">{label}</span>
+        {hint && <span className="text-[11px] leading-snug text-obsidian-muted">{hint}</span>}
       </div>
       <div className="flex flex-shrink-0 items-center">{control}</div>
     </div>
@@ -164,8 +165,8 @@ function Card({
       {title && (
         <div className="flex items-start justify-between gap-3 pt-3.5">
           <div className="min-w-0">
-            <h3 className="text-[12.5px] font-semibold text-[#F2F0E5]">{title}</h3>
-            {desc && <p className="mt-0.5 text-[11px] leading-snug text-[#87857F]">{desc}</p>}
+            <h3 className="text-[12.5px] font-semibold text-obsidian-text">{title}</h3>
+            {desc && <p className="mt-0.5 text-[11px] leading-snug text-obsidian-muted">{desc}</p>}
           </div>
           {action && <div className="flex-shrink-0 pt-0.5">{action}</div>}
         </div>
@@ -183,7 +184,7 @@ function ModelRows({ entries }: { entries: LocalModelEntry[] }) {
         <div
           key={entry.key}
           title={entry.model}
-          className="truncate rounded-md px-2.5 py-2 text-[12.5px] text-[#CECDC3]"
+          className="truncate rounded-md px-2.5 py-2 text-[12.5px] text-obsidian-soft"
         >
           {entry.label}
         </div>
@@ -238,7 +239,7 @@ function ThemeSwatches({
               </span>
             </span>
             <span className="flex items-center gap-1.5">
-              <span className={`text-[11.5px] ${active ? 'text-[#F2F0E5]' : 'text-[#87857F] group-hover:text-[#CECDC3]'}`}>{s.label}</span>
+              <span className={`text-[11.5px] ${active ? 'text-obsidian-text' : 'text-obsidian-muted group-hover:text-obsidian-soft'}`}>{s.label}</span>
               {active && (
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#3AA99F" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M20 6 9 17l-5-5" />
@@ -301,8 +302,8 @@ function Segmented<T extends string>({
           onClick={() => onChange(o.value)}
           className={`cursor-pointer rounded-md border px-3 py-1.5 text-[11.5px] transition-colors ${
             value === o.value
-              ? 'border-white/[0.12] bg-white/[0.07] text-[#F2F0E5]'
-              : 'border-white/[0.07] bg-transparent text-[#87857F] hover:text-[#CECDC3]'
+              ? 'border-white/[0.12] bg-white/[0.07] text-obsidian-text'
+              : 'border-white/[0.07] bg-transparent text-obsidian-muted hover:text-obsidian-soft'
           }`}
         >
           {o.label}
@@ -313,12 +314,12 @@ function Segmented<T extends string>({
 }
 
 const inputCls =
-  'w-full rounded-md border border-white/[0.08] bg-white/[0.03] px-3 py-2 font-mono text-[12.5px] text-[#F2F0E5] placeholder-white/20 transition-colors focus:border-[#3AA99F]/60 focus:outline-none';
+  'w-full rounded-md border border-white/[0.08] bg-white/[0.03] px-3 py-2 font-mono text-[12.5px] text-obsidian-text placeholder-white/20 transition-colors focus:border-[#3AA99F]/60 focus:outline-none';
 const selectCls =
-  'rounded-md border border-white/[0.08] bg-white/[0.03] px-2.5 py-2 font-mono text-[12px] text-[#F2F0E5] focus:outline-none cursor-pointer';
-const labelCls = 'text-[11.5px] text-[#87857F]';
+  'rounded-md border border-white/[0.08] bg-white/[0.03] px-2.5 py-2 font-mono text-[12px] text-obsidian-text focus:outline-none cursor-pointer';
+const labelCls = 'text-[11.5px] text-obsidian-muted';
 /** Bağlantı formu etiketleri: providers bölümünün sabit ölçeği (12px). */
-const connLabelCls = 'text-[12px] text-[#CECDC3]';
+const connLabelCls = 'text-[12px] text-obsidian-soft';
 
 const AVATAR_SIZE = 256;
 
@@ -400,6 +401,9 @@ export function SettingsModal({
   const [workspaceRoot, setWorkspaceRoot] = useState('');
   /** Son uygulanan kök: aynı yolu blur'da tekrar göndermeyi önler. */
   const appliedWorkspaceRef = useRef('');
+  const loadedProviderRef = useRef('');
+  const loadedStartViewRef = useRef<'chat' | 'project'>('chat');
+  const loadedProfileRef = useRef<{ name: string; avatar: string }>({ name: '', avatar: '' });
   const [showReasoning, setShowReasoning] = useState<boolean>(() => readShowReasoning());
   // Yanıt politikası: kullanıcı kelime yazmasa da açık tercih (H43).
   const [answerMode, setAnswerMode] = useState<'auto' | 'terse' | 'detailed'>(() => {
@@ -511,10 +515,12 @@ export function SettingsModal({
       if (sel === 'managed' || pending) {
         setActiveProvider('managed');
         setActiveLocal(true);
+        loadedProviderRef.current = 'managed';
       } else {
         if (!conns.some((c) => c.id === sel)) sel = conns[0]?.id || '';
         setActiveProvider(sel);
         setActiveLocal(false);
+        loadedProviderRef.current = sel;
       }
       // DEĞER OKUNMAZ: yalnız "kayıtlı mı" bilgisi. Anahtar hiçbir zaman
       // webview'a alınmaz; input boş başlar, placeholder kayıtlı olduğunu
@@ -550,12 +556,15 @@ export function SettingsModal({
     setRouterEnabled(localStorage.getItem('tlm_router_enabled') === 'true');
     const rm = localStorage.getItem('tlm_router_mode');
     setRouterMode(rm === 'fast' || rm === 'deep' ? rm : 'auto');
-    setStartView(localStorage.getItem('tlm_start_view') === 'project' ? 'project' : 'chat');
+    const loadedStartView: 'chat' | 'project' = localStorage.getItem('tlm_start_view') === 'project' ? 'project' : 'chat';
+    setStartView(loadedStartView);
+    loadedStartViewRef.current = loadedStartView;
     setResetArmed(false);
     setClearChatsArmed(false);
     setQuery('');
     setDisplayName(user?.name || '');
     setAvatar(user?.avatar || '');
+    loadedProfileRef.current = { name: user?.name || '', avatar: user?.avatar || '' };
 
     try {
       const cfg = JSON.parse(localStorage.getItem('thalamus_config') || '{}');
@@ -570,7 +579,7 @@ export function SettingsModal({
     invoke<{ root: string; name: string; file_count: number }>('get_workspace_info')
       .then((info) => {
         if (cancelled) return;
-        if (info?.root) setWorkspaceRoot(info.root);
+        if (info?.root) { setWorkspaceRoot(info.root); appliedWorkspaceRef.current = info.root; }
       })
       .catch(() => {});
 
@@ -651,17 +660,21 @@ export function SettingsModal({
 
   // Tema seçimi ANINDA kalıcıdır (previewTheme localStorage'a yazar); bu yüzden
   // kapatmak temayı geri almaz. Diğer (Kaydet'e bağlı) alanlar için Cancel iptal sayılır.
-  const requestClose = useCallback(() => {
-    onClose();
-  }, [onClose]);
+  const settingsDirty =
+    activeProvider !== loadedProviderRef.current ||
+    startView !== loadedStartViewRef.current ||
+    displayName !== loadedProfileRef.current.name ||
+    avatar !== loadedProfileRef.current.avatar ||
+    workspaceRoot !== appliedWorkspaceRef.current ||
+    Object.keys(keys).some((id) => (keys[id] || '').trim() !== (loadedKeysRef.current[id] || '').trim());
 
-  // Esc closes the dialog (same semantics as the X button).
-  useEffect(() => {
-    if (!isOpen) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') requestClose(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [isOpen, requestClose]);
+  const requestClose = useCallback(() => {
+    if (settingsDirty && !window.confirm(t('settings.unsavedClose'))) return;
+    onClose();
+  }, [settingsDirty, onClose, t]);
+
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const dialogProps = useDialog({ open: isOpen, onClose: requestClose, panelRef });
 
   const conn = activeLocal ? null : (connections.find((c) => c.id === activeProvider) ?? null);
   const connIsLocal = !!conn && isLocalBaseUrl(conn.baseUrl);
@@ -918,6 +931,11 @@ export function SettingsModal({
 
     showToast(t('settings.saved'), t('settings.savedMsg'), 'success');
     onSaved?.();
+    loadedKeysRef.current = { ...keys };
+    loadedProviderRef.current = activeProvider;
+    loadedStartViewRef.current = startView;
+    loadedProfileRef.current = { name: displayName.trim() || user?.name || '', avatar: avatar || '' };
+    appliedWorkspaceRef.current = validatedRoot ?? workspaceRoot;
     // Editor ayağı (ProjectDashboard) fontSize/tabSize'ı anında alabilsin diye
     // config değişti bilgisini yay (remount beklemeden uygulanır).
     window.dispatchEvent(new Event('thalamus_config_changed'));
@@ -969,10 +987,16 @@ export function SettingsModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
       <div className="absolute inset-0" onClick={requestClose} />
 
-      <div className="relative flex h-[620px] w-[860px] max-w-[94vw] overflow-hidden rounded-lg border border-white/[0.08] bg-[#100F0F] shadow-2xl font-sans text-xs">
+      <div
+        ref={panelRef}
+        {...dialogProps}
+        aria-label={t('settings.title')}
+        tabIndex={-1}
+        className="relative flex h-[620px] w-[860px] max-w-[94vw] overflow-hidden rounded-lg border border-white/[0.08] bg-obsidian-bg shadow-2xl font-sans text-xs outline-none"
+      >
 
         {/* left: search + grouped section list */}
-        <aside className="flex w-[208px] flex-shrink-0 flex-col border-r border-white/[0.06] bg-[#100F0F] p-2">
+        <aside className="flex w-[208px] flex-shrink-0 flex-col border-r border-white/[0.06] bg-obsidian-bg p-2">
           <div className="relative px-0.5 pb-1.5 pt-0.5">
             <Search size={13} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#575654]" />
             <input
@@ -981,14 +1005,14 @@ export function SettingsModal({
               onChange={(e) => setQuery(e.target.value)}
               placeholder={t('settings.searchPlaceholder')}
               spellCheck={false}
-              className="w-full rounded-md border border-white/[0.08] bg-white/[0.03] py-1.5 pl-7 pr-6 text-[12px] text-[#F2F0E5] placeholder-white/25 transition-colors focus:border-[#3AA99F]/60 focus:outline-none"
+              className="w-full rounded-md border border-white/[0.08] bg-white/[0.03] py-1.5 pl-7 pr-6 text-[12px] text-obsidian-text placeholder-white/25 transition-colors focus:border-[#3AA99F]/60 focus:outline-none"
             />
             {query && (
               <button
                 type="button"
                 onClick={() => setQuery('')}
                 aria-label={t('settings.searchClear')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 flex h-4 w-4 items-center justify-center rounded text-[#575654] transition-colors hover:text-[#CECDC3] cursor-pointer"
+                className="absolute right-2 top-1/2 -translate-y-1/2 flex h-4 w-4 items-center justify-center rounded text-[#575654] transition-colors hover:text-obsidian-soft cursor-pointer"
               >
                 <X size={11} />
               </button>
@@ -1011,8 +1035,8 @@ export function SettingsModal({
                       onClick={() => { setActiveSection(item.id); setQuery(''); }}
                       className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[12.5px] transition-colors cursor-pointer ${
                         active
-                          ? 'bg-white/[0.06] text-[#F2F0E5]'
-                          : 'text-[#87857F] hover:bg-white/[0.03] hover:text-[#CECDC3]'
+                          ? 'bg-white/[0.06] text-obsidian-text'
+                          : 'text-obsidian-muted hover:bg-white/[0.03] hover:text-obsidian-soft'
                       }`}
                     >
                       <Icon size={14} />
@@ -1029,10 +1053,10 @@ export function SettingsModal({
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="flex flex-shrink-0 items-start justify-between px-6 pb-3 pt-5">
             <div className="flex flex-col">
-              <span className="text-[14px] font-semibold tracking-tight text-[#F2F0E5]">
+              <span className="text-[14px] font-semibold tracking-tight text-obsidian-text">
                 {q ? t('settings.title') : t(sectionLabelKey(activeSection))}
               </span>
-              <span className="mt-0.5 max-w-[540px] text-[11px] leading-snug text-[#87857F]">
+              <span className="mt-0.5 max-w-[540px] text-[11px] leading-snug text-obsidian-muted">
                 {q ? t('settings.searchEmpty', { query: query.trim() }) : t(sectionDescKey(activeSection))}
               </span>
             </div>
@@ -1040,7 +1064,7 @@ export function SettingsModal({
               type="button"
               onClick={requestClose}
               aria-label={t('settings.closeAria')}
-              className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-[#575654] transition-colors hover:bg-white/[0.06] hover:text-[#CECDC3] cursor-pointer"
+              className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-[#575654] transition-colors hover:bg-white/[0.06] hover:text-obsidian-soft cursor-pointer"
             >
               <X size={14} />
             </button>
@@ -1050,7 +1074,7 @@ export function SettingsModal({
             {/* ── SEARCH RESULTS ── */}
             {q && (
               searchResults.length === 0 ? (
-                <p className="pt-2 text-[12px] text-[#87857F]">{t('settings.searchEmpty', { query: query.trim() })}</p>
+                <p className="pt-2 text-[12px] text-obsidian-muted">{t('settings.searchEmpty', { query: query.trim() })}</p>
               ) : (
                 <div className="flex flex-col">
                   {searchResults.map((r) => (
@@ -1060,7 +1084,7 @@ export function SettingsModal({
                       onClick={() => { setActiveSection(r.section); setQuery(''); }}
                       className="flex items-center justify-between gap-4 rounded-md px-3 py-2.5 text-left transition-colors hover:bg-white/[0.04] cursor-pointer"
                     >
-                      <span className="text-[12.5px] text-[#CECDC3]">{t(r.labelKey)}</span>
+                      <span className="text-[12.5px] text-obsidian-soft">{t(r.labelKey)}</span>
                       <span className="text-[11px] text-[#575654]">{t(sectionLabelKey(r.section))}</span>
                     </button>
                   ))}
@@ -1180,7 +1204,7 @@ export function SettingsModal({
                         }`}
                       >
                         <span
-                          className={`min-w-0 truncate text-[12.5px] ${activeLocal ? 'text-[#F2F0E5]' : 'text-[#CECDC3]'}`}
+                          className={`min-w-0 truncate text-[12.5px] ${activeLocal ? 'text-obsidian-text' : 'text-obsidian-soft'}`}
                         >
                           {t('settings.conn.local')}
                         </span>
@@ -1198,7 +1222,7 @@ export function SettingsModal({
                           }`}
                         >
                           <span
-                            className={`min-w-0 truncate text-[12.5px] ${selected ? 'text-[#F2F0E5]' : 'text-[#CECDC3]'}`}
+                            className={`min-w-0 truncate text-[12.5px] ${selected ? 'text-obsidian-text' : 'text-obsidian-soft'}`}
                           >
                             {c.name || c.id}
                           </span>
@@ -1206,7 +1230,7 @@ export function SettingsModal({
                       );
                     })}
                     {connections.length === 0 && !showLocal && (
-                      <p className="px-2.5 py-1.5 text-[12px] text-[#87857F]">
+                      <p className="px-2.5 py-1.5 text-[12px] text-obsidian-muted">
                         {t('settings.conn.empty')}
                       </p>
                     )}
@@ -1214,7 +1238,7 @@ export function SettingsModal({
                       <button
                         type="button"
                         onClick={addConnection}
-                        className="flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-left text-[12px] text-[#87857F] transition-colors hover:bg-white/[0.03] hover:text-[#CECDC3]"
+                        className="flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-left text-[12px] text-obsidian-muted transition-colors hover:bg-white/[0.03] hover:text-obsidian-soft"
                       >
                         <Plus size={12} />
                         {t('settings.conn.new')}
@@ -1223,7 +1247,7 @@ export function SettingsModal({
                         type="button"
                         disabled={scanning}
                         onClick={() => void runLocalScan([])}
-                        className="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-[11.5px] text-[#575654] transition-colors hover:text-[#CECDC3] disabled:cursor-default disabled:opacity-50"
+                        className="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-[11.5px] text-[#575654] transition-colors hover:text-obsidian-soft disabled:cursor-default disabled:opacity-50"
                       >
                         <RefreshCw size={11} className={scanning ? 'animate-spin' : ''} />
                         {t('settings.localScan')}
@@ -1237,7 +1261,7 @@ export function SettingsModal({
                       {localFileEntries.length > 0 ? (
                         <ModelRows entries={localFileEntries} />
                       ) : (
-                        <p className="px-2.5 py-1.5 text-[12px] text-[#87857F]">
+                        <p className="px-2.5 py-1.5 text-[12px] text-obsidian-muted">
                           {scanFailed ? t('settings.localScanFailed') : t('settings.localNone')}
                         </p>
                       )}
@@ -1298,7 +1322,7 @@ export function SettingsModal({
                             type="button"
                             onClick={() => setVisibleProvider(visibleProvider === conn.id ? null : conn.id)}
                             aria-label={visibleProvider === conn.id ? t('settings.hideKey') : t('settings.showKey')}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 text-[#575654] transition-colors hover:text-[#CECDC3] cursor-pointer"
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-[#575654] transition-colors hover:text-obsidian-soft cursor-pointer"
                             tabIndex={-1}
                           >
                             {visibleProvider === conn.id ? <EyeOff size={13} /> : <Eye size={13} />}
@@ -1329,7 +1353,7 @@ export function SettingsModal({
                               onClick={() => void refreshModels(conn.id)}
                               aria-label={t('settings.modelsRefresh')}
                               title={t('settings.modelsRefresh')}
-                              className="cursor-pointer text-[#575654] transition-colors hover:text-[#CECDC3]"
+                              className="cursor-pointer text-[#575654] transition-colors hover:text-obsidian-soft"
                             >
                               <RefreshCw size={11} className={modelsLoading[conn.id] ? 'animate-spin' : ''} />
                             </button>
@@ -1342,7 +1366,7 @@ export function SettingsModal({
                               <div
                                 key={m}
                                 title={m}
-                                className="truncate px-2.5 py-1.5 font-mono text-[11.5px] text-[#CECDC3]"
+                                className="truncate px-2.5 py-1.5 font-mono text-[11.5px] text-obsidian-soft"
                               >
                                 {m}
                               </div>
@@ -1366,7 +1390,7 @@ export function SettingsModal({
                           className={`cursor-pointer px-1 text-[12px] transition-colors ${
                             confirmingDelete
                               ? 'text-rose-300/90'
-                              : 'text-[#87857F] hover:text-[#CECDC3]'
+                              : 'text-obsidian-muted hover:text-obsidian-soft'
                           }`}
                         >
                           {confirmingDelete ? t('settings.conn.deleteAsk') : t('settings.conn.delete')}
@@ -1431,7 +1455,7 @@ export function SettingsModal({
                       placeholder={t('settings.instructionsPlaceholder')}
                       className={`${inputCls} min-h-[72px] resize-y`}
                     />
-                    <p className="text-[11px] text-[#87857F]">{t('settings.instructionsHint')}</p>
+                    <p className="text-[11px] text-obsidian-muted">{t('settings.instructionsHint')}</p>
                   </div>
                 </Card>
 
@@ -1453,7 +1477,7 @@ export function SettingsModal({
                         }}
                         className={inputCls}
                       />
-                      <p className="text-[11px] leading-snug text-[#87857F]">{t('settings.temperatureHint')}</p>
+                      <p className="text-[11px] leading-snug text-obsidian-muted">{t('settings.temperatureHint')}</p>
                     </div>
                     <div className="flex flex-col gap-1.5">
                       <label className={labelCls} htmlFor="settings-max-tokens">{t('settings.maxTokens')}</label>
@@ -1471,7 +1495,7 @@ export function SettingsModal({
                         }}
                         className={inputCls}
                       />
-                      <p className="text-[11px] leading-snug text-[#87857F]">{t('settings.maxTokensHint')}</p>
+                      <p className="text-[11px] leading-snug text-obsidian-muted">{t('settings.maxTokensHint')}</p>
                     </div>
                   </div>
                 </Card>
@@ -1547,7 +1571,7 @@ export function SettingsModal({
                           <option key={m.id} value={m.id}>{m.label}</option>
                         ))}
                       </datalist>
-                      <p className="text-[11px] text-[#87857F]">{t('settings.deepModelHint')}</p>
+                      <p className="text-[11px] text-obsidian-muted">{t('settings.deepModelHint')}</p>
                     </div>
                   )}
                 </Card>
@@ -1557,13 +1581,13 @@ export function SettingsModal({
             {/* ── PROFILE ── */}
             {!q && activeSection === 'profile' && (
               !user ? (
-                <p className="pt-2 text-[11.5px] leading-relaxed text-[#87857F]">
+                <p className="pt-2 text-[11.5px] leading-relaxed text-obsidian-muted">
                   {t('settings.noProfile')}
                 </p>
               ) : (
                 <Card>
                   <div className="flex items-center gap-4 py-3.5">
-                    <div className="flex h-16 w-16 flex-shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/[0.08] bg-white/[0.03] text-[#87857F]">
+                    <div className="flex h-16 w-16 flex-shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/[0.08] bg-white/[0.03] text-obsidian-muted">
                       {avatar ? (
                         <img src={avatar} alt="" className="h-full w-full object-cover" />
                       ) : (
@@ -1572,7 +1596,7 @@ export function SettingsModal({
                     </div>
                     <div className="flex flex-col gap-1.5">
                       <div className="flex items-center gap-2">
-                        <label className="flex cursor-pointer items-center gap-1.5 rounded-md border border-white/[0.08] px-3 py-1.5 text-[11.5px] text-[#CECDC3] transition-colors hover:border-white/[0.14]">
+                        <label className="flex cursor-pointer items-center gap-1.5 rounded-md border border-white/[0.08] px-3 py-1.5 text-[11.5px] text-obsidian-soft transition-colors hover:border-white/[0.14]">
                           <Upload size={12} />
                           {avatar ? t('settings.changePhoto') : t('settings.uploadPhoto')}
                           <input type="file" accept="image/*" className="hidden" onChange={handleAvatarPick} />
@@ -1581,14 +1605,14 @@ export function SettingsModal({
                           <button
                             type="button"
                             onClick={() => setAvatar('')}
-                            className="flex cursor-pointer items-center gap-1.5 rounded-md border border-white/[0.08] px-3 py-1.5 text-[11.5px] text-[#87857F] transition-colors hover:border-rose-600/50 hover:text-rose-300"
+                            className="flex cursor-pointer items-center gap-1.5 rounded-md border border-white/[0.08] px-3 py-1.5 text-[11.5px] text-obsidian-muted transition-colors hover:border-rose-600/50 hover:text-rose-300"
                           >
                             <Trash2 size={12} />
                             {t('common.remove')}
                           </button>
                         )}
                       </div>
-                      <span className="text-[11px] text-[#87857F]">{t('settings.avatarHint')}</span>
+                      <span className="text-[11px] text-obsidian-muted">{t('settings.avatarHint')}</span>
                     </div>
                   </div>
 
@@ -1603,12 +1627,12 @@ export function SettingsModal({
                       className={inputCls}
                       spellCheck={false}
                     />
-                    <span className="text-[11px] text-[#87857F]">{t('settings.displayNameHint')}</span>
+                    <span className="text-[11px] text-obsidian-muted">{t('settings.displayNameHint')}</span>
                   </div>
 
                   {user.email && (
                     <div className="py-3.5">
-                      <span className="text-[11px] text-[#87857F]">{t('settings.signedInAs', { email: user.email })}</span>
+                      <span className="text-[11px] text-obsidian-muted">{t('settings.signedInAs', { email: user.email })}</span>
                     </div>
                   )}
                 </Card>
@@ -1652,7 +1676,7 @@ export function SettingsModal({
                       className={`flex-shrink-0 rounded-md border px-3 py-1.5 text-[11.5px] transition-colors cursor-pointer ${
                         resetArmed
                           ? 'border-rose-600/60 bg-rose-600/15 text-rose-300'
-                          : 'border-white/[0.08] text-[#87857F] hover:border-white/[0.14] hover:text-[#CECDC3]'
+                          : 'border-white/[0.08] text-obsidian-muted hover:border-white/[0.14] hover:text-obsidian-soft'
                       }`}
                     >
                       {resetArmed ? t('settings.resetConfirm') : t('settings.reset')}
@@ -1676,7 +1700,7 @@ export function SettingsModal({
                       className={`flex-shrink-0 rounded-md border px-3 py-1.5 text-[11.5px] transition-colors cursor-pointer ${
                         clearChatsArmed
                           ? 'border-rose-600/60 bg-rose-600/15 text-rose-300'
-                          : 'border-white/[0.08] text-[#87857F] hover:border-white/[0.14] hover:text-[#CECDC3]'
+                          : 'border-white/[0.08] text-obsidian-muted hover:border-white/[0.14] hover:text-obsidian-soft'
                       }`}
                     >
                       {clearChatsArmed ? t('settings.clearChatsConfirm') : t('settings.clearChats')}
@@ -1690,12 +1714,16 @@ export function SettingsModal({
 
           <footer className="flex flex-shrink-0 items-center justify-between gap-2 border-t border-white/[0.06] px-6 py-3">
             <div className="flex min-w-0 flex-col">
-              <span className="truncate text-[10.5px] text-[#575654]">{t('settings.instantHint')}</span>
+              <span className="truncate text-[10.5px] text-[#575654]">
+                {activeSection === 'providers' || activeSection === 'profile'
+                  ? t('settings.saveHint')
+                  : t('settings.instantHint')}
+              </span>
               <span
                 className="mt-0.5 flex items-center gap-1.5 text-[10px] text-[#575654]/80"
                 title={t('settings.versionHint')}
               >
-                <span className="font-medium text-[#87857F]">Thalamus</span>
+                <span className="font-medium text-obsidian-muted">Thalamus</span>
                 <span className="tabular-nums">v{__APP_VERSION__}</span>
                 <span className="text-[#575654]/60">·</span>
                 <span>beta</span>
@@ -1705,7 +1733,7 @@ export function SettingsModal({
             <button
               type="button"
               onClick={requestClose}
-              className="rounded-md border border-white/[0.08] px-3.5 py-1.5 text-[11.5px] text-[#87857F] transition-colors hover:border-white/[0.14] hover:text-[#CECDC3] cursor-pointer"
+              className="rounded-md border border-white/[0.08] px-3.5 py-1.5 text-[11.5px] text-obsidian-muted transition-colors hover:border-white/[0.14] hover:text-obsidian-soft cursor-pointer"
             >
               {t('common.close')}
             </button>

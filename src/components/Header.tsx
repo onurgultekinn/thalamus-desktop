@@ -23,20 +23,20 @@ export function Header({
     .filter(Boolean);
 
   return (
-    <header className="w-full h-10 bg-[#100F0F] border-b border-[#282726] flex items-center justify-between px-4 font-sans text-xs select-none">
+    <header className="w-full h-10 bg-obsidian-bg border-b border-[#282726] flex items-center justify-between px-4 font-sans text-xs select-none">
       <div className="flex items-center gap-3">
 
         {/* LOGO */}
         <div className="flex items-center gap-2 flex-shrink-0">
-          <span className="font-bold text-[#F2F0E5] tracking-tight text-[13px]">
+          <span className="font-bold text-obsidian-text tracking-tight text-[13px]">
             thalamus
           </span>
-          <span className="bg-[#1C1B1A] text-[#A8A49E] border border-[#282726] text-[11px] px-1.5 py-0.5 rounded font-medium">
+          <span className="bg-obsidian-panel text-[#A8A49E] border border-[#282726] text-[11px] px-1.5 py-0.5 rounded font-medium">
             studio
           </span>
         </div>
 
-        <div className="w-[1px] h-[14px] bg-[#282726] flex-shrink-0" />
+        <div className="w-[1px] h-[14px] bg-obsidian-surface flex-shrink-0" />
 
         {/* DYNAMIC PATH — mono yerine uygulama fontu; son segment parlak beyaz
             değil, paletin yumuşak ön planı (göz yormayan kırılım). */}
@@ -50,16 +50,16 @@ export function Header({
                 <span
                   className={
                     isRoot
-                      ? "text-[#87857F]"
+                      ? "text-obsidian-muted"
                       : isLast
-                      ? "text-[#CECDC3] font-medium"
-                      : "text-[#87857F]"
+                      ? "text-obsidian-soft font-medium"
+                      : "text-obsidian-muted"
                   }
                 >
                   {segment}
                 </span>
                 {!isLast && (
-                  <span className="text-[#87857F] select-none" aria-hidden="true">/</span>
+                  <span className="text-obsidian-muted select-none" aria-hidden="true">/</span>
                 )}
               </div>
             );
@@ -75,10 +75,10 @@ export function Header({
               type="button"
               onClick={onOpenNucleus}
               title="Nucleus — Alt+N"
-              className="group flex items-center gap-1.5 text-[11px] text-[#87857F] transition-colors hover:text-[#CECDC3] cursor-pointer"
+              className="group flex items-center gap-1.5 text-[11px] text-obsidian-muted transition-colors hover:text-obsidian-soft cursor-pointer"
             >
               <span className="leading-none font-medium">Nucleus</span>
-              <span className="text-[10px] leading-none text-[#87857F] group-hover:text-[#CECDC3] transition-colors select-none">
+              <span className="text-[10px] leading-none text-obsidian-muted group-hover:text-obsidian-soft transition-colors select-none">
                 Alt N
               </span>
             </button>
@@ -88,10 +88,10 @@ export function Header({
               type="button"
               onClick={onOpenPalette}
               title="Ctrl+K"
-              className="group flex items-center gap-1.5 text-[11px] text-[#87857F] transition-colors hover:text-[#CECDC3] cursor-pointer"
+              className="group flex items-center gap-1.5 text-[11px] text-obsidian-muted transition-colors hover:text-obsidian-soft cursor-pointer"
             >
               <span className="leading-none font-medium">{t('nav.search')}</span>
-              <span className="text-[10px] leading-none text-[#87857F] group-hover:text-[#CECDC3] transition-colors select-none">
+              <span className="text-[10px] leading-none text-obsidian-muted group-hover:text-obsidian-soft transition-colors select-none">
                 Ctrl K
               </span>
             </button>

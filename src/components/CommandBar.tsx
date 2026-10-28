@@ -419,14 +419,26 @@ export function CommandBar({
     onSend({ preventDefault: () => {} } as unknown as FormEvent, files);
   };
 
+  const canSend = !loading && (input.trim().length > 0 || images.length > 0 || uploadedFiles.length > 0);
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      if ((input.trim() || images.length > 0 || uploadedFiles.length > 0) && !loading) {
-        submitWithFiles();
-      }
+      if (canSend) submitWithFiles();
     }
   };
+
+  useEffect(() => {
+    const preventFileDrop = (e: DragEvent) => {
+      if (e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files')) e.preventDefault();
+    };
+    window.addEventListener('dragover', preventFileDrop);
+    window.addEventListener('drop', preventFileDrop);
+    return () => {
+      window.removeEventListener('dragover', preventFileDrop);
+      window.removeEventListener('drop', preventFileDrop);
+    };
+  }, []);
 
   // ÖNERİLEN MODEL — router'ın UI yüzü. Gömülü model adı yok: derin model
   // Ayarlar'da sağlayıcı başına girilir. Auto yalnız ÖNERİR; kullanıcı tek
@@ -519,7 +531,7 @@ export function CommandBar({
                 onClick={() => void runLocalScan()}
                 disabled={scanning}
                 title={t('settings.localScan')}
-                className="ml-auto flex-shrink-0 cursor-pointer rounded-md p-1 text-[#87857F] transition-colors hover:bg-white/[0.06] hover:text-[#CECDC3] disabled:opacity-50"
+                className="ml-auto flex-shrink-0 cursor-pointer rounded-md p-1 text-obsidian-muted transition-colors hover:bg-white/[0.06] hover:text-obsidian-soft disabled:opacity-50"
               >
                 <RefreshCw size={11} className={scanning ? 'animate-spin' : ''} />
               </button>
@@ -532,7 +544,7 @@ export function CommandBar({
                 <div className="rounded-lg border border-[#3AA99F]/30 bg-gradient-to-br from-[#3AA99F]/10 to-[#4385BE]/10 p-3">
                   <div className="flex items-center gap-2">
                     <Sparkles size={13} className="text-[#9FD9D0]" />
-                    <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold text-[#F2F0E5]">
+                    <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold text-obsidian-text">
                       {recommendedLabel}
                     </span>
                   </div>
@@ -549,7 +561,7 @@ export function CommandBar({
                   </button>
                 </div>
               ) : (
-                <p className="px-1 py-2 text-[11px] leading-relaxed text-[#87857F]">
+                <p className="px-1 py-2 text-[11px] leading-relaxed text-obsidian-muted">
                   {t('composer.recSetup')}
                 </p>
               )}
@@ -570,7 +582,7 @@ export function CommandBar({
                   >
                     <span
                       className={`min-w-0 flex-1 truncate text-[12px] font-medium ${
-                        selected ? 'text-[#F2F0E5]' : 'text-[#CECDC3]'
+                        selected ? 'text-obsidian-text' : 'text-obsidian-soft'
                       }`}
                     >
                       {model.label}
@@ -785,7 +797,7 @@ export function CommandBar({
             ) : (
               <button
                 type="submit"
-                disabled={loading || (!input.trim() && images.length === 0)}
+                disabled={!canSend}
                 className="flex items-center justify-center w-6 h-6 bg-obsidian-text text-obsidian-bg rounded-md cursor-pointer disabled:opacity-20 disabled:cursor-not-allowed hover:bg-obsidian-text/90 transition-all"
                 title={t('composer.send')}
               >

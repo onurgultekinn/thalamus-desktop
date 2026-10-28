@@ -46,7 +46,7 @@ function clampRect(r: Rect, min: { w: number; h: number }): Rect {
  * native size (no scaling → crisp text/canvas); the layout reflows to the
  * window and the frame keeps its own background.
  */
-export const FLOATING_CHROME = 'flex flex-col rounded-lg border border-[#34332F] shadow-2xl overflow-hidden';
+export const FLOATING_CHROME = 'flex flex-col rounded-lg border border-obsidian-raise shadow-2xl overflow-hidden';
 
 export interface UseFloating {
   floating: boolean;

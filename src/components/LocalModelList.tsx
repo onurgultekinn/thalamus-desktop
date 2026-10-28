@@ -29,7 +29,7 @@ export function LocalModelList({
 
   if (scanning && entries.length === 0) {
     return (
-      <div className={`flex items-center gap-2 px-2 py-4 text-[11.5px] text-[#87857F] ${className}`}>
+      <div className={`flex items-center gap-2 px-2 py-4 text-[11.5px] text-obsidian-muted ${className}`}>
         <Loader2 size={12} className="animate-spin" />
         {t('settings.localScanning')}
       </div>
@@ -39,14 +39,14 @@ export function LocalModelList({
   if (entries.length === 0) {
     return (
       <div className={`flex flex-col items-center gap-2.5 px-2 py-6 text-center ${className}`}>
-        <span className="text-[11.5px] text-[#87857F]">
+        <span className="text-[11.5px] text-obsidian-muted">
           {scanFailed ? t('settings.localScanFailed') : t('settings.localNone')}
         </span>
         {onScan && (
           <button
             type="button"
             onClick={onScan}
-            className="cursor-pointer rounded-md border border-white/[0.08] px-2.5 py-1 text-[11px] text-[#CECDC3] transition-colors hover:border-white/[0.16] hover:bg-white/[0.04]"
+            className="cursor-pointer rounded-md border border-white/[0.08] px-2.5 py-1 text-[11px] text-obsidian-soft transition-colors hover:border-white/[0.16] hover:bg-white/[0.04]"
           >
             {t('settings.localScan')}
           </button>
@@ -95,7 +95,7 @@ export function LocalModelList({
           >
             <span
               className={`min-w-0 flex-1 truncate text-[12px] font-medium ${
-                entry.inUse ? 'text-[#F2F0E5]' : 'text-[#CECDC3]'
+                entry.inUse ? 'text-obsidian-text' : 'text-obsidian-soft'
               }`}
             >
               {entry.label}
@@ -118,7 +118,7 @@ export function LocalModelList({
                     }}
                     title={t('settings.localStop')}
                     aria-label={t('settings.localStop')}
-                    className="flex-shrink-0 cursor-pointer rounded p-1 text-[#87857F] transition-colors hover:bg-white/[0.06] hover:text-[#CECDC3]"
+                    className="flex-shrink-0 cursor-pointer rounded p-1 text-obsidian-muted transition-colors hover:bg-white/[0.06] hover:text-obsidian-soft"
                   >
                     <Square size={9} />
                   </button>

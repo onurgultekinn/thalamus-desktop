@@ -779,6 +779,7 @@ export default function App() {
     const currentAbort = new AbortController();
     abortControllerRef.current = currentAbort;
     const signal = currentAbort.signal;
+    let sendOk = true;
 
     /** İstek iptal mi geldi: kullanıcı Stop (abort) mi, 180s timeout mu? */
     const abortKind = (): 'stop' | 'timeout' | null => {
@@ -927,6 +928,7 @@ export default function App() {
           }]);
         }
       } catch (err) {
+        sendOk = false;
         // T2: kullanıcı Stop'a bastıysa hata mesajı yazılmaz; dürüst not düşülür.
         const kind = abortKind();
         if (kind) {
@@ -951,7 +953,7 @@ export default function App() {
         setLoading(false);
         abortControllerRef.current = null;
       }
-      return;
+      return sendOk;
     }
 
     // ── Metin yolu: gerçek AI yanıtı ─────────────────────────────────────
@@ -1263,6 +1265,7 @@ export default function App() {
         }
       }
   } catch (err) {
+      sendOk = false;
       const kind = abortKind();
       if (kind) {
         applyMessages(prev => [...prev, {
@@ -1286,6 +1289,7 @@ export default function App() {
       setLoading(false);
       abortControllerRef.current = null;
     }
+    return sendOk;
 };
 
   /**
@@ -1319,10 +1323,15 @@ export default function App() {
    */
   const handleEditMessage = async (idx: number, content: string) => {
     if (loading || engineLoading) return;
+    const snapshot = messages;
     const original = messages[idx];
     const history = messages.slice(0, idx);
     setMessages(history);
-    await handleSendMessage(content, false, original?.images, undefined, history);
+    const ok = await handleSendMessage(content, false, original?.images, undefined, history);
+    if (!ok) {
+      setMessages(snapshot);
+      showToast(t('chat.previousRestored'), t('chat.previousRestoredMsg'), 'error');
+    }
   };
 
   const handleOpenProjectView = useCallback(() => setCurrentView('project'), []);
@@ -1381,8 +1390,13 @@ export default function App() {
       showToast(t('chat.nothingToRegen'), t('chat.nothingToRegenMsg'), 'info');
       return;
     }
+    const snapshot = messages;
     setMessages(prev => prev.slice(0, assistantIdx));
-    await handleSendMessage(userText, true, userImages);
+    const ok = await handleSendMessage(userText, true, userImages);
+    if (!ok) {
+      setMessages(snapshot);
+      showToast(t('chat.previousRestored'), t('chat.previousRestoredMsg'), 'error');
+    }
   };
 
   const handleExportChat = (chatId: string, format: 'md' | 'json') => {
@@ -1466,8 +1480,8 @@ export default function App() {
 
   const projectName = getWorkspaceName();
   const activePath = currentView === 'project' 
-    ? `projects / ${projectName} / ${activeTab}` 
-    : `chats / ${activeChat.title}`;
+    ? `${t('header.projects')} / ${projectName} / ${activeTab}` 
+    : `${t('header.chats')} / ${activeChat.title}`;
 
   const nucleusTranscript = messages
     .slice(-NUCLEUS_LIMITS.transcriptMessages)
@@ -1538,7 +1552,7 @@ export default function App() {
           run: handleStopRequest,
         }]
       : []),
-    ...chats.slice(0, 12).map((chat) => ({
+    ...chats.map((chat) => ({
       id: `palette:chat:${chat.id}`,
       label: chat.title,
       hint: t('palette.chat'),
@@ -1601,7 +1615,7 @@ export default function App() {
                   .chat-layout CSS'i column!important olduğu için satır burada. */}
               <div style={{ display: 'flex', flexDirection: 'row', height: '100%', width: '100%', overflow: 'hidden' }}>
               <div style={{ flex: 1, minWidth: 320, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-              <div className="message-list" data-chat-scroll style={{ flex: 1, overflowY: 'auto' }}>
+              <div className="message-list" data-chat-scroll aria-busy={loading} style={{ flex: 1, overflowY: 'auto' }}>
                 <ChatView
                   messages={messages}
                   loading={loading}
@@ -1625,7 +1639,7 @@ export default function App() {
 
               {sessionSave.avoidedChars > 0 && (
                 <div
-                  className="flex items-center gap-2 px-3 py-1 text-[10.5px] font-mono text-[#3AA99F] border-t border-[#34332F]/60 select-none"
+                  className="flex items-center gap-2 px-3 py-1 text-[10.5px] font-mono text-[#3AA99F] border-t border-obsidian-raise/60 select-none"
                   title={t('session.savedTitle')}
                 >
                   <span className="w-1.5 h-1.5 rounded-full bg-[#3AA99F]" />
@@ -1768,16 +1782,21 @@ export default function App() {
       
       {showOnboarding && (
         <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4 select-none font-sans">
-          <div className="w-full max-w-md bg-[#1C1B1A] border border-[#34332F] rounded-xl shadow-2xl p-6 flex flex-col gap-4 text-xs animate-in fade-in zoom-in-95 duration-150">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="onboarding-title"
+            className="w-full max-w-md bg-obsidian-panel border border-obsidian-raise rounded-xl shadow-2xl p-6 flex flex-col gap-4 text-xs animate-in fade-in zoom-in-95 duration-150"
+          >
             <div className="flex flex-col gap-1.5">
-              <h2 className="text-sm font-semibold text-[#F2F0E5] tracking-tight">{t('onb.title')}</h2>
+              <h2 id="onboarding-title" className="text-sm font-semibold text-obsidian-text tracking-tight">{t('onb.title')}</h2>
               <p className="text-[#A8A49E] leading-relaxed text-[11.5px]">
                 {t('onb.body')}
               </p>
             </div>
             
-            <div className="p-3 bg-[#100F0F]/60 border border-[#34332F] rounded-lg text-[#A8A49E] leading-relaxed text-[11px]">
-              <strong className="text-[#CECDC3] block mb-1">{t('onb.effects')}</strong>
+            <div className="p-3 bg-obsidian-bg/60 border border-obsidian-raise rounded-lg text-[#A8A49E] leading-relaxed text-[11px]">
+              <strong className="text-obsidian-soft block mb-1">{t('onb.effects')}</strong>
               {t('onb.liveLine')}<br/>
               {t('onb.offlineLine')}
             </div>
@@ -1790,12 +1809,13 @@ export default function App() {
                   setOnlinePricing(false);
                   setShowOnboarding(false);
                 }}
-                className="px-3.5 py-2 rounded-md border border-[#34332F] hover:bg-[#282726] text-[#CECDC3] font-medium transition-colors cursor-pointer"
+                className="px-3.5 py-2 rounded-md border border-obsidian-raise hover:bg-obsidian-surface text-obsidian-soft font-medium transition-colors cursor-pointer"
               >
                 {t('onb.offlineBtn')}
               </button>
               <button
                 type="button"
+                autoFocus
                 onClick={() => {
                   localStorage.setItem('tlm_online_pricing', 'true');
                   setOnlinePricing(true);

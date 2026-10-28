@@ -15,6 +15,7 @@ import { findFileViewerZoomProvider, resolveFileViewerScrollContainer } from '@f
 import { FILE_VIEWER_OPTIONS } from '../lib/fileViewerSetup';
 import { useT } from '../lib/i18n';
 import { useFloatingPanel, useAutoMinWidth, FloatResizeHandle, FLOATING_CHROME } from './floating';
+import { useDialog } from '../lib/useDialog';
 
 /** Masaüstünde yeni pencere izni yok; blob'u sistem tarayıcısına vermek de
  *  mümkün değil. Bu yüzden "pencerede aç" yalnız tarayıcı önizlemesinde var. */
@@ -124,7 +125,7 @@ function MenuItem({ label, hint, disabled, active, onClick }: { label: string; h
           ? 'cursor-default text-obsidian-muted/50'
           : active
             ? 'cursor-pointer text-[#dcb67a] bg-[#dcb67a]/[0.12]'
-            : 'cursor-pointer hover:bg-[#282726] hover:text-[#dcb67a]'
+            : 'cursor-pointer hover:bg-obsidian-surface hover:text-[#dcb67a]'
       }`}
     >
       <span>{label}</span>
@@ -364,7 +365,7 @@ function PdfBar({ page, pageCount, scale, rotation, zoomMenuOpen, zoomBtnRef, on
           inputMode="numeric"
           aria-label={t('preview.page')}
           title={t('preview.page')}
-          className="w-8 h-6 rounded-md bg-transparent text-center font-mono text-[11.5px] text-obsidian-text border border-transparent hover:border-obsidian-border focus:border-[#dcb67a]/60 focus:bg-[#100F0F] outline-none transition-colors"
+          className="w-8 h-6 rounded-md bg-transparent text-center font-mono text-[11.5px] text-obsidian-text border border-transparent hover:border-obsidian-border focus:border-[#dcb67a]/60 focus:bg-obsidian-bg outline-none transition-colors"
         />
         <span className="font-mono text-[11px] text-obsidian-muted min-w-[26px]">/ {pageCount || '–'}</span>
         <BarButton title={t('preview.nextPage')} onClick={() => onGoTo(page + 1)} disabled={!pageCount || page >= pageCount}>
@@ -464,6 +465,8 @@ export function FilePreviewDrawer({ item, onClose, inline = false, contentWidth 
   const viewerRef = useRef<FileViewerHandle | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const hoveringRef = useRef(false);
+  const draftsRef = useRef<Record<string, string>>({});
+  const itemKeyRef = useRef<string>('');
 
   // Hangi dalın çizileceğini tek yerde belirle: viewer kendi içinde kaydırır,
   // native dallar ise dış kapsayıcıda. Böylece gereksiz (yeşil) dış
@@ -795,16 +798,20 @@ export function FilePreviewDrawer({ item, onClose, inline = false, contentWidth 
   const textDirty = edit.on && edit.draft !== (edit.base || item.body || '');
 
   const toggleEdit = useCallback(() => {
+    if (edit.on && edit.draft !== (edit.base || item.body || '')) {
+      if (!window.confirm(t('preview.discardEditQ'))) return;
+    }
     setEdit((p) => (p.on
       ? { ...p, on: false, draft: p.base || item.body || '' }
       : { ...p, on: true, draft: p.draft || p.base || item.body || '', saved: false }));
-  }, [item.body]);
+  }, [edit.on, edit.draft, edit.base, item.body, t]);
 
   const saveText = useCallback(async () => {
     const content = edit.draft;
     if (content === (edit.base || item.body || '')) { showNote(t('preview.saved')); return; }
     try {
       const result = await writeTextWithBackup(item.path ?? '', content, edit.base || item.body || '');
+      delete draftsRef.current[item.path ?? item.name];
       setEdit((p) => ({ ...p, base: content, saved: true, on: false }));
       showNote(result === 'saved'
         ? `${t('preview.saved')} · ${t('preview.backupAt')} ${(item.path ?? '').split(/[\\/]/).pop()}.bak`
@@ -856,9 +863,19 @@ export function FilePreviewDrawer({ item, onClose, inline = false, contentWidth 
   }, [viewMode, activeMedia, togglePlay, seekBy, setVolume, toggleMute]);
 
   // Dosya değişince türe özel görünüm/düzenleme durumları sıfırlanır.
+  // Kaydedilmemiş taslaklar dosya başına bellekte tutulur; geri dönünce geri gelir.
   useEffect(() => {
+    const nextKey = item.path ?? item.name;
+    const prevKey = itemKeyRef.current;
+    setEdit((p) => {
+      if (prevKey && prevKey !== nextKey && p.on && p.draft !== (p.base || '')) {
+        draftsRef.current[prevKey] = p.draft;
+      }
+      const restored = draftsRef.current[nextKey] ?? '';
+      return { on: false, draft: restored, base: '', size: 11.5, wrap: true, lines: false, saved: false, copied: false };
+    });
+    itemKeyRef.current = nextKey;
     setImage({ zoom: 1, rotation: 0, flipH: false, flipV: false, bg: 'dark' });
-    setEdit({ on: false, draft: '', base: '', size: 11.5, wrap: true, lines: false, saved: false, copied: false });
     setMedia({ playing: false, time: 0, duration: 0, rate: 1, volume: 1, muted: false, loop: false });
     setNote(null);
   }, [item]);
@@ -867,6 +884,21 @@ export function FilePreviewDrawer({ item, onClose, inline = false, contentWidth 
     if (textDirty && !window.confirm(t('preview.discardQ'))) return;
     onClose();
   }, [textDirty, onClose, t]);
+
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const dialogProps = useDialog({ open: !inline, onClose: requestClose, panelRef: dialogRef });
+
+  useEffect(() => {
+    if (!inline) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      const el = document.activeElement as HTMLElement | null;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+      requestClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [inline, requestClose]);
 
   const copySelection = useCallback(() => {
     const text = window.getSelection()?.toString() ?? '';
@@ -1103,7 +1135,10 @@ export function FilePreviewDrawer({ item, onClose, inline = false, contentWidth 
   // onu daraltır). Yüzen modda her zaman portal + fixed kullanılır.
   const node = (
     <div
-      ref={fv.frameRef}
+      ref={(el) => { dialogRef.current = el; fv.frameRef.current = el; }}
+      {...(inline ? {} : dialogProps)}
+      aria-label={item.name}
+      tabIndex={inline ? undefined : -1}
       style={fv.floating ? fv.style : undefined}
       onPointerEnter={() => { hoveringRef.current = true; }}
       onPointerLeave={() => { hoveringRef.current = false; }}
@@ -1122,7 +1157,7 @@ export function FilePreviewDrawer({ item, onClose, inline = false, contentWidth 
           className={`pointer-events-none absolute bottom-4 left-1/2 z-50 -translate-x-1/2 max-w-[86%] truncate rounded-md border px-2 py-1 text-[10.5px] shadow-lg ${
             note.error
               ? 'border-rose-500/40 bg-[#2A1A1A]/95 text-rose-300'
-              : 'border-obsidian-border bg-[#1C1B1A]/95 text-[#dcb67a]'
+              : 'border-obsidian-border bg-obsidian-panel/95 text-[#dcb67a]'
           }`}
         >
           {note.text}
@@ -1131,7 +1166,7 @@ export function FilePreviewDrawer({ item, onClose, inline = false, contentWidth 
       <div
         ref={fv.headerRef}
         onPointerDown={fv.floating ? fv.onDragStart : undefined}
-        className={`flex items-center justify-between gap-2 px-3 py-2 border-b border-obsidian-border bg-[#1C1B1A] overflow-hidden whitespace-nowrap flex-shrink-0 ${fv.floating ? 'cursor-move' : ''}`}
+        className={`flex items-center justify-between gap-2 px-3 py-2 border-b border-obsidian-border bg-obsidian-panel overflow-hidden whitespace-nowrap flex-shrink-0 ${fv.floating ? 'cursor-move' : ''}`}
       >
         <div className="flex items-center gap-2 min-w-0">
           <FileCode size={14} className="text-obsidian-muted flex-shrink-0" />
@@ -1321,7 +1356,7 @@ export function FilePreviewDrawer({ item, onClose, inline = false, contentWidth 
               onKeyDown={(e) => {
                 if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); void saveText(); }
               }}
-              className="h-full w-full resize-none bg-[#100F0F] p-3 font-mono text-obsidian-text outline-none"
+              className="h-full w-full resize-none bg-obsidian-bg p-3 font-mono text-obsidian-text outline-none"
               style={{
                 fontSize: edit.size,
                 lineHeight: 1.6,
@@ -1429,7 +1464,7 @@ export function FilePreviewDrawer({ item, onClose, inline = false, contentWidth 
     <div
       ref={menuRef}
       role="menu"
-      className="fixed z-[90] w-52 rounded-lg border border-obsidian-border bg-[#1C1B1A] p-1 shadow-2xl text-[12px] text-obsidian-text"
+      className="fixed z-[90] w-52 rounded-lg border border-obsidian-border bg-obsidian-panel p-1 shadow-2xl text-[12px] text-obsidian-text"
       style={{ left: menu.x, top: menu.y }}
       onContextMenu={(e) => e.preventDefault()}
     >
@@ -1454,7 +1489,7 @@ export function FilePreviewDrawer({ item, onClose, inline = false, contentWidth 
     <div
       ref={zoomMenuRef}
       role="menu"
-      className="fixed z-[90] w-48 rounded-lg border border-obsidian-border bg-[#1C1B1A] p-1 shadow-2xl text-[12px] text-obsidian-text"
+      className="fixed z-[90] w-48 rounded-lg border border-obsidian-border bg-obsidian-panel p-1 shadow-2xl text-[12px] text-obsidian-text"
       style={{ left: zoomMenuAt.x, top: zoomMenuAt.y }}
     >
       <MenuItem label={t('preview.fitWidth')} hint="Ctrl+0" onClick={() => { closeZoomMenu(); fitToWidth(); }} />
@@ -1476,7 +1511,7 @@ export function FilePreviewDrawer({ item, onClose, inline = false, contentWidth 
   // "Basılı tut = metin seçimi" ipucu (imlecin yanında, kısa süreliğine).
   const hintNode = hint ? createPortal(
     <div
-      className="pointer-events-none fixed z-[95] rounded-md border border-obsidian-border bg-[#1C1B1A]/95 px-2 py-1 text-[10.5px] text-[#dcb67a] shadow-lg"
+      className="pointer-events-none fixed z-[95] rounded-md border border-obsidian-border bg-obsidian-panel/95 px-2 py-1 text-[10.5px] text-[#dcb67a] shadow-lg"
       style={{ left: hint.x, top: hint.y }}
     >
       {t('preview.selectHint')}

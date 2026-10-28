@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { MarkdownMessage } from './MarkdownMessage';
+import { useT } from '../lib/i18n';
 
 /**
  * Akış hâlindeki cevap için artımlı çizim.
@@ -56,6 +57,7 @@ export function splitLiveBlocks(content: string): { frozen: string[]; tail: stri
 }
 
 export const StreamingMessage: React.FC<{ content: string }> = ({ content }) => {
+  const t = useT();
   const { frozen, tail } = splitLiveBlocks(content);
 
   // BEKLEME TESPİTİ: delta akarken imleç SABİT durur (yanıp sönmez).
@@ -70,7 +72,8 @@ export const StreamingMessage: React.FC<{ content: string }> = ({ content }) => 
   }, [content]);
 
   return (
-    <div className="tlm-streaming">
+    <div className="tlm-streaming" aria-busy="true">
+      <span className="sr-only" role="status">{t('chat.streamingStatus')}</span>
       {frozen.map((block, index) => (
         <FrozenBlock key={index} content={block} />
       ))}

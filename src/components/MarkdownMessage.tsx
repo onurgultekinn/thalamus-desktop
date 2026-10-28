@@ -252,8 +252,8 @@ export const MarkdownMessage: React.FC<MarkdownMessageProps> = React.memo(({ con
   // Kopyalama başlıklı, dil rozetli blok çerçevesi — hem Prism dilinciği hem
   // dilsiz ``` blokları aynı çerçeveye oturur.
   const renderCodeBlock = (lang: string, codeString: string) => (
-    <div className="my-2 rounded-md overflow-hidden border border-zinc-800 bg-[#100F0F] relative text-left">
-      <div className="flex items-center justify-between px-3 py-1.5 bg-[#1C1B1A] border-b border-zinc-800 font-mono text-[11px]">
+    <div className="my-2 rounded-md overflow-hidden border border-zinc-800 bg-obsidian-bg relative text-left">
+      <div className="flex items-center justify-between px-3 py-1.5 bg-obsidian-panel border-b border-zinc-800 font-mono text-[11px]">
         <span className="text-[#dcb67a] font-semibold">{lang || 'text'}</span>
         <button
           type="button"
@@ -326,7 +326,7 @@ export const MarkdownMessage: React.FC<MarkdownMessageProps> = React.memo(({ con
             );
           },
           thead({ children }) {
-            return <thead className="bg-[#1C1B1A]">{children}</thead>;
+            return <thead className="bg-obsidian-panel">{children}</thead>;
           },
           th({ children }) {
             return <th className="border-b border-zinc-800 px-2.5 py-1.5 text-left font-semibold text-zinc-100">{children}</th>;

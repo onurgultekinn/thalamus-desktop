@@ -701,7 +701,7 @@ export function FlowEditorX6(props: FlowEditorX6Props) {
       background: { color: '#0D0C0C' },
       grid: { size: GRID, visible: true, type: 'dot', args: { color: '#2A2927' } },
       panning: { enabled: true, eventTypes: ['leftMouseDown'] },
-      mousewheel: { enabled: true, modifiers: [], minScale: 0.2, maxScale: 2, zoomAtMousePosition: true },
+      mousewheel: { enabled: true, modifiers: ['ctrl'], minScale: 0.2, maxScale: 2, zoomAtMousePosition: true },
       interacting: { edgeMovable: false, nodeMovable: true, edgeLabelMovable: false },
       connecting: {
         validateMagnet: () => false,
@@ -836,43 +836,27 @@ export function FlowEditorX6(props: FlowEditorX6Props) {
       graph.zoomToFit({ padding: 32, maxScale: 1 });
     }, 120);
 
-    /* KapsayÄ±cÄ± yeniden boyutlandÄ±ÄŸÄ±nda (Ã¶r. saÄŸ panel katlanÄ±nca flow
-       bÃ¼yÃ¼r) X6 canvas'Ä± YENÄ°DEN BOYUTLANDIR ve iÃ§eriÄŸi gÃ¶rÃ¼nÃ¼me sÄ±ÄŸdÄ±r.
-       X6'nÄ±n autoResize'i yalnÄ±z pencere resize'Ä±nÄ± dinler; panel katlanmasÄ±
-       pencere resize'Ä± olmadÄ±ÄŸÄ± iÃ§in canvas eski boyutta kalÄ±yordu ve
-       geniÅŸleyen alan boÅŸ gÃ¶rÃ¼nÃ¼yordu. */
-    let refitTimer: number | undefined;
+    /* Kapsayıcı yeniden boyutlandığında (ör. sağ panel katlanınca flow
+       büyür) X6 canvas'ını YENİDEN BOYUTLANDIR. Görünürlük değişiminde bir
+       kez sığdırılır; sonraki boyut değişimlerinde kullanıcının pan/zoom'u
+       korunur (her resize'da zoom-to-fit sürpriz oluyordu). */
     let lastW = 0;
-    let lastH = 0;
     const ro = new ResizeObserver((entries) => {
       const rect = entries[0]?.contentRect;
-      /* Gizliyken (0Ã—0) boyut deÄŸiÅŸimi sayÄ±lmaz; gÃ¶rÃ¼nÃ¼r olunca sÄ±ÄŸdÄ±r. */
+      /* Gizliyken (0×0) boyut değişimi sayılmaz; görünür olunca sığdır. */
       if (!rect || rect.width <= 0 || rect.height <= 0) return;
       graph.resize(rect.width, rect.height);
       const firstReveal = lastW === 0;
-      const sizeChanged = firstReveal
-        || Math.abs(rect.width - lastW) > 1
-        || Math.abs(rect.height - lastH) > 1;
       lastW = rect.width;
-      lastH = rect.height;
-      /* YalnÄ±z gÃ¶rÃ¼nÃ¼rlÃ¼k deÄŸiÅŸtiyse kullanÄ±cÄ±nÄ±n pan/zoom'u korunur. */
-      if (!sizeChanged) return;
+      if (!firstReveal) return;
       if (propsRef.current.agents.length === 0) return;
-      /* Ä°lk gÃ¶rÃ¼nÃ¼rlÃ¼kte beklemeden sÄ±ÄŸdÄ±r (flash olmasÄ±n). */
-      if (firstReveal) {
-        graph.zoomToFit({ padding: 32, maxScale: 1 });
-        return;
-      }
-      if (refitTimer !== undefined) window.clearTimeout(refitTimer);
-      refitTimer = window.setTimeout(() => {
-        graph.zoomToFit({ padding: 32, maxScale: 1 });
-      }, 180);
+      /* İlk görünürlükte beklemeden sığdır (flash olmasın). */
+      graph.zoomToFit({ padding: 32, maxScale: 1 });
     });
     ro.observe(container);
 
     return () => {
       window.clearTimeout(timer);
-      if (refitTimer !== undefined) window.clearTimeout(refitTimer);
       ro.disconnect();
       if (dragTimerRef.current !== null) window.clearTimeout(dragTimerRef.current);
       graph.dispose();
@@ -1005,7 +989,20 @@ export function FlowEditorX6(props: FlowEditorX6Props) {
 
   return (
     <div className="relative h-full w-full">
-      <div ref={containerRef} className={`x6-thalamus h-full w-full ${linkFrom ? 'cursor-crosshair' : ''}`} />
+      <div ref={containerRef} aria-hidden="true" className={`x6-thalamus h-full w-full ${linkFrom ? 'cursor-crosshair' : ''}`} />
+
+      <ul className="sr-only" aria-label={t('company.nodesList')}>
+        {props.agents.map((a) => (
+          <li key={a.id}>
+            <button
+              type="button"
+              onClick={() => { props.onSelectNode(a.id); props.onOpenPlan(a.id); }}
+            >
+              {a.name}{a.role ? ` — ${a.role}` : ''}
+            </button>
+          </li>
+        ))}
+      </ul>
 
       <div className="pointer-events-none absolute left-2 top-2 z-10 max-w-[250px] rounded-md border border-[#2C2A26] bg-[#151412]/90 px-2 py-1 text-[9.5px] leading-snug text-[#8C877B]">
         {t('company.flowHelp')}
@@ -1078,7 +1075,7 @@ export function FlowEditorX6(props: FlowEditorX6Props) {
           <button
             type="button"
             onClick={() => setLinkFrom(null)}
-            className="shrink-0 rounded px-1 text-[10px] text-[#8C877B] hover:bg-[#2A2825] hover:text-[#F2F0E5] cursor-pointer"
+            className="shrink-0 rounded px-1 text-[10px] text-[#8C877B] hover:bg-[#2A2825] hover:text-obsidian-text cursor-pointer"
           >
             {t('company.cancel')}
           </button>
@@ -1086,13 +1083,13 @@ export function FlowEditorX6(props: FlowEditorX6Props) {
       )}
 
       <div className="absolute bottom-3 left-3 z-10 flex flex-col overflow-hidden rounded-lg border border-[#2C2A26] bg-[#151412]">
-        <button type="button" onClick={() => zoom(0.12)} title="Zoom in" className="grid h-7 w-7 place-items-center border-b border-[#24221F] text-[#A8A397] hover:bg-[#1D1B18] cursor-pointer">
+        <button type="button" onClick={() => zoom(0.12)} title={t('company.zoomIn')} aria-label={t('company.zoomIn')} className="grid h-7 w-7 place-items-center border-b border-[#24221F] text-[#A8A397] hover:bg-[#1D1B18] cursor-pointer">
           <Plus size={12} />
         </button>
-        <button type="button" onClick={() => zoom(-0.12)} title="Zoom out" className="grid h-7 w-7 place-items-center border-b border-[#24221F] text-[#A8A397] hover:bg-[#1D1B18] cursor-pointer">
+        <button type="button" onClick={() => zoom(-0.12)} title={t('company.zoomOut')} aria-label={t('company.zoomOut')} className="grid h-7 w-7 place-items-center border-b border-[#24221F] text-[#A8A397] hover:bg-[#1D1B18] cursor-pointer">
           <Minus size={12} />
         </button>
-        <button type="button" onClick={fit} title="Fit" className="grid h-7 w-7 place-items-center text-[#A8A397] hover:bg-[#1D1B18] cursor-pointer">
+        <button type="button" onClick={fit} title={t('company.fit')} aria-label={t('company.fit')} className="grid h-7 w-7 place-items-center text-[#A8A397] hover:bg-[#1D1B18] cursor-pointer">
           <Maximize2 size={11} />
         </button>
       </div>

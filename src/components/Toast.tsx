@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { X } from 'lucide-react';
 import { wikiUrlFor, splitExplanation } from '../lib/errors';
 import { useT } from '../lib/i18n';
@@ -46,9 +46,48 @@ const ACCENT: Record<ToastType, string> = {
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const t = useT();
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const timers = useRef(new Map<string, { handle: number; endsAt: number; remaining: number }>());
+
+  const clearTimer = useCallback((id: string) => {
+    const timer = timers.current.get(id);
+    if (timer) window.clearTimeout(timer.handle);
+    timers.current.delete(id);
+  }, []);
 
   const removeToast = useCallback((id: string) => {
+    clearTimer(id);
     setToasts(prev => prev.filter(t => t.id !== id));
+  }, [clearTimer]);
+
+  const schedule = useCallback((id: string, duration: number) => {
+    const handle = window.setTimeout(() => {
+      timers.current.delete(id);
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, duration);
+    timers.current.set(id, { handle, endsAt: Date.now() + duration, remaining: duration });
+  }, []);
+
+  const pauseTimer = useCallback((id: string) => {
+    const timer = timers.current.get(id);
+    if (!timer || timer.handle === -1) return;
+    window.clearTimeout(timer.handle);
+    timers.current.set(id, {
+      ...timer,
+      handle: -1,
+      remaining: Math.max(0, timer.endsAt - Date.now()),
+    });
+  }, []);
+
+  const resumeTimer = useCallback((id: string) => {
+    const timer = timers.current.get(id);
+    if (!timer || timer.handle !== -1) return;
+    if (timer.remaining <= 0) { removeToast(id); return; }
+    schedule(id, timer.remaining);
+  }, [removeToast, schedule]);
+
+  useEffect(() => () => {
+    for (const timer of timers.current.values()) window.clearTimeout(timer.handle);
+    timers.current.clear();
   }, []);
 
   const showToast = useCallback(
@@ -59,19 +98,19 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 
       setToasts(prev => [...prev.slice(-3), newToast]);
 
-      if (dur > 0) {
-        setTimeout(() => {
-          removeToast(id);
-        }, dur);
-      }
+      if (dur > 0) schedule(id, dur);
     },
-    [removeToast]
+    [schedule]
   );
 
   return (
     <ToastContext.Provider value={{ showToast }}>
       {children}
-      <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-1.5 pointer-events-none max-w-sm w-full select-none font-sans">
+      <div
+        role="region"
+        aria-label={t('toast.region')}
+        className="fixed bottom-4 right-4 z-50 flex flex-col gap-1.5 pointer-events-none max-w-sm w-full select-none font-sans"
+      >
         {toasts.map(toast => {
           const accent = ACCENT[toast.type];
           const code = codeOf(toast.detail);
@@ -79,7 +118,15 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
           return (
             <div
               key={toast.id}
-              className="pointer-events-auto relative w-full rounded-md bg-[#201F1D] border border-[#3A3835] shadow-2xl px-3.5 py-3 pb-3.5 flex flex-col gap-1.5 overflow-hidden animate-in fade-in slide-in-from-bottom-1 duration-150"
+              role={toast.type === 'error' ? 'alert' : 'status'}
+              aria-atomic="true"
+              onMouseEnter={() => pauseTimer(toast.id)}
+              onMouseLeave={() => resumeTimer(toast.id)}
+              onFocus={() => pauseTimer(toast.id)}
+              onBlur={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node | null)) resumeTimer(toast.id);
+              }}
+              className="group pointer-events-auto relative w-full rounded-md bg-[#201F1D] border border-[#3A3835] shadow-2xl px-3.5 py-3 pb-3.5 flex flex-col gap-1.5 overflow-hidden animate-in fade-in slide-in-from-bottom-1 duration-150"
             >
               <div className="flex items-baseline gap-2">
                 {toast.type === 'error' && code ? (
@@ -137,7 +184,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
               {/* Kalan süre çubuğu: kırık beyaz, alttan iner. */}
               {toast.durationMs && toast.durationMs > 0 && (
                 <div
-                  className="absolute bottom-0 left-0 h-[1.5px] toast-timer"
+                  className="absolute bottom-0 left-0 h-[1.5px] toast-timer group-hover:[animation-play-state:paused] group-focus-within:[animation-play-state:paused]"
                   style={{ background: 'rgba(244,242,237,0.34)', animationDuration: `${toast.durationMs}ms` }}
                 />
               )}

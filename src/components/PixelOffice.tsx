@@ -2099,9 +2099,25 @@ export function PixelOffice({ agents, selected, onSelect, onActivate }: Props) {
     let last = performance.now();
     const start = last;
 
+    /* Hareket azaltma tercihinde sahne 2 FPS'e düşer; sekme gizliyken veya
+       canvas ekran dışındayken döngü tamamen durur (boşa CPU yakmaz). */
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    let pageVisible = !document.hidden;
+    let onScreen = true;
+    let lastPaint = 0;
+
+    const schedule = () => {
+      if (pageVisible && onScreen) rafRef.current = requestAnimationFrame(draw);
+    };
+
     const sat = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
 
     const draw = (t: number) => {
+      if (reduceMotion && t - lastPaint < 500) {
+        schedule();
+        return;
+      }
+      lastPaint = t;
       const dt = Math.min(0.05, (t - last) / 1000);
       last = t;
       const time = (t - start) / 1000;
@@ -2505,11 +2521,37 @@ export function PixelOffice({ agents, selected, onSelect, onActivate }: Props) {
         ctx.fillText(tag.bubble, bx + bw / 2, by + bh / 2 + 0.5);
       });
 
-      rafRef.current = requestAnimationFrame(draw);
+      schedule();
     };
 
-    rafRef.current = requestAnimationFrame(draw);
-    return () => cancelAnimationFrame(rafRef.current);
+    const onVisibility = () => {
+      pageVisible = !document.hidden;
+      if (pageVisible) {
+        last = performance.now();
+        schedule();
+      } else {
+        cancelAnimationFrame(rafRef.current);
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+
+    const io = new IntersectionObserver(([entry]) => {
+      onScreen = entry?.isIntersecting ?? true;
+      if (onScreen) {
+        last = performance.now();
+        schedule();
+      } else {
+        cancelAnimationFrame(rafRef.current);
+      }
+    });
+    io.observe(canvas);
+
+    schedule();
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      io.disconnect();
+      cancelAnimationFrame(rafRef.current);
+    };
   }, [agents]);
 
   const clampView = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
@@ -2689,6 +2731,7 @@ export function PixelOffice({ agents, selected, onSelect, onActivate }: Props) {
     <div ref={wrapRef} className="relative w-full h-full overflow-hidden bg-[#20242c]">
       <canvas
         ref={canvasRef}
+        aria-hidden="true"
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -2706,13 +2749,26 @@ export function PixelOffice({ agents, selected, onSelect, onActivate }: Props) {
         }}
       />
 
-      <div className="absolute top-2 left-2 flex items-center gap-1 rounded-md border border-[#34332F] bg-[#1C1B1A]/90 p-1 select-none">
+      <ul className="sr-only" aria-label={t('office.agentsList')}>
+        {agents.map((a) => (
+          <li key={a.id}>
+            <button
+              type="button"
+              onClick={() => { onSelect(a.id); onActivate?.(a.id); }}
+            >
+              {a.name}{a.role ? ` — ${a.role}` : ''}
+            </button>
+          </li>
+        ))}
+      </ul>
+
+      <div className="absolute top-2 left-2 flex items-center gap-1 rounded-md border border-obsidian-raise bg-obsidian-panel/90 p-1 select-none">
         {ZONE_VIEWS.map(z => (
           <button
             key={z.id}
             type="button"
             onClick={() => focusRoom(z.room, z.id)}
-            className={`px-2 h-6 rounded text-[10px] cursor-pointer ${zone === z.id ? 'bg-[#3AA99F] text-[#101413] font-semibold' : 'bg-[#34332F] text-[#CECDC3] hover:bg-[#3d3c37]'}`}
+            className={`px-2 h-6 rounded text-[10px] cursor-pointer ${zone === z.id ? 'bg-[#3AA99F] text-[#101413] font-semibold' : 'bg-[#34332F] text-obsidian-soft hover:bg-[#3d3c37]'}`}
           >
             {t(z.labelKey)}
           </button>
@@ -2721,7 +2777,7 @@ export function PixelOffice({ agents, selected, onSelect, onActivate }: Props) {
 
       {selAgent && (
         <div
-          className="absolute top-2 right-2 w-52 rounded-md border border-[#34332F] bg-[#1C1B1A]/95 shadow-lg p-2.5 text-[#CECDC3] select-none"
+          className="absolute top-2 right-2 w-52 rounded-md border border-obsidian-raise bg-obsidian-panel/95 shadow-lg p-2.5 text-obsidian-soft select-none"
           data-tick={tick}
           onPointerDown={e => e.stopPropagation()}
           onPointerMove={e => e.stopPropagation()}
@@ -2733,16 +2789,16 @@ export function PixelOffice({ agents, selected, onSelect, onActivate }: Props) {
               {initials}
             </div>
             <div className="min-w-0 flex-1">
-              <div className="text-[12px] font-semibold text-[#F2F0E5] truncate">{selAgent.name}</div>
-              <div className="text-[10px] text-[#87857F] truncate">{selAgent.role}</div>
+              <div className="text-[12px] font-semibold text-obsidian-text truncate">{selAgent.name}</div>
+              <div className="text-[10px] text-obsidian-muted truncate">{selAgent.role}</div>
             </div>
-            <button type="button" onClick={() => onSelect(null)} aria-label={t('common.close')} className="text-[#87857F] hover:text-[#F2F0E5] cursor-pointer leading-none text-[14px]">
+            <button type="button" onClick={() => onSelect(null)} aria-label={t('common.close')} className="text-obsidian-muted hover:text-obsidian-text cursor-pointer leading-none text-[14px]">
               ×
             </button>
           </div>
           <div className="mt-2 flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full" style={{ background: accent }} />
-            <span className="text-[10px] text-[#CECDC3]">{status}</span>
+            <span className="text-[10px] text-obsidian-soft">{status}</span>
           </div>
           {onActivate && selAgent && (
             <button
@@ -2761,7 +2817,7 @@ export function PixelOffice({ agents, selected, onSelect, onActivate }: Props) {
           görünür, çalışanlar özet sayar — 20 ajanla bile taşmaz. Chevron FULL:
           tüm ajanlar sarmal ızgarada. Sağda zoom ayrılmış segmentte. */}
       <div
-        className="absolute bottom-2 left-2 right-2 flex items-start gap-1 rounded-md border border-[#34332F] bg-[#1C1B1A]/92 p-1 select-none"
+        className="absolute bottom-2 left-2 right-2 flex items-start gap-1 rounded-md border border-obsidian-raise bg-obsidian-panel/92 p-1 select-none"
         data-tick={tick}
         onPointerDown={e => e.stopPropagation()}
         onPointerMove={e => e.stopPropagation()}
@@ -2786,7 +2842,7 @@ export function PixelOffice({ agents, selected, onSelect, onActivate }: Props) {
               </span>
             ) : null
           )}
-          <span className="text-[#87857F]">{actCounts.work + actCounts.seated} × {t('office.actWorking')}</span>
+          <span className="text-obsidian-muted">{actCounts.work + actCounts.seated} × {t('office.actWorking')}</span>
         </div>
         {activityOpen && chipAgents.length > 0 && (
           <div
@@ -2832,9 +2888,9 @@ export function PixelOffice({ agents, selected, onSelect, onActivate }: Props) {
         )}
         {/* Zoom: çubuğun sağında, net çizgiyle ayrık kendi segmenti */}
         <div className="ml-auto flex shrink-0 items-center gap-1.5 self-center border-l border-[#2A2825] pl-1.5">
-          <button type="button" aria-label={t('office.zoomOut')} onClick={() => zoomAt(1 / 1.25, (wrapRef.current?.clientWidth || 0) / 2, (wrapRef.current?.clientHeight || 0) / 2)} className="w-6 h-6 rounded text-[13px] leading-none bg-[#34332F] text-[#CECDC3] hover:bg-[#3d3c37] cursor-pointer">−</button>
-          <button type="button" aria-label={t('office.zoomIn')} onClick={() => zoomAt(1.25, (wrapRef.current?.clientWidth || 0) / 2, (wrapRef.current?.clientHeight || 0) / 2)} className="w-6 h-6 rounded text-[13px] leading-none bg-[#34332F] text-[#CECDC3] hover:bg-[#3d3c37] cursor-pointer">+</button>
-          <button type="button" onClick={() => { setView({ zoom: 1, x: 0, y: 0 }); setZone(''); setGliding(false); }} className="px-1.5 h-6 rounded text-[10px] bg-[#34332F] text-[#CECDC3] hover:bg-[#3d3c37] cursor-pointer">{t('office.zoneAll')}</button>
+          <button type="button" aria-label={t('office.zoomOut')} onClick={() => zoomAt(1 / 1.25, (wrapRef.current?.clientWidth || 0) / 2, (wrapRef.current?.clientHeight || 0) / 2)} className="w-6 h-6 rounded text-[13px] leading-none bg-[#34332F] text-obsidian-soft hover:bg-[#3d3c37] cursor-pointer">−</button>
+          <button type="button" aria-label={t('office.zoomIn')} onClick={() => zoomAt(1.25, (wrapRef.current?.clientWidth || 0) / 2, (wrapRef.current?.clientHeight || 0) / 2)} className="w-6 h-6 rounded text-[13px] leading-none bg-[#34332F] text-obsidian-soft hover:bg-[#3d3c37] cursor-pointer">+</button>
+          <button type="button" onClick={() => { setView({ zoom: 1, x: 0, y: 0 }); setZone(''); setGliding(false); }} className="px-1.5 h-6 rounded text-[10px] bg-[#34332F] text-obsidian-soft hover:bg-[#3d3c37] cursor-pointer">{t('office.zoneAll')}</button>
         </div>
       </div>
     </div>

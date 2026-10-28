@@ -136,6 +136,17 @@ function ChatViewInner({
   const windowStart = Math.max(0, messages.length - visibleCount);
   const visibleMessages = windowStart > 0 ? messages.slice(windowStart) : messages;
   const hiddenCount = windowStart;
+  const loadOlderRef = useRef<HTMLButtonElement | null>(null);
+  const loadOlder = () => {
+    const scroller = loadOlderRef.current?.closest('[data-chat-scroll]') as HTMLElement | null;
+    if (!scroller) { setVisibleCount(c => c + WINDOW_STEP); return; }
+    const prevHeight = scroller.scrollHeight;
+    const prevTop = scroller.scrollTop;
+    setVisibleCount(c => c + WINDOW_STEP);
+    requestAnimationFrame(() => {
+      scroller.scrollTop = prevTop + (scroller.scrollHeight - prevHeight);
+    });
+  };
 
   const saveEdit = () => {
     if (editingIdx === null) return;
@@ -167,13 +178,13 @@ function ChatViewInner({
             <button
               type="button"
               onClick={() => onSampleCode(`def calc_data(items):\n    # Redundant calculation optimization example\n    total = 0\n    for x in items:\n        val = x * 2.0\n        total += val\n    return total`)}
-              className="sketch-border flex items-start gap-3.5 p-4 bg-[#1C1B1A]/80 hover:bg-[#282726] hover:border-[#dcb67a]/60 text-left cursor-pointer transition-all duration-300 group"
+              className="sketch-border flex items-start gap-3.5 p-4 bg-obsidian-panel/80 hover:bg-obsidian-surface hover:border-[#dcb67a]/60 text-left cursor-pointer transition-all duration-300 group"
             >
               <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-[#dcb67a] transition-colors group-hover:border-[#dcb67a]/40 group-hover:bg-[#dcb67a]/10 flex-shrink-0">
                 <FileCode2 size={17} strokeWidth={1.75} />
               </div>
               <div className="flex flex-col gap-1 min-w-0">
-                <span className="text-[13px] font-semibold text-[#F2F0E5] group-hover:text-white transition-colors">{t('chat.card.sample.title')}</span>
+                <span className="text-[13px] font-semibold text-obsidian-text group-hover:text-white transition-colors">{t('chat.card.sample.title')}</span>
                 <span className="text-[11px] text-[#A8A49E] leading-normal">{t('chat.card.sample.desc')}</span>
               </div>
             </button>
@@ -182,13 +193,13 @@ function ChatViewInner({
             <button
               type="button"
               onClick={onOpenProject}
-              className="sketch-border flex items-start gap-3.5 p-4 bg-[#1C1B1A]/80 hover:bg-[#282726] hover:border-[#dcb67a]/60 text-left cursor-pointer transition-all duration-300 group"
+              className="sketch-border flex items-start gap-3.5 p-4 bg-obsidian-panel/80 hover:bg-obsidian-surface hover:border-[#dcb67a]/60 text-left cursor-pointer transition-all duration-300 group"
             >
               <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-[#dcb67a] transition-colors group-hover:border-[#dcb67a]/40 group-hover:bg-[#dcb67a]/10 flex-shrink-0">
                 <FolderOpen size={17} strokeWidth={1.75} />
               </div>
               <div className="flex flex-col gap-1 min-w-0">
-                <span className="text-[13px] font-semibold text-[#F2F0E5] group-hover:text-white transition-colors">{t('chat.card.project.title')}</span>
+                <span className="text-[13px] font-semibold text-obsidian-text group-hover:text-white transition-colors">{t('chat.card.project.title')}</span>
                 <span className="text-[11px] text-[#A8A49E] leading-normal">{t('chat.card.project.desc', { project: projectName })}</span>
               </div>
             </button>
@@ -198,13 +209,13 @@ function ChatViewInner({
             <button
               type="button"
               onClick={onOpenSettings}
-              className="sketch-border flex items-start gap-3.5 p-4 bg-[#1C1B1A]/80 hover:bg-[#282726] hover:border-[#dcb67a]/60 text-left cursor-pointer transition-all duration-300 group"
+              className="sketch-border flex items-start gap-3.5 p-4 bg-obsidian-panel/80 hover:bg-obsidian-surface hover:border-[#dcb67a]/60 text-left cursor-pointer transition-all duration-300 group"
             >
               <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-[#dcb67a] transition-colors group-hover:border-[#dcb67a]/40 group-hover:bg-[#dcb67a]/10 flex-shrink-0">
                 <KeyRound size={17} strokeWidth={1.75} />
               </div>
               <div className="flex flex-col gap-1 min-w-0">
-                <span className="text-[13px] font-semibold text-[#F2F0E5] group-hover:text-white transition-colors">{t('chat.card.model.title')}</span>
+                <span className="text-[13px] font-semibold text-obsidian-text group-hover:text-white transition-colors">{t('chat.card.model.title')}</span>
                 <span className="text-[11px] text-[#A8A49E] leading-normal">{t('chat.card.model.desc')}</span>
               </div>
             </button>
@@ -214,13 +225,13 @@ function ChatViewInner({
             <button
               type="button"
               onClick={onEngineDiagnostic}
-              className="sketch-border flex items-start gap-3.5 p-4 bg-[#1C1B1A]/80 hover:bg-[#282726] hover:border-[#dcb67a]/60 text-left cursor-pointer transition-all duration-300 group"
+              className="sketch-border flex items-start gap-3.5 p-4 bg-obsidian-panel/80 hover:bg-obsidian-surface hover:border-[#dcb67a]/60 text-left cursor-pointer transition-all duration-300 group"
             >
               <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-[#dcb67a] transition-colors group-hover:border-[#dcb67a]/40 group-hover:bg-[#dcb67a]/10 flex-shrink-0">
                 <Gauge size={17} strokeWidth={1.75} />
               </div>
               <div className="flex flex-col gap-1 min-w-0">
-                <span className="text-[13px] font-semibold text-[#F2F0E5] group-hover:text-white transition-colors">{t('chat.card.engine.title')}</span>
+                <span className="text-[13px] font-semibold text-obsidian-text group-hover:text-white transition-colors">{t('chat.card.engine.title')}</span>
                 <span className="text-[11px] text-[#A8A49E] leading-normal">{t('chat.card.engine.desc')}</span>
               </div>
             </button>
@@ -231,9 +242,10 @@ function ChatViewInner({
           {/* Eskiler burada durur: tek tusla bir sayfa daha getirilir. */}
           {hiddenCount > 0 && (
             <button
+              ref={loadOlderRef}
               type="button"
-              onClick={() => setVisibleCount(c => c + WINDOW_STEP)}
-              className="mx-auto mt-1 mb-2 px-3 py-1.5 rounded-md border border-white/[0.08] bg-white/[0.03] text-[11px] text-[#A8A49E] hover:text-[#F2F0E5] hover:bg-white/[0.06] cursor-pointer transition-colors"
+              onClick={loadOlder}
+              className="mx-auto mt-1 mb-2 px-3 py-1.5 rounded-md border border-white/[0.08] bg-white/[0.03] text-[11px] text-[#A8A49E] hover:text-obsidian-text hover:bg-white/[0.06] cursor-pointer transition-colors"
               title={`${hiddenCount} earlier message${hiddenCount === 1 ? '' : 's'} hidden for speed`}
             >
               {t('chat.loadOlder', { n: Math.min(WINDOW_STEP, hiddenCount), s: Math.min(WINDOW_STEP, hiddenCount) === 1 ? '' : 's' })}
@@ -412,14 +424,14 @@ function ChatViewInner({
                         if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) saveEdit();
                       }}
                       rows={4}
-                      className="pretty-scrollbar min-h-[118px] w-full resize-none overflow-hidden rounded-md bg-[#100F0F]/60 px-3 py-3 text-[13.5px] leading-relaxed text-[#F2F0E5] outline-none ring-1 ring-inset ring-white/[0.07] transition-shadow focus:ring-[#dcb67a]/40"
+                      className="pretty-scrollbar min-h-[118px] w-full resize-none overflow-hidden rounded-md bg-obsidian-bg/60 px-3 py-3 text-[13.5px] leading-relaxed text-obsidian-text outline-none ring-1 ring-inset ring-white/[0.07] transition-shadow focus:ring-[#dcb67a]/40"
                     />
                     <div className="flex flex-wrap items-center justify-end gap-2">
                       <div className="flex items-center gap-1">
                         <button
                           type="button"
                           onClick={() => setEditingIdx(null)}
-                          className="cursor-pointer rounded px-2 py-1 text-[11px] text-[#87857F] transition-colors hover:bg-white/[0.05] hover:text-[#CECDC3]"
+                          className="cursor-pointer rounded px-2 py-1 text-[11px] text-obsidian-muted transition-colors hover:bg-white/[0.05] hover:text-obsidian-soft"
                         >
                           {t('common.cancel')}
                         </button>
@@ -517,7 +529,7 @@ function ChatViewInner({
                     {!!msg.usage?.cachedTokens && (
                       <>
                         <span className="dot-separator" aria-hidden="true">·</span>
-                        <span className="text-[#3AA99F]" title="prompt cache">
+                        <span className="text-[#3AA99F]" title={t('chat.promptCache')}>
                           {t('chat.usageCached', { n: msg.usage.cachedTokens })}
                         </span>
                       </>
@@ -561,7 +573,7 @@ function ChatViewInner({
           (m) => m.streaming && (m.content.trim() || m.reasoning?.trim())
         ) && (
           <div className="msg-wrapper msg-assistant-left">
-            <div className="custom-loader-card">
+            <div className="custom-loader-card" role="status" aria-live="polite">
               <div className="custom-loader-container">
                 <span>{loadingLabel || t('chat.processing')}</span>
                 <div className="custom-loader-words">
@@ -591,6 +603,8 @@ function ChatViewInner({
 export const ChatView = memo(ChatViewInner, (prev, next) =>
   prev.messages === next.messages &&
   prev.loading === next.loading &&
+  prev.loadingLabel === next.loadingLabel &&
+  prev.hasProvider === next.hasProvider &&
   prev.userName === next.userName &&
   prev.targetModel === next.targetModel &&
   prev.onlinePricing === next.onlinePricing &&
