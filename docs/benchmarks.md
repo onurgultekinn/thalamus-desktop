@@ -145,6 +145,9 @@ table from `bench/results/quality-<date>.md`:
 # Token savings (no model needed)
 cargo run --manifest-path src-tauri/Cargo.toml --example bench_public --release
 
+# Engine speed (no model needed)
+cargo run --manifest-path src-tauri/Cargo.toml --example bench_engine --release
+
 # Quality A/B (bring an OpenAI-compatible endpoint)
 cargo run --manifest-path src-tauri/Cargo.toml --example bench_dump --release
 OPENAI_BASE_URL=http://127.0.0.1:11434/v1 MODEL=llama3.2 \

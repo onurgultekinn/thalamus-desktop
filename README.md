@@ -298,6 +298,7 @@ Other useful scripts:
 ```
 npm test               # vitest: pure frontend functions
 npm run i18n:check     # TR/EN key parity and empty translations
+npm run hygiene:check  # no local-only files or secrets in the tree
 npm run license:check  # dependency licence gate
 npm run attributions   # regenerate ATTRIBUTIONS.md
 ```

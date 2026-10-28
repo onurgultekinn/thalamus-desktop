@@ -21,6 +21,7 @@ the ground rules are still simple:
 - Run the checks before opening a PR:
 
   ```bash
+  npm run hygiene:check   # no private/local-only files or secrets
   npm run lint            # oxlint
   npm run build           # tsc + vite build
   npm test                # vitest (pure functions)
