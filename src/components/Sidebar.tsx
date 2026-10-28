@@ -276,9 +276,12 @@ export function Sidebar({
         {/* PROJECTS Group — most recently opened first */}
         <div className="flex flex-col gap-0.5 w-full mt-1">
           {isOpen && (
-            <span className="px-1.5 mb-2 text-[11px] font-semibold uppercase tracking-widest text-obsidian-muted">
+            /* Semantik başlık: ekran okuyucu bölümler arasında gezinebilsin.
+               Tailwind preflight h2'yi görsel olarak nötrler, sınıflar aynı
+               kaldığı için görünüm değişmez. */
+            <h2 className="px-1.5 mb-2 text-[11px] font-semibold uppercase tracking-widest text-obsidian-muted">
               {t('sidebar.projects')}
-            </span>
+            </h2>
           )}
 
           {!isOpen && (
@@ -384,7 +387,7 @@ export function Sidebar({
         <div className="flex flex-col gap-0.5 w-full mt-4">
           {/* Başlık ile arama arasında dengeli nefes payı: başlık 8px, arama
               kutusundan sonra da aynı ritim korunur. */}
-          {isOpen && <span className="px-1.5 mb-2 text-[11px] font-semibold uppercase tracking-widest text-obsidian-muted">{t('sidebar.chats')}</span>}
+          {isOpen && <h2 className="px-1.5 mb-2 text-[11px] font-semibold uppercase tracking-widest text-obsidian-muted">{t('sidebar.chats')}</h2>}
 
           {/* Arama: başlık + mesaj içeriği; sonuçlar aşağıda listelenir.
               Kutu kompakt: listeye baskın gelmesin. */}

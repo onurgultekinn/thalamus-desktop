@@ -910,8 +910,37 @@ html[data-theme='nord-red'] .text-\[\#dcb67a\] { color: #DBA871 !important; }
   to { opacity: 1; transform: none; }
 }
 .nucleus-msg { animation: nucleus_msg_in 150ms ease-out both; }
+/* Hareket hassasiyeti.
+   Ölçüm: uygulamada 4 animasyon vardı, 3'ü sonsuz (skeleton pulse, caret
+   breathe, spinner). Hareket hassasiyeti olan kullanıcı için bunların hepsi
+   kapanmalı. Tek tek sınıf listelemek yerine global olarak süreleri sıfırlıyor,
+   yalnız anlam taşıyan geçişleri (renk/opaklık) çok kısa tutuyoruz — böylece
+   arayüz "donmuş" görünmez ama hareket etmez. */
 @media (prefers-reduced-motion: reduce) {
   .nucleus-msg { animation: none; }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  /* Yükleniyor göstergesi "durum" bildirir, süs değil: tamamen susarsa
+     kullanıcı uygulamanın donduğunu sanar. Yavaşlatılmış tek tur bırakıyoruz. */
+  .custom-loader-word {
+    animation-duration: 3s !important;
+    animation-iteration-count: infinite !important;
+  }
+
+  /* Akis imleci: "cevap hala geliyor" bilgisini verir; susleme degil. */
+  .tlm-stream-tail.is-idle > div > :is(p, li, h1, h2, h3, h4, h5, h6):last-child::after,
+  .tlm-stream-tail.is-idle > div > :is(ul, ol):last-child > li:last-child::after {
+    animation-duration: 2.5s !important;
+    animation-iteration-count: infinite !important;
+  }
 }
 
 /* Sidebar folder icon: pops when a project becomes active. */
@@ -1147,6 +1176,32 @@ html[data-theme='nord-red'] .text-\[\#dcb67a\] { color: #DBA871 !important; }
   outline-offset: 2px;
   border-radius: 2px;
 }
+
+/* ── Klavye odak göstergesi (global) ──────────────────────────────────────
+   Ölçüm: 97 etkileşimli öğenin 69'unda görünür odak stili yoktu — klavyeyle
+   gezen kullanıcı nerede olduğunu göremiyordu. Tek tek sınıf eklemek yerine
+   burada tek bir :focus-visible kuralı tanımlıyoruz; fareyle tıklayan
+   kullanıcı bunu GÖRMEZ (focus-visible yalnız klavye/AT için tetiklenir).
+
+   Renk accent (#4385BE) yerine gold tonu: koyu Obsidian zemininde hem
+   yüksek kontrast hem marka paletiyle uyumlu. outline-offset, düğmenin
+   kendi kenarlığıyla çakışmasın diye 2px. */
+/* :where() DEĞİL :is() — :is() en yüksek özgüllüklü argümanı devralır
+   ([tabindex]:not(...) = 0,2,0), böylece Tailwind'in
+   `.focus\:outline-none:focus` (0,2,0) kuralını yenebilir. :where() ile
+   özgüllük 0,1,0'da kalıyordu ve 12 yerdeki outline-none kuralımı eziyordu. */
+:is(a, button, input, select, textarea, summary, [tabindex]:not([tabindex="-1"])):focus-visible {
+  outline: 2px solid rgb(var(--tlm-gold) / 0.9);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Radyo/checkbox gibi tarayıcı varsayılanı olan öğelerde halka yeterli;
+   ekstra kutu gölgesi eklemiyoruz (çift gösterge olurdu). */
+:is(input[type="checkbox"], input[type="radio"]):focus-visible {
+  outline-offset: 1px;
+}
+
 /* ── AntV X6 — Thalamus dark theme ─────────────────────────────────────── */
 .x6-thalamus .x6-graph {
   background: transparent !important;
