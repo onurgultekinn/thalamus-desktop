@@ -309,7 +309,94 @@ impl ContextStore {
                 .count(),
         }
     }
+
+    /// Sorudan anahtar çıkarıp depodan ilgili içerikleri getirir.
+    ///
+    /// Neden gerekli: ölçüldü (map_navigation_test, qwen2.5-coder:7b) — model
+    /// haritadan doğru id'yi seçemiyor (0/20). Model navigasyonu yerine
+    /// **deterministik anahtar eşleştirme** kullanıyoruz: sorudaki kelimeleri
+    /// depodaki etiket ve içerikte arıyoruz. Model eklemiyoruz; 7B'de de
+    /// 70B'de de aynı davranır.
+    ///
+    /// `query`: kullanıcının sorusu (anahtar çıkarma kaynağı).
+    /// `exclude_ids`: bağlamda zaten bulunan id'ler (son tur vb) — tekrar eklenmez.
+    /// `max_chars`: döndürülen içerik toplamı bu sınırı aşmasın.
+    ///
+    /// Döndürülen: (id, turn, kind, label, çözülmüş metin) listesi.
+    /// Skor sırasına göre (en çok eşleşen ilk).
+    pub fn relevant(
+        &self,
+        query: &str,
+        exclude_ids: &[u32],
+        max_chars: usize,
+    ) -> Vec<(u32, u32, Kind, String, String)> {
+        // Sorudan anahtar kelimeleri çıkar: 3+ karakter, stop-word değil.
+        let keys: Vec<String> = query
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| w.chars().count() >= 3)
+            .map(|w| w.to_lowercase())
+            .filter(|w| !STOP_WORDS.contains(&w.as_str()))
+            .collect();
+        if keys.is_empty() {
+            return Vec::new();
+        }
+
+        // Her artefaktı skorla: etiket eşleşmesi ×2, içerik eşleşmesi ×1.
+        let mut scored: Vec<(usize, u32, u32, Kind, String, String)> = Vec::new();
+        for art in &self.artifacts {
+            if exclude_ids.contains(&art.id) {
+                continue;
+            }
+            let content = self.recall(art.id).map(|v| {
+                match &v {
+                    Value::String(s) => s.clone(),
+                    other => serde_json::to_string(other).unwrap_or_default(),
+                }
+            });
+            let Some(text) = content else { continue };
+            let label_lower = art.label.to_lowercase();
+            let text_lower = text.to_lowercase();
+            let mut score = 0usize;
+            for key in &keys {
+                if label_lower.contains(key.as_str()) {
+                    score += 2;
+                }
+                if text_lower.contains(key.as_str()) {
+                    score += 1;
+                }
+            }
+            if score == 0 {
+                continue;
+            }
+            scored.push((score, art.id, art.turn, art.kind, art.label.clone(), text));
+        }
+        scored.sort_by(|a, b| b.0.cmp(&a.0));
+
+        // Bütçe: en iyi eşleşmelerden başla, toplam karakter sınırına kadar.
+        let mut out = Vec::new();
+        let mut used = 0usize;
+        for (_, id, turn, kind, label, text) in scored {
+            if used + text.len() > max_chars {
+                break;
+            }
+            used += text.len();
+            out.push((id, turn, kind, label, text));
+        }
+        out
+    }
 }
+
+/// Türkçe ve İngilizce yaygın kelimeler — anahtar eşleştirmede yok sayılır.
+const STOP_WORDS: &[&str] = &[
+    "the", "and", "for", "are", "but", "not", "you", "all", "can", "her", "was", "one", "our",
+    "out", "day", "get", "has", "him", "his", "how", "man", "new", "now", "old", "see", "two",
+    "way", "who", "boy", "did", "its", "let", "put", "say", "she", "too", "use", "bu", "ve",
+    "bir", "için", "gibi", "daha", "çok", "ama", "yok", "var", "ne", "nasıl", "neden", "olan",
+    "ile", "kadar", "sonra", "önce", "şu", "bunu", "şunu", "benim", "senin", "bize", "sana",
+    "neyle", "nerede", "kimin", "kaç", "yeni", "eski", "dosya", "var", "yok", "değil", "yap",
+    "et", "etme", "olsun", "oldu", "olan", "what", "that", "this", "with", "from", "have",
+    "been", "when", "where", "which", "will", "would", "could", "should", "there", "their",
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StoreStats {
@@ -459,5 +546,81 @@ mod tests {
     fn recall_unknown_id_is_none() {
         let s = ContextStore::new();
         assert!(s.recall(9999).is_none());
+    }
+
+    #[test]
+    fn relevant_finds_content_by_keyword() {
+        let mut s = ContextStore::new();
+        s.push(0, Kind::Tool, "grep_search src/auth.rs",
+            &json!({"results": ["auth timeout at line 42", "retry logic missing"]}),
+            None, None);
+        s.push(1, Kind::Tool, "read_file src/db.rs",
+            &json!({"content": "let pool = connect_to_database();"}),
+            None, None);
+        s.push(2, Kind::File, "src/auth.rs",
+            &json!({"body": "fn login(user: &str) -> Result<Token> { auth_timeout_check() }"}),
+            None, None);
+
+        let res = s.relevant("auth timeout problem", &[], 50_000);
+        assert!(!res.is_empty(), "auth+timeout eşleşmeli");
+        // En iyi eşleşme auth.rs içeren artefakt olmalı
+        assert!(res.iter().any(|(_,_,_,l,_)| l.contains("auth")),
+            "etiket auth içermeli: {:?}", res.iter().map(|r| &r.3).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn relevant_excludes_specified_ids() {
+        let mut s = ContextStore::new();
+        s.push(0, Kind::Tool, "tool_a", &json!({"data": "timeout retry logic"}), None, None);
+        let id2 = s.push(1, Kind::Tool, "tool_b", &json!({"data": "timeout again here"}), None, None);
+
+        let res = s.relevant("timeout", &[id2], 50_000);
+        // tool_b exclude edildi, sadece tool_a dönmeli
+        assert_eq!(res.len(), 1, "exclude sonrası 1 sonuç: {:?}", res.len());
+        assert_eq!(res[0].0, 0, "tool_a id'si 0 olmalı");
+    }
+
+    #[test]
+    fn relevant_respects_max_chars() {
+        let mut s = ContextStore::new();
+        for i in 0..10u32 {
+            s.push(i, Kind::Tool, &format!("timeout_tool_{}", i),
+                &json!({"data": "timeout".repeat(1200), "n": i}), None, None);
+        }
+        let res = s.relevant("timeout", &[], 15_000);
+        let total: usize = res.iter().map(|r| r.4.len()).sum();
+        assert!(total <= 15_000, "bütçe aşılmalı değil: {}", total);
+        assert!(!res.is_empty(), "en az 1 sonuç");
+    }
+
+    #[test]
+    fn relevant_returns_empty_for_stop_words_only() {
+        let mut s = ContextStore::new();
+        s.push(0, Kind::Tool, "tool", &json!({"data": "something"}), None, None);
+        let res = s.relevant("bu ne için", &[], 50_000);
+        assert!(res.is_empty(), "sadece stop-word varsa sonuç boş olmalı");
+    }
+
+    #[test]
+    fn relevant_turkish_keyword_matches() {
+        let mut s = ContextStore::new();
+        s.push(0, Kind::Tool, "grep_auth",
+            &json!({"mesaj": "kimlik doğrulama hatası: token süresi dolmuş"}),
+            None, None);
+        s.push(1, Kind::File, "src/db.rs",
+            &json!({"icerik": "veritabanı bağlantısı kuruldu"}),
+            None, None);
+
+        let res = s.relevant("kimlik doğrulama token hatası", &[], 50_000);
+        assert!(res.iter().any(|(_,_,_,l,_)| l.contains("auth")),
+            "auth içeren sonuç dönmeli: {:?}", res.iter().map(|r| &r.3).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn relevant_no_match_returns_empty() {
+        let mut s = ContextStore::new();
+        s.push(0, Kind::Tool, "tool", &json!({"data": "abc def"}), None, None);
+        let res = s.relevant("xyzzy quantum", &[], 50_000);
+        assert!(res.is_empty(), "eşleşme yoksa boş");
     }
 }
