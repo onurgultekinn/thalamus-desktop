@@ -590,7 +590,7 @@ fn parse_exit_code(result: &str) -> Option<i32> {
 /// Sağlayıcı hatası tekrarlanmaya değer mi? Yalnızca yanıt GÖNDERİLMEDEN
 /// oluşan hatalar (HTTP durum satırı, bağlantı kurulamadı) — akış ortasında
 /// üretilmez, bu yüzden kısmi akışı tekrar basma riski yoktur.
-fn is_retryable_provider_error(e: &str) -> bool {
+pub(crate) fn is_retryable_provider_error(e: &str) -> bool {
     e.starts_with("HTTP 429")
         || e.starts_with("HTTP 5")
         || e.contains("error sending request")
@@ -598,7 +598,7 @@ fn is_retryable_provider_error(e: &str) -> bool {
 
 /// Geçici sağlayıcı hatalarında geri çekilmeli tekrar (429/5xx/bağlantı):
 /// en fazla 2 tekrar, 1.6 sn / 3.2 sn bekleme. Kalıcı hata ilk hatayla döner.
-fn post_with_retry<T>(mut f: impl FnMut() -> Result<T, String>) -> Result<T, String> {
+pub(crate) fn post_with_retry<T>(mut f: impl FnMut() -> Result<T, String>) -> Result<T, String> {
     let mut attempt = 0usize;
     loop {
         match f() {
@@ -754,6 +754,13 @@ pub fn run_tool_loop(
     ctx.allow_shell = allow_shell;
     ctx.read_only = read_only;
     ctx.engine = engine;
+    // Bağlam deposu: uzun oturumda eski araç çıktıları burada saklanır.
+    // trim_old_tool_results eski sonuçları kırparken içerik depoda durur —
+    // model recall(id) ile geri çağırabilir (kayıpsızlık garantisi).
+    let context_store = std::sync::Arc::new(std::sync::Mutex::new(
+        crate::engine::context_store::ContextStore::new(),
+    ));
+    ctx.context = Some(context_store.clone());
     let headers = vec![("Authorization".to_string(), format!("Bearer {}", api_key))];
     let mut rounds = 0usize;
     let mut usage = Value::Null;
@@ -845,6 +852,27 @@ pub fn run_tool_loop(
                 tools::execute(&name, &args, &ctx)
             };
             fresh_chars += result.chars().count();
+            // Araç çıktısını depoya yaz: kırpılsa bile kayıpsız erişilebilir.
+            let tool_turn = rounds as u32;
+            if let Ok(parsed) = serde_json::from_str::<Value>(&result) {
+                context_store.lock().unwrap_or_else(|e| e.into_inner()).push(
+                    tool_turn,
+                    crate::engine::context_store::Kind::Tool,
+                    &name,
+                    &parsed,
+                    None,
+                    None,
+                );
+            } else {
+                context_store.lock().unwrap_or_else(|e| e.into_inner()).push(
+                    tool_turn,
+                    crate::engine::context_store::Kind::Tool,
+                    &name,
+                    &json!(result),
+                    None,
+                    None,
+                );
+            }
             messages.push(json!({
                 "role": "tool",
                 "tool_call_id": tc["id"].as_str().unwrap_or(""),
