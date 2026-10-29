@@ -85,6 +85,9 @@ pub struct ToolCtx<'a> {
     pub sub_usage: std::cell::RefCell<Value>,
     /// Motor kaynakları (repo_map aracı için).
     pub engine: EngineCtx,
+    /// Bağlam deposu — uzun oturumda eski içeriği saklar ve recall sağlar.
+    /// None olabilir (basit kullanım / test).
+    pub context: Option<std::sync::Arc<std::sync::Mutex<crate::engine::context_store::ContextStore>>>,
 }
 
 impl<'a> ToolCtx<'a> {
@@ -98,6 +101,7 @@ impl<'a> ToolCtx<'a> {
             read_only: false,
             sub_usage: std::cell::RefCell::new(Value::Null),
             engine: EngineCtx::default(),
+            context: None,
         }
     }
 }
@@ -269,6 +273,16 @@ pub fn specs(allow_shell: bool) -> Value {
                 },"required":["url"]}
             }
         }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "recall",
+                "description": "Get full content of a context item by id. Items are in the CONTEXT MAP. Restored losslessly.",
+                "parameters": {"type":"object","properties":{
+                    "id":{"type":"integer","description":"the item id from the CONTEXT MAP (e.g. 47)"}
+                },"required":["id"]}
+            }
+        }),
     ];
     if allow_shell {
         all.push(json!({
@@ -288,7 +302,7 @@ pub fn specs(allow_shell: bool) -> Value {
 /// Sub-ajan (dispatch_agent) araç seti: yalnız okuma. dispatch_agent burada
 /// YOK — alt-ajan alt-ajan doğuramaz (derinlik kontrolü spec düzeyinde).
 pub fn read_only_specs() -> Value {
-    let names = ["read_file", "grep_search", "find_files", "list_dir", "get_code_body", "repo_map", "web_search", "read_page"];
+    let names = ["read_file", "grep_search", "find_files", "list_dir", "get_code_body", "repo_map", "web_search", "read_page", "recall"];
     let full = specs(false);
     Value::Array(
         full.as_array()
@@ -1076,6 +1090,25 @@ fn tool_run_command(ctx: &ToolCtx, args: &Value) -> String {
     }
 }
 
+/// recall araci: bağlam deposundan bir öğeyi kayıpsız çözer.
+/// `context_store.rs` ile birlikte uzun oturumda eski bilgiyi korur.
+fn tool_recall(ctx: &ToolCtx, args: &Value) -> String {
+    let Some(ref ctx_store) = ctx.context else {
+        return "recall is unavailable: no context store in this session.".into();
+    };
+    let Some(id) = args["id"].as_u64() else {
+        return "recall: 'id' gerekli (bağlam haritasındaki öğe numarası).".into();
+    };
+    let store = ctx_store.lock().unwrap_or_else(|e| e.into_inner());
+    match store.recall(id as u32) {
+        Some(content) => match &content {
+            Value::String(s) => s.clone(),
+            other => serde_json::to_string_pretty(other).unwrap_or_default(),
+        },
+        None => format!("recall: id {id} bulunamadı — haritadaki id'leri kontrol edin."),
+    }
+}
+
 /// repo_map araci: workspace'i tarar (mtime cache'li, ignore listeli) ve
 /// onem-sirali, token-butceli schema haritasi dondurur. Ajanin depoyu tek
 /// bakista gormesinin UCUZ yolu - dosya dosya read_file yerine bunu istesin.
@@ -1191,6 +1224,7 @@ pub fn execute(name: &str, args: &Value, ctx: &ToolCtx) -> String {
         "todo_write" => tool_todo_write(ctx, args),
         "run_command" => tool_run_command(ctx, args),
         "repo_map" => tool_repo_map(ctx, args),
+        "recall" => tool_recall(ctx, args),
         other => format!("unknown tool: {}", other),
     }
 }
@@ -1629,7 +1663,7 @@ export function main() { return helperOne(); }
         // Araç şemaları her istekte (ve tool-loop'un her turunda) gider:
         // ~4 bayt/token — büyüme bilinçli karar olsun. 2026-10: web_search +
         // read_page (+2 araç) ile bütçe bilinçli 4400/5000'e alındı.
-        for (allow, budget) in [(false, 4_400usize), (true, 5_000)] {
+        for (allow, budget) in [(false, 4_700usize), (true, 5_300)] {
             let bytes = serde_json::to_string(&specs(allow)).unwrap().len();
             assert!(
                 bytes < budget,
