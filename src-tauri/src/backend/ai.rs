@@ -883,6 +883,13 @@ pub fn run_tool_loop(
             return Err(e);
         }
         trim_old_tool_results(&mut messages, tool_calls.len());
+        // Eski mesajları okunabilir özetle değiştir: "context doldu → özetle →
+        // yeni oturum" döngüsünü bitirir. Eski mesajlar SİLİNMEZ — tek cümle
+        // özete küçülür, tam içerik depoda durur (recall edilebilir).
+        crate::engine::context_engine::ContextEngine::compact_messages(
+            &mut messages,
+            tool_calls.len() + 2, // son tur + system + user korunur
+        );
     }
 }
 
