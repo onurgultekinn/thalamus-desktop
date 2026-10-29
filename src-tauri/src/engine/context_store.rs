@@ -294,6 +294,11 @@ impl ContextStore {
         out
     }
 
+    /// Bir turdaki tüm indeks satırlarını döndürür (context_engine için).
+    pub fn entries_for_turn(&self, turn: u32) -> Vec<IndexEntry> {
+        self.index.iter().filter(|e| e.turn == turn).cloned().collect()
+    }
+
     /// Depo istatistikleri (arayüz/telemetri için).
     pub fn stats(&self) -> StoreStats {
         StoreStats {

@@ -2,6 +2,7 @@
 // ONNX/model bağımlılığı yoktur; saf Rust + serde_json + tiktoken-rs.
 pub mod certification;
 pub mod code_shrink;
+pub mod context_engine;
 pub mod context_store;
 pub mod edits;
 pub mod fasttok;
