@@ -339,44 +339,89 @@ impl ContextEngine {
         }
     }
 
-    /// Mesaj dizisini sıkıştırır: eski mesajları okunabilir özetle değiştirir.
+    /// Mesaj dizisini **token bütçesine** göre sıkıştırır.
     ///
-    /// Bu, "context doldu → özetle → yeni oturum" döngüsünü bitirir.
-    /// Eski mesajlar SİLİNMEZ — okunabilir tek cümleye küçülür. İçerik
-    /// depoda kayıpsız durur (recall edilebilir).
+    /// Fark (önceki sürüme göre):
+    /// - Sabit "son N mesaj" yerine gerçek token sayısına bakar; bütçe
+    ///   dolmadan hiçbir şeye dokunmaz (gereksiz kalite kaybı yok).
+    /// - Sıkıştırılan her mesaja **gerçek depo id'si** yazılır. Önceki sürüm
+    ///   "recall if needed" diyordu ama hangi id olduğunu söylemiyordu —
+    ///   model çağıramazdı.
+    /// - System ve user mesajlarına dokunulmaz.
     ///
-    /// Döndürülen: kazanç (karakter farkı).
-    pub fn compact_messages(messages: &mut Vec<Value>, keep_recent: usize) -> usize {
-        let total_before: usize = messages.iter()
-            .map(|m| m["content"].as_str().map(|s| s.len()).unwrap_or(0))
-            .sum();
-        if messages.len() <= keep_recent {
+    /// Eski mesajlar SİLİNMEZ: okunabilir tek cümleye küçülür, tam içerik
+    /// depoda kayıpsız durur.
+    ///
+    /// Döndürülen: kazanç (karakter).
+    pub fn compact_to_budget(
+        store: &crate::engine::context_store::ContextStore,
+        messages: &mut Vec<Value>,
+        budget_tokens: usize,
+        keep_recent: usize,
+        bpe: Option<&CoreBPE>,
+    ) -> usize {
+        let total = |msgs: &[Value]| -> usize {
+            msgs.iter()
+                .map(|m| count_tokens(bpe, m["content"].as_str().unwrap_or("")))
+                .sum()
+        };
+        let before = total(messages);
+        if before <= budget_tokens || messages.len() <= keep_recent {
             return 0;
         }
+
+        // Son `keep_recent` mesaj TERCİHEN korunur. Ama bütçe sert bir sınırdır:
+        // korunanlar tek başına bütçeyi aşıyorsa onlar da sıkıştırılır
+        // (system ve son user mesajı hariç — onlar her zaman tam gider).
         let old_end = messages.len().saturating_sub(keep_recent);
-        for i in 0..old_end {
-            // System ve user mesajlarına dokunma — sadece tool/assistant sıkıştır
+        let mut order: Vec<usize> = (0..messages.len()).collect();
+        // Önce ESKİ + BÜYÜK olanlar: (eski_mi, uzunluk) ters sıralı.
+        order.sort_by_key(|&i| {
+            let is_old = i < old_end;
+            let len = messages[i]["content"].as_str().map(|s| s.len()).unwrap_or(0);
+            (!is_old, std::cmp::Reverse(len))
+        });
+        // Son user mesajının indeksi — asla sıkıştırılmaz.
+        let last_user = messages
+            .iter()
+            .rposition(|m| m["role"].as_str() == Some("user"));
+        for i in order {
+            if total(messages) <= budget_tokens {
+                break;
+            }
+            if Some(i) == last_user {
+                continue; // güncel soru her zaman tam gider
+            }
             let role = messages[i]["role"].as_str().unwrap_or("");
-            if role == "system" || role == "user" {
+            if role == "system" {
                 continue;
             }
             let content = messages[i]["content"].as_str().unwrap_or("");
-            if content.len() <= 300 {
-                continue; // zaten küçük
+            if content.len() <= 300 || content.starts_with("[compressed]") {
+                continue;
             }
-            // İçeriği okunabilir özete çevir
-            let v: Value = serde_json::from_str(content).unwrap_or(Value::String(content.to_string()));
+            let v: Value =
+                serde_json::from_str(content).unwrap_or(Value::String(content.to_string()));
+            // KAYIPSIZLIK İLKESİ: depoda karşılığı olmayan mesaj SIKIŞTIRILMAZ.
+            // Sıkıştırmak geri çağrılamayan bilgi üretir — bu, projenin temel
+            // sözleşmesini bozar. Depoda yoksa mesaj olduğu gibi kalır.
+            let Some(store_id) = store.id_of(content) else {
+                continue;
+            };
             let summary = Self::render_readable(&v);
-            let compact = format!(
-                "[compressed] {} (full content in context store — recall if needed)",
-                summary
-            );
-            messages[i]["content"] = json!(compact);
+            messages[i]["content"] = json!(format!(
+                "[compressed] {} — full text: recall(id={})",
+                summary, store_id
+            ));
         }
-        let total_after: usize = messages.iter()
-            .map(|m| m["content"].as_str().map(|s| s.len()).unwrap_or(0))
-            .sum();
-        total_before.saturating_sub(total_after)
+
+        before.saturating_sub(total(messages))
+    }
+
+    /// Geriye uyumlu sarmalayıcı: depo yoksa id yazılmaz.
+    pub fn compact_messages(messages: &mut Vec<Value>, keep_recent: usize) -> usize {
+        let empty = crate::engine::context_store::ContextStore::new();
+        Self::compact_to_budget(&empty, messages, 0, keep_recent, None)
     }
 }
 
@@ -545,5 +590,82 @@ mod tests {
             self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
             ((self.0 >> 33) as u32) % n
         }
+    }
+
+    #[test]
+    fn compaction_writes_real_recall_id() {
+        // Sıkıştırılan mesajın özetinde GERÇEK depo id'si olmalı —
+        // yoksa model "recall" diyemez (önceki sürümün hatası).
+        let mut engine = ContextEngine::new();
+        let big = json!({"rows": (0..200).map(|i| json!({
+            "id": i, "file": format!("src/m{}.rs", i % 9), "status": "ok",
+            "msg": format!("event number {} processed", i)
+        })).collect::<Vec<_>>()});
+        engine.process_turn("inspect logs", &[big], "done", None);
+
+        let mut msgs = vec![
+            json!({"role": "system", "content": "you are helpful"}),
+            json!({"role": "tool", "content": serde_json::to_string(&engine.store().recall(1).unwrap()).unwrap()}),
+            json!({"role": "assistant", "content": "short reply"}),
+        ];
+        let saved = ContextEngine::compact_to_budget(engine.store(), &mut msgs, 50, 1, None);
+        assert!(saved > 0, "büyük mesaj sıkıştırılmalı");
+        let compacted = msgs[1]["content"].as_str().unwrap();
+        assert!(compacted.contains("[compressed]"), "etiket olmalı: {}", compacted);
+        assert!(
+            compacted.contains("recall(id="),
+            "gerçek recall id'si yazılmalı: {}",
+            compacted
+        );
+        // Yazılan id gerçekten çözülebilmeli.
+        let id: u32 = compacted
+            .split("recall(id=")
+            .nth(1)
+            .and_then(|s| s.split(')').next())
+            .and_then(|s| s.trim().parse().ok())
+            .expect("id ayrıştırılmalı");
+        assert!(engine.store().recall(id).is_some(), "id={} depoda bulunmalı", id);
+    }
+
+    #[test]
+    fn compaction_respects_token_budget() {
+        let mut engine = ContextEngine::new();
+        let mut msgs: Vec<Value> = vec![json!({"role": "system", "content": "sys"})];
+        for t in 0..40u32 {
+            let payload = json!({"rows": (0..60).map(|i| json!({
+                "id": i, "t": t, "status": "ok", "msg": "line of tool output here"
+            })).collect::<Vec<_>>()});
+            engine.process_turn(&format!("turn {t}"), &[payload.clone()], "ok", None);
+            msgs.push(json!({"role": "tool", "content": serde_json::to_string(&payload).unwrap()}));
+            msgs.push(json!({"role": "assistant", "content": format!("turn {t} done")}));
+        }
+        let bpe = tiktoken_rs::cl100k_base().ok();
+        let budget = 2_000usize;
+        ContextEngine::compact_to_budget(engine.store(), &mut msgs, budget, 4, bpe.as_ref());
+        let after: usize = msgs
+            .iter()
+            .map(|m| match bpe.as_ref() {
+                Some(b) => b.encode_ordinary(m["content"].as_str().unwrap_or("")).len(),
+                None => m["content"].as_str().unwrap_or("").len() / 4,
+            })
+            .sum();
+        assert!(after <= budget, "bütçe aşılmamalı: {} > {}", after, budget);
+        // System mesajı korunmalı.
+        assert_eq!(msgs[0]["content"].as_str(), Some("sys"));
+    }
+
+    #[test]
+    fn compaction_does_nothing_within_budget() {
+        // Bütçe dolmadıysa hiçbir mesaja dokunulmamalı (gereksiz kalite kaybı yok).
+        let mut engine = ContextEngine::new();
+        engine.process_turn("hi", &[json!({"ok": true})], "hello", None);
+        let mut msgs = vec![
+            json!({"role": "system", "content": "s"}),
+            json!({"role": "tool", "content": "{\"a\":1}"}),
+        ];
+        let original = msgs.clone();
+        let saved = ContextEngine::compact_to_budget(engine.store(), &mut msgs, 10_000, 1, None);
+        assert_eq!(saved, 0);
+        assert_eq!(msgs, original, "bütçe içindeyken mesajlar değişmemeli");
     }
 }

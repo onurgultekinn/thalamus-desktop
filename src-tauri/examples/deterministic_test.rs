@@ -86,7 +86,7 @@ fn main() {
         let fb = json!({"path": format!("src/m{}/h.rs", t % 7), "body": "x".repeat(1500)});
         store.push(t as u32, Kind::File, "read_file", &fb, Some(d.file_key.clone()), None);
     }
-    let map = store.map(None, 900);
+    let _map = store.map(None, 900);
     let stats = store.stats();
 
     let bpe = tiktoken_rs::cl100k_base().expect("cl100k");

@@ -534,6 +534,20 @@ const TOOL_RESULT_TRIM: usize = 2_000;
 /// Tool loop'ta güncel turdan önceki `tool` mesajlarını kırpır. Her tur tüm
 /// konuşma sağlayıcıya yeniden gönderildiği için, kırpılmamış eski read_file/
 /// grep çıktıları prompt token'ını turlarla üstel büyütüyordu.
+/// Modele giden bağlam için token bütçesi.
+///
+/// Modelin bildirilen penceresinin **%55**'i. Neden yarıdan az:
+/// - çıktı (max_tokens) için yer gerekir;
+/// - araç şemaları her turda gider (~5 KB);
+/// - ve pencerenin dolması "lost in the middle" etkisini artırır
+///   (2026 RULER/NoLiMa: çok-faktör isabeti ~%60). Bilinçli olarak
+///   muhafazakâr: dar bağlam, geniş bağlamdan daha isabetli.
+fn context_budget_for(caps: &model_caps::ModelCaps) -> usize {
+    const DEFAULT_CONTEXT: u64 = 32_768;
+    let window = caps.context_length.unwrap_or(DEFAULT_CONTEXT).max(4_096) as usize;
+    (window * 55 / 100).max(2_048)
+}
+
 fn trim_old_tool_results(messages: &mut [Value], fresh_count: usize) {
     let tool_idx: Vec<usize> = messages
         .iter()
@@ -616,6 +630,8 @@ pub(crate) fn post_with_retry<T>(mut f: impl FnMut() -> Result<T, String>) -> Re
 /// çalışır (en fazla 6 tur, read-only araçlar), sonucu kısaltılarak ana
 /// bağlama döner. Alt-ajan alt-ajan doğuramaz (read_only_specs'te yok).
 const SUBAGENT_MAX_TURNS: usize = 6;
+/// Alt-ajan bağlam bütçesi: kısa özet döndürür, geniş bağlam gereksiz.
+const SUBAGENT_CONTEXT_BUDGET: usize = 12_000;
 const SUBAGENT_MAX_CHARS: usize = 6_000;
 
 #[allow(clippy::too_many_arguments)]
@@ -658,6 +674,8 @@ fn run_dispatch_agent(
         false,
         true,
         engine,
+        // Alt-ajan kısa bir özet döndürür; dar bütçe yeterli ve daha isabetli.
+        SUBAGENT_CONTEXT_BUDGET,
     ) {
         Ok((content, _, _, sub_usage, _, _)) => {
             // Alt döngünün maliyeti ana bilançoya akar — görünmez kalmasın.
@@ -744,6 +762,7 @@ pub fn run_tool_loop(
     allow_shell: bool,
     read_only: bool,
     engine: tools::EngineCtx,
+    context_budget: usize,
 ) -> Result<(String, String, usize, Value, Vec<tools::RecordedEdit>, Vec<(String, String)>), String> {
     let tools_json = if read_only {
         tools::read_only_specs()
@@ -882,14 +901,23 @@ pub fn run_tool_loop(
         if let Some(e) = round_budget_error(fresh_chars) {
             return Err(e);
         }
-        trim_old_tool_results(&mut messages, tool_calls.len());
-        // Eski mesajları okunabilir özetle değiştir: "context doldu → özetle →
-        // yeni oturum" döngüsünü bitirir. Eski mesajlar SİLİNMEZ — tek cümle
-        // özete küçülür, tam içerik depoda durur (recall edilebilir).
-        crate::engine::context_engine::ContextEngine::compact_messages(
+        // 1) Bütçe aşımını okunabilir özetle çöz: depoda karşılığı olan
+        //    mesajlar tek cümleye iner ve `recall(id=N)` tutamacı alınır.
+        //    ÖNEMLİ: bu adım ÖNCE çalışır — sonra kırpma içeriği değiştirirse
+        //    depo eşleşmesi (id_of) kaybolur.
+        let guard = context_store.lock().unwrap_or_else(|e| e.into_inner());
+        let saved = crate::engine::context_engine::ContextEngine::compact_to_budget(
+            &guard,
             &mut messages,
-            tool_calls.len() + 2, // son tur + system + user korunur
+            context_budget,
+            tool_calls.len() + 2,
+            None,
         );
+        if saved > 0 {
+            log::debug!("context compacted: {} chars saved", saved);
+        }
+        // 2) Güvenlik ağı: hâlâ bütçe üstünde kalan eski sonuçları kırp.
+        trim_old_tool_results(&mut messages, tool_calls.len());
     }
 }
 
@@ -1353,6 +1381,7 @@ fn stream_tool_loop(
     allow_shell: bool,
     read_only: bool,
     engine: tools::EngineCtx,
+    context_budget: usize,
 ) {
     let tools_json = if read_only {
         tools::read_only_specs()
@@ -1363,6 +1392,12 @@ fn stream_tool_loop(
     ctx.allow_shell = allow_shell;
     ctx.read_only = read_only;
     ctx.engine = engine;
+    // Bağlam deposu: kırpılan/özetlenen içerik burada kayıpsız durur ve
+    // model `recall(id)` ile geri çağırabilir.
+    let context_store = std::sync::Arc::new(std::sync::Mutex::new(
+        crate::engine::context_store::ContextStore::new(),
+    ));
+    ctx.context = Some(context_store.clone());
     let mut rounds = 0usize;
     let mut usage = Value::Null;
     loop {
@@ -1460,6 +1495,23 @@ fn stream_tool_loop(
                         }));
                     }
                     fresh_chars += result.chars().count();
+                    // Araç sonucunu depoya yaz (kayıpsız): bütçe aşımında
+                    // mesaj özete inse bile tam içerik `recall` ile erişilebilir.
+                    {
+                        let parsed = serde_json::from_str::<Value>(&result)
+                            .unwrap_or_else(|_| json!(result.clone()));
+                        context_store
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .push(
+                                rounds as u32,
+                                crate::engine::context_store::Kind::Tool,
+                                &name,
+                                &parsed,
+                                None,
+                                None,
+                            );
+                    }
                     messages.push(json!({
                         "role": "tool",
                         "tool_call_id": tc["id"].as_str().unwrap_or(""),
@@ -1469,6 +1521,23 @@ fn stream_tool_loop(
                 if let Some(e) = round_budget_error(fresh_chars) {
                     let _ = emit_event(tx, json!({"type": "error", "message": e}));
                     return;
+                }
+                // Bütçe aşımını okunabilir özet + recall tutamacıyla çöz.
+                // Kırpmadan ÖNCE çalışır (kırpma içeriği değiştirir, depo
+                // eşleşmesi kaybolur).
+                {
+                    let guard = context_store.lock().unwrap_or_else(|e| e.into_inner());
+                    let saved =
+                        crate::engine::context_engine::ContextEngine::compact_to_budget(
+                            &guard,
+                            &mut messages,
+                            context_budget,
+                            tool_calls.len() + 2,
+                            None,
+                        );
+                    if saved > 0 {
+                        log::debug!("stream context compacted: {} chars saved", saved);
+                    }
                 }
                 trim_old_tool_results(&mut messages, tool_calls.len());
             }
@@ -1509,6 +1578,9 @@ pub async fn ai_chat_stream(
         schema_cache: Some(state.schema_cache.clone()),
     };
 
+    // Bağlam bütçesi model penceresinden türetilir (muhafazakâr: %55).
+    let context_budget = context_budget_for(&caps);
+
     let (tx, rx) = tokio::sync::mpsc::channel::<String>(64);
     let _ = tx.try_send(
         json!({
@@ -1537,6 +1609,7 @@ pub async fn ai_chat_stream(
             shell_allowed(permission_for_task.as_deref()),
             false,
             engine_for_task.clone(),
+            context_budget,
         );
     });
 
@@ -1571,6 +1644,7 @@ pub async fn ai_chat(
 
     let effort_for_task = req.reasoning_effort.clone();
     let gen_for_task = GenOptions::from_request(&req).with_caps(&caps);
+    let context_budget = context_budget_for(&caps);
     let blocks_for_task = blocks.clone();
     let url_for_task = url.clone();
     let api_key_for_task = resolve_api_key(&req)?;
@@ -1602,6 +1676,7 @@ pub async fn ai_chat(
             shell_allowed(permission_for_task.as_deref()),
             false,
             engine_for_task.clone(),
+            context_budget,
         )
     })
     .await
@@ -1707,6 +1782,7 @@ mod tests {
             false,
             false,
             tools::EngineCtx::default(),
+            8_000,
         )
         .unwrap_err();
         assert!(err.contains("budget"), "bütçe hatası beklenirdi: {}", err);
@@ -1765,6 +1841,7 @@ mod tests {
             false,
             false,
             tools::EngineCtx::default(),
+            8_000,
         )
         .unwrap();
         assert_eq!(content, "kisa cevap");
@@ -1821,6 +1898,7 @@ mod tests {
             false,
             false,
             tools::EngineCtx::default(),
+            8_000,
         )
         .unwrap();
         assert_eq!(content, "tamam");
@@ -1849,6 +1927,7 @@ mod tests {
             false,
             false,
             tools::EngineCtx::default(),
+            8_000,
         )
         .unwrap_err();
         assert!(err.contains("401"));
@@ -1919,6 +1998,7 @@ mod tests {
             false,
             false,
             tools::EngineCtx::default(),
+            8_000,
         )
         .unwrap();
         assert_eq!(content, "Login True döndürüyor.");
@@ -1987,6 +2067,7 @@ mod tests {
             false,
             false,
             tools::EngineCtx::default(),
+            8_000,
         )
         .unwrap();
         assert_eq!(usage["prompt_tokens"], json!(300));
@@ -2063,6 +2144,7 @@ mod tests {
             false,
             false,
             tools::EngineCtx::default(),
+            8_000,
         )
         .unwrap();
         let seen = transport.seen.lock().unwrap_or_else(|e| e.into_inner());
@@ -2108,6 +2190,7 @@ mod tests {
             false,
             false,
             tools::EngineCtx::default(),
+            8_000,
         )
         .unwrap();
         // 10 (ana tur 1) + 50 (alt döngü) + 20 (ana tur 2) = 80.
@@ -2247,6 +2330,7 @@ mod tests {
             false,
             false,
             tools::EngineCtx::default(),
+            8_000,
         )
         .unwrap();
 
@@ -2290,6 +2374,7 @@ mod tests {
             false,
             false,
             tools::EngineCtx::default(),
+            8_000,
         )
         .unwrap();
         assert_eq!(content, "bulamadım");

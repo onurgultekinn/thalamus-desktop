@@ -105,6 +105,10 @@ pub struct ContextStore {
     artifacts: Vec<Artifact>,
     index: Vec<IndexEntry>,
     by_dedup: HashMap<String, u32>,
+    /// İçerik → id: sıkıştırılan mesajın hangi depo öğesine karşılık
+    /// geldiğini bulmak için. Böylece modelin gördüğü özete gerçek
+    /// `recall(id)` yazılabilir (uydurma id değil).
+    by_content: HashMap<u64, u32>,
     next_id: u32,
     /// Ham (sıkıştırılmamış) toplam bayt — tasarruf raporu için.
     raw_bytes: usize,
@@ -179,30 +183,22 @@ impl ContextStore {
         self.next_id += 1;
         self.raw_bytes += raw_len;
         self.stored_bytes += payload.len();
+        // İçerik parmak izi → id: sıkıştırma sırasında mesajın hangi depo
+        // öğesine karşılık geldiğini bulmak için (gerçek recall id'si).
+        self.by_content.insert(content_fingerprint(&raw), id);
         if let Some(key) = dedup_key {
             self.by_dedup.insert(key.clone(), id);
-            self.artifacts.push(Artifact {
-                id,
-                turn,
-                kind,
-                label: label.clone(),
-                payload,
-                compressed,
-                tokens,
-                verified,
-            });
-        } else {
-            self.artifacts.push(Artifact {
-                id,
-                turn,
-                kind,
-                label: label.clone(),
-                payload,
-                compressed,
-                tokens,
-                verified,
-            });
         }
+        self.artifacts.push(Artifact {
+            id,
+            turn,
+            kind,
+            label: label.clone(),
+            payload,
+            compressed,
+            tokens,
+            verified,
+        });
         self.index.push(IndexEntry {
             id,
             turn,
@@ -212,6 +208,14 @@ impl ContextStore {
             alias_of: None,
         });
         id
+    }
+
+    /// Bir içeriğin depodaki id'sini bulur (yoksa `None`).
+    ///
+    /// Sıkıştırılan mesajın özetine gerçek `recall(id)` yazmak için kullanılır:
+    /// model uydurma bir id değil, gerçekten var olan bir id görür.
+    pub fn id_of(&self, content: &str) -> Option<u32> {
+        self.by_content.get(&content_fingerprint(content)).copied()
     }
 
     /// Bir artefaktı **kayıpsız** çözer. `None` = id yok.
@@ -424,6 +428,19 @@ impl StoreStats {
         }
         100.0 * (self.raw_bytes.saturating_sub(self.stored_bytes) as f64) / (self.raw_bytes as f64)
     }
+}
+
+/// İçerik parmak izi: FNV-1a 64-bit. Kriptografik değil — yalnızca
+/// "bu mesaj depodaki hangi öğe?" eşlemesi için. Çakışma olsa bile
+/// `recall` yanlış içerik döndürmez; yalnızca özette yanlış id görünür
+/// (ve o id de geçerli bir depo öğesidir).
+fn content_fingerprint(s: &str) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in s.as_bytes() {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
 }
 
 fn clip(s: &str, max: usize) -> String {
