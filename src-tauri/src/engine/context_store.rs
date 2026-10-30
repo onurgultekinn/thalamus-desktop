@@ -571,6 +571,43 @@ mod tests {
     }
 
     #[test]
+    fn id_of_finds_stored_content_and_rejects_unknown() {
+        // Sıkıştırma sırasında "bu mesaj depodaki hangi öğe?" sorusunun
+        // cevabı bu eşleme. Yanlış id yazarsak model yanlış içeriği çeker —
+        // bu yüzden eşleşme ve eşleşmeme durumları ayrı ayrı doğrulanır.
+        let mut s = ContextStore::new();
+        let payload = json!({"rows": [{"id": 1, "status": "ok"}]});
+        let raw = serde_json::to_string(&payload).unwrap();
+        let id = s.push(0, Kind::Tool, "tool", &payload, None, None);
+
+        assert_eq!(s.id_of(&raw), Some(id), "kaydedilen içerik bulunmalı");
+        assert_eq!(s.id_of("{\"başka\":1}"), None, "bilinmeyen içerik None");
+
+        // Aynı içerik ikinci kez yazılırsa en son id dönmeli.
+        let id2 = s.push(1, Kind::Tool, "tool", &payload, None, None);
+        assert_ne!(id, id2);
+        assert_eq!(s.id_of(&raw), Some(id2));
+    }
+
+    #[test]
+    fn recall_is_lossless_for_nested_and_unicode_content() {
+        // Kayıpsızlık sözleşmesi: Türkçe karakterler, iç içe yapı, kaçışlar
+        // ve büyük sayılar geri açıldığında BİREBİR aynı olmalı.
+        let mut s = ContextStore::new();
+        let payload = json!({
+            "başlık": "ĞÜŞİÖÇ ğüşiöç",
+            "nested": {"a": [1, 2, {"b": r#"iç "tırnak" ve \ ters bölü"#}]},
+            "quote": "satır\nsonu\tsekme",
+            "big": 9_007_199_254_740_991i64,
+            "float": 1.5e-10,
+            "null_v": null,
+            "bool_v": true,
+        });
+        let id = s.push(0, Kind::Tool, "t", &payload, None, None);
+        assert_eq!(s.recall(id).as_ref(), Some(&payload), "değer birebir dönmeli");
+    }
+
+    #[test]
     fn relevant_finds_content_by_keyword() {
         let mut s = ContextStore::new();
         s.push(0, Kind::Tool, "grep_search src/auth.rs",
