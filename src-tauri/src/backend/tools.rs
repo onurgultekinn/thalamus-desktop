@@ -299,6 +299,33 @@ pub fn specs(allow_shell: bool) -> Value {
     Value::Array(all)
 }
 
+/// Modelin çağırabileceği araç ADLARI (kurtarma için).
+///
+/// Bazı modeller araç çağrısını `tool_calls` yerine düz içerik olarak yazar;
+/// o metni yalnızca GERÇEK bir araç adıyla eşleşiyorsa kurtarırız — rastgele
+/// JSON'u araç çağrısı sanmamak için bu liste şart.
+pub fn tool_names(allow_shell: bool) -> Vec<&'static str> {
+    let mut v = vec![
+        "read_file",
+        "write_file",
+        "edit_file",
+        "list_dir",
+        "find_files",
+        "grep_search",
+        "get_code_body",
+        "repo_map",
+        "todo_write",
+        "dispatch_agent",
+        "web_search",
+        "read_page",
+        "recall",
+    ];
+    if allow_shell {
+        v.push("run_command");
+    }
+    v
+}
+
 /// Sub-ajan (dispatch_agent) araç seti: yalnız okuma. dispatch_agent burada
 /// YOK — alt-ajan alt-ajan doğuramaz (derinlik kontrolü spec düzeyinde).
 pub fn read_only_specs() -> Value {

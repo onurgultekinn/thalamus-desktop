@@ -601,6 +601,55 @@ fn parse_exit_code(result: &str) -> Option<i32> {
     rest[..end].trim().parse::<i32>().ok()
 }
 
+/// Modelin araç çağrısını `tool_calls` yerine `content` İÇİNE JSON olarak
+/// yazdığı durumu kurtarır.
+///
+/// Neden gerekli (ölçüldü, qwen2.5-coder:7b): model şu metni düz içerik olarak
+/// döndürdü — `tool_calls` boştu, yani araç hiç çalışmıyordu:
+///   {"name": "recall", "arguments": {"id": 1}}
+/// Bu, küçük/yerel modellerde yaygın. Kurtarma olmadan "model-bağımsız"
+/// iddiası çöker: yetenekli olmayan modelde özellik sessizce ölür.
+///
+/// Yalnızca BİLİNEN araç adları kabul edilir (rastgele JSON yanlış
+/// yorumlanmasın); JSON tek başına duruyorsa (etrafında uzun prose yoksa)
+/// kurtarılır.
+fn rescue_text_tool_call(content: &str, known_tools: &[&str]) -> Option<(String, String)> {
+    let t = content.trim();
+    // Yanıtın neredeyse tamamı JSON olmalı; uzun prose içinde geçen JSON'u
+    // araç çağrısı sanmayalım.
+    let start = t.find('{')?;
+    let end = t.rfind('}')?;
+    if end <= start {
+        return None;
+    }
+    let before = &t[..start];
+    let after = &t[end + 1..];
+    if before.chars().count() > 40 || after.chars().count() > 40 {
+        return None;
+    }
+    let v: Value = serde_json::from_str(&t[start..=end]).ok()?;
+    let name = v
+        .get("name")
+        .or_else(|| v.get("tool"))
+        .or_else(|| v.get("function")?.get("name"))?
+        .as_str()?
+        .to_string();
+    if !known_tools.contains(&name.as_str()) {
+        return None;
+    }
+    let args = v
+        .get("arguments")
+        .or_else(|| v.get("args"))
+        .or_else(|| v.get("parameters"))
+        .cloned()
+        .unwrap_or(json!({}));
+    let args_str = match args {
+        Value::String(s) => s,
+        other => serde_json::to_string(&other).ok()?,
+    };
+    Some((name, args_str))
+}
+
 /// Sağlayıcı hatası tekrarlanmaya değer mi? Yalnızca yanıt GÖNDERİLMEDEN
 /// oluşan hatalar (HTTP durum satırı, bağlantı kurulamadı) — akış ortasında
 /// üretilmez, bu yüzden kısmi akışı tekrar basma riski yoktur.
@@ -823,7 +872,20 @@ pub fn run_tool_loop(
         if msg.is_null() {
             return Err("provider response was unexpectedly empty".into());
         }
-        let tool_calls = msg["tool_calls"].as_array().cloned().unwrap_or_default();
+        let mut tool_calls = msg["tool_calls"].as_array().cloned().unwrap_or_default();
+        if tool_calls.is_empty() {
+            // Kurtarma: model araç çağrısını düz içerik olarak yazmış olabilir
+            // (ölçüldü: qwen2.5-coder:7b). Yalnız bilinen araç adları kabul.
+            let content_text = msg["content"].as_str().unwrap_or("");
+            if let Some((name, args)) = rescue_text_tool_call(content_text, &tools::tool_names(allow_shell)) {
+                tool_calls.push(json!({
+                    "id": format!("rescued_{}", rounds),
+                    "type": "function",
+                    "function": {"name": name, "arguments": args},
+                }));
+                log::debug!("rescued text tool call: {}", name);
+            }
+        }
         if tool_calls.is_empty() {
             let content = msg["content"].as_str().unwrap_or("").to_string();
             // Düşünme (reasoning) metni: sağlayıcıya göre `reasoning` ya da
@@ -1430,9 +1492,22 @@ fn stream_tool_loop(
             )
         });
         match round {
-            Ok((content, _reasoning, tool_calls, round_usage, finish_reason)) => {
+            Ok((content, _reasoning, mut tool_calls, round_usage, finish_reason)) => {
                 if !round_usage.is_null() {
                     accumulate_usage(&mut usage, &round_usage);
+                }
+                if tool_calls.is_empty() {
+                    // Kurtarma: araç çağrısı düz içerik olarak gelmiş olabilir.
+                    if let Some((name, args)) =
+                        rescue_text_tool_call(&content, &tools::tool_names(allow_shell))
+                    {
+                        tool_calls.push(json!({
+                            "id": format!("rescued_{}", rounds),
+                            "type": "function",
+                            "function": {"name": name, "arguments": args},
+                        }));
+                        log::debug!("stream: rescued text tool call: {}", name);
+                    }
                 }
                 if tool_calls.is_empty() {
                     let mut final_usage = usage;
@@ -2196,6 +2271,35 @@ mod tests {
         // 10 (ana tur 1) + 50 (alt döngü) + 20 (ana tur 2) = 80.
         assert_eq!(usage["prompt_tokens"], json!(80));
         assert_eq!(usage["total_tokens"], json!(90));
+    }
+
+    #[test]
+    fn text_tool_call_is_rescued_only_for_known_tools() {
+        let tools = ["recall", "read_file"];
+        // Gözlenen gerçek biçim (qwen2.5-coder:7b).
+        let got = rescue_text_tool_call(r#"{"name": "recall", "arguments": {"id": 1}}"#, &tools);
+        assert_eq!(got.map(|(n, a)| (n, a.contains("1"))), Some(("recall".into(), true)));
+
+        // `function` sarmalı ve `args` anahtarı da kabul.
+        let got = rescue_text_tool_call(
+            r#"{"function": {"name": "read_file"}, "args": {"path": "a.rs"}}"#,
+            &tools,
+        );
+        assert!(got.is_some());
+
+        // Bilinmeyen araç → kurtarılmaz (rastgele JSON araç çağrısı sanılmasın).
+        assert!(rescue_text_tool_call(r#"{"name": "drop_database"}"#, &tools).is_none());
+
+        // Uzun prose içinde geçen JSON → kurtarılmaz.
+        let prose = format!(
+            "{} {{\"name\": \"recall\", \"arguments\": {{\"id\": 1}}}} {}",
+            "Bu uzun bir açıklama cümlesi. ".repeat(3),
+            "Ve devamı da uzun.".repeat(3)
+        );
+        assert!(rescue_text_tool_call(&prose, &tools).is_none());
+
+        // Düz JSON olmayan metin → None.
+        assert!(rescue_text_tool_call("sadece cevap", &tools).is_none());
     }
 
     #[test]
