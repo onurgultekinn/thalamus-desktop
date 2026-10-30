@@ -1519,6 +1519,22 @@ fn stream_tool_loop(
                         "finish_reason": finish_reason,
                         "edits": recorded_edits_json(&ctx.edits.borrow()),
                         "todos": todos_json(&ctx.todos.borrow()),
+                        // Bağlam deposu bilançosu: arayüz "pencere dolmuyor,
+                        // içerik kayıpsız duruyor" bilgisini buradan gösterir.
+                        "context": context_store
+                            .lock()
+                            .map(|g| {
+                                let st = g.stats();
+                                json!({
+                                    "items": st.items,
+                                    "stored": st.artifacts,
+                                    "savings_pct": st.savings_pct(),
+                                    "dedup_saved": st.dedup_saved_bytes,
+                                    "unverified": st.unverified,
+                                    "budget_tokens": context_budget,
+                                })
+                            })
+                            .unwrap_or(serde_json::Value::Null),
                     }));
                     return;
                 }
