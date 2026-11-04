@@ -23,11 +23,11 @@
 
 | Chat | Project workspace |
 |---|---|
-| ![Chat — first-run welcome with a keyless local model selected](docs/assets/welcome.png) | ![Project — explorer, editor and PowerShell terminal](docs/assets/project.png) |
+| ![Chat — first-run welcome with a keyless local model selected](docs/assets/framed/welcome.png) | ![Project — explorer, editor and PowerShell terminal](docs/assets/framed/project.png) |
 
 | Providers — local model discovery, no key needed |
 |---|
-| ![Settings — Providers page listing discovered local models](docs/assets/settings.png) |
+| ![Settings — Providers page listing discovered local models](docs/assets/framed/settings.png) |
 
 Thalamus Desktop combines an AI chat, a project workspace (file explorer,
 editor, terminal), and an agent-mode copilot in one desktop application. The

@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; }
+  body {
+    background:
+      radial-gradient(1200px 700px at 50% -10%, #1c2030 0%, rgba(28,32,48,0) 60%),
+      linear-gradient(160deg, #101218 0%, #0a0b10 100%);
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+  }
+  .stage {
+    width: 1300px;
+  }
+  .win {
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.10);
+    box-shadow:
+      0 40px 90px rgba(0,0,0,0.60),
+      0 12px 30px rgba(0,0,0,0.45),
+      0 0 0 1px rgba(0,0,0,0.45);
+    background: #100f0f;
+  }
+  .bar {
+    height: 46px;
+    background: linear-gradient(#211f1e, #1b1a19);
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+    display: flex; align-items: center;
+    padding: 0 18px;
+    position: relative;
+  }
+  .dots { display: flex; gap: 9px; }
+  .dot { width: 13px; height: 13px; border-radius: 50%; }
+  .d1 { background: #ff5f57; } .d2 { background: #febc2e; } .d3 { background: #28c840; }
+  .title {
+    position: absolute; left: 0; right: 0; text-align: center;
+    color: #A8A49E; font-size: 15px; letter-spacing: 0.4px;
+    font-weight: 600; pointer-events: none;
+  }
+  .title b { color: #dcb67a; font-weight: 700; }
+  .win img { width: 100%; display: block; }
+</style>
+</head>
+<body>
+  <div class="stage">
+    <div class="win">
+      <div class="bar">
+        <div class="dots"><div class="dot d1"></div><div class="dot d2"></div><div class="dot d3"></div></div>
+        <div class="title" id="t"></div>
+      </div>
+      <img id="shot" src="">
+    </div>
+  </div>
+  <script>
+    const q = new URLSearchParams(location.search);
+    const img = q.get('img') || 'welcome.png';
+    const label = q.get('label') || 'Thalamus Desktop';
+    document.getElementById('shot').src = img;
+    document.getElementById('t').innerHTML = '<b>thalamus</b> ' + label;
+  </script>
+</body>
+</html>
