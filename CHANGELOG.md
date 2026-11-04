@@ -8,6 +8,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **One-line Windows install.** `irm https://raw.githubusercontent.com/onurgultekinn/thalamus-desktop/master/install.ps1 | iex` fetches the latest release, verifies it against the release's `SHA256SUMS.txt`, and installs silently. It sidesteps the SmartScreen prompt and the script-execution policy because PowerShell downloads the file itself; hash verification is not skipped.
+
+## [0.1.0] - 2026-11-04
+
+First tagged build. Every item below is grounded in a commit under this tag.
+
+### Added
+
 - **Bounded context for long sessions.** Agent messages are compacted to a token
   budget instead of dropped: an old tool result becomes a deterministic,
   readable one-line summary carrying a `recall(id=N)` handle, and the model can
@@ -24,6 +32,12 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   window is bounded and nothing was lost.
 - `/api/ai/chat` and `/api/ai/chat/stream` responses now include a `context`
   block: `window_tokens`, `budget_tokens`, and `window_verified`.
+- **One pipeline for attachments** across every upload surface, with per-file
+  read state and a model-readability badge; PDF text extraction via pdf.js.
+- **Chat onboarding**: a first-run welcome with actionable bridges; an animated
+  session-name box that falls back to automatic numbering ("Sohbet N");
+  per-chat timestamps in the sidebar; project view without forced folder
+  selection.
 
 ### Fixed
 
@@ -43,6 +57,9 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   withdrawn and replaced by `examples/presentation_test.rs`, which puts the
   needle inside a tool output and adds a length-matched `@T` condition. See
   `docs/context-window.md` Result 4.
+- The draft release for this tag initially shipped without installer files: the
+  workflow joined artifact paths into a single glob line, which matched nothing.
+  `files:` now uses direct glob patterns.
 
 ### Changed
 
@@ -61,7 +78,6 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   reviewer's `error` re-runs the producer with both the finding and its own
   previous output and the result is re-reviewed, and a failing node no longer
   discards its siblings' results.
-
 
 ## [0.1.0-beta] - 2026-10-27
 
