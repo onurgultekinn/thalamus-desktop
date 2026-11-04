@@ -67,6 +67,11 @@ bench/results/quality-*.md
 *.pfx
 *.p12
 
+# Calisma zamani artiklari ve yerel deneme ciktilari
+server.pid
+agent-demo/
+gui-test-screenshots/
+
 # Ic olcum alani (private; _private/lab altinda da bir kopyasi var)
 lab/
 

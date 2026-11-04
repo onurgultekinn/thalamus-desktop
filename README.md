@@ -152,6 +152,22 @@ final design.
 - Local profile screen on first launch. This is **not** an account system: the
   name you enter stays in `localStorage` and personalises the interface only.
 
+**Long sessions: the context window stays bounded**
+- Turn by turn, agent messages are compacted to a token budget instead of being
+  dropped. An old tool result becomes a readable one-line summary plus a
+  `recall(id=N)` handle; the model can fetch the full original text at any time.
+- Nothing is discarded: every tool result, user message, and reply goes into an
+  in-memory store with lossless compression and content deduplication. A message
+  is only compacted if the store can resolve it again — otherwise it is left
+  untouched, so compaction can never make information unreachable.
+- The budget is derived from the context window the server is *actually* using,
+  not the model's advertised maximum. This matters for local runtimes: Ollama
+  loads a 32K model at 4096 by default and silently truncates longer prompts.
+  When the server reports nothing, a conservative 4096 is assumed and the
+  response marks the window as unverified.
+- Measurements, negative results, and the remaining limits are in
+  [docs/context-window.md](docs/context-window.md).
+
 ### Experimental
 
 These surfaces exist in the build and are usable, but they are prototypes: the
@@ -253,12 +269,38 @@ are functional and tested. Expect breaking changes before `1.0`.
 
 ## Install
 
-Download the installer from [GitHub Releases](../../releases) and run it. The
-installers are not code-signed yet, so Windows SmartScreen will warn on first
-launch — see [docs/install.md](docs/install.md) for the steps and how to verify
-your download against `SHA256SUMS.txt`.
+### One-line install (recommended)
+
+Open **PowerShell** (no admin needed) and paste:
+
+```powershell
+irm https://raw.githubusercontent.com/onurgultekinn/thalamus-desktop/master/install.ps1 | iex
+```
+
+This downloads the latest release, verifies it against the release's
+`SHA256SUMS.txt`, and runs the installer silently. It avoids the SmartScreen
+prompt and PowerShell's script-execution policy entirely, because the file is
+fetched by PowerShell rather than by a browser.
+
+Pin a specific version with `$env:THALAMUS_VERSION = "v0.1.0"` before the
+command.
+
+### Manual download
+
+Download the NSIS `.exe` or MSI `.msi` from
+[GitHub Releases](../../releases) and run it. The installers are not code-signed
+yet, so Windows SmartScreen will warn on first launch — see
+[docs/install.md](docs/install.md) for the steps and how to verify your download
+against `SHA256SUMS.txt`.
 
 Package-manager channels (`winget`) are planned.
+
+## After installing
+
+The app opens with a local profile — no account, no password. File explorer,
+terminal and the compression engine work immediately. To get AI replies, either
+add a provider key in **Settings → Providers** or connect a local model.
+
 
 ## Development
 

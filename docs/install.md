@@ -18,11 +18,30 @@ to a code in [ERRORS.md](../ERRORS.md).
 
 ## Install
 
+### Option A — one line (no SmartScreen prompt)
+
+Open PowerShell (a normal user window is enough) and paste:
+
+```powershell
+irm https://raw.githubusercontent.com/onurgultekinn/thalamus-desktop/master/install.ps1 | iex
+```
+
+Why this skips the warnings: a browser-downloaded installer carries Windows'
+*Mark-of-the-Web* tag, which is what triggers SmartScreen, and a saved `.ps1`
+file would hit the script-execution policy. Here PowerShell fetches the
+installer itself, so neither applies. Verification is not skipped — the script
+downloads the release's `SHA256SUMS.txt`, compares the hash of the installer it
+just fetched, and refuses to install on a mismatch.
+
+Set `$env:THALAMUS_VERSION = "v0.1.0"` before the command to pin a version.
+
+### Option B — manual download
+
 1. Open [GitHub Releases](../../releases) and download the installer for the
    latest beta — either the NSIS `.exe` or the MSI `.msi`. Both install the same
    app.
 2. The installer is not code-signed yet, so Windows SmartScreen will show
-   *"Windows protected your PC"*.
+   *"Windows protected your PC"* — see below.
 
 ### Getting past SmartScreen safely
 
