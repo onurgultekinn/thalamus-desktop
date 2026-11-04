@@ -29,7 +29,36 @@ export function getWorkspaceName(): string {
     const parts = root.split(/[\\/]/).filter(Boolean);
     if (parts.length > 0) return parts[parts.length - 1];
   }
+  // Kök bağlı değilken isim kutusuna yazılan adı onurlandır.
+  const pending = getPendingProjectName();
+  if (pending) return pending;
   return 'workspace';
+}
+
+const PENDING_PROJECT_NAME_KEY = 'thalamus_project_display_name';
+
+/** Kullanıcı klasör bağlamadan proje açtığında verdiği ad (isteğe bağlı). */
+export function setPendingProjectName(name?: string): void {
+  try {
+    if (name) localStorage.setItem(PENDING_PROJECT_NAME_KEY, name);
+    else localStorage.removeItem(PENDING_PROJECT_NAME_KEY);
+  } catch { /* noop */ }
+}
+
+export function getPendingProjectName(): string | undefined {
+  try {
+    const v = localStorage.getItem(PENDING_PROJECT_NAME_KEY);
+    return v && v.trim() ? v.trim() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Klasör bağlanınca bekleyen ad bir kez tüketilir. */
+export function consumePendingProjectName(): string | undefined {
+  const name = getPendingProjectName();
+  setPendingProjectName(undefined);
+  return name;
 }
 
 export function saveWorkspaceRoot(root: string): void {

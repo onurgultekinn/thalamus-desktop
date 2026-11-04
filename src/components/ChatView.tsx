@@ -1,5 +1,5 @@
 import { Fragment, memo, useEffect, useRef, useState, type RefObject } from 'react';
-import { FileCode2, FolderOpen, KeyRound, Gauge, Pencil } from 'lucide-react';
+import { Pencil } from 'lucide-react';
 import { AskQuestionCard } from './AskQuestionCard';
 import { MarkdownMessage } from './MarkdownMessage';
 import { StreamingMessage } from './StreamingMarkdown';
@@ -72,17 +72,14 @@ function ChatViewInner({
   loadingLabel,
   userName,
   onlinePricing,
-  projectName,
   chatEndRef,
   chatKey,
-  onSampleCode,
-  onOpenProject,
-  onOpenSettings,
-  onEngineDiagnostic,
+  showWelcome = false,
+  onStartChat,
+  onOpenProjectView,
   onRegenerate,
   onEditMessage,
   onAnswerQuestion,
-  hasProvider = false,
 }: {
   messages: Message[];
   loading: boolean;
@@ -90,20 +87,18 @@ function ChatViewInner({
   userName: string;
   targetModel: string;
   onlinePricing: boolean;
-  projectName: string;
   chatEndRef: RefObject<HTMLDivElement | null>;
   /** Identity of the open chat; resets the render window when it changes. */
   chatKey: string;
-  onSampleCode: (code: string) => void;
-  onOpenProject: () => void;
-  onOpenSettings: () => void;
-  onEngineDiagnostic: () => void;
+  /** True yalnızca hiç sohbet ve proje yokken: tam karşılama ekranı. */
+  showWelcome?: boolean;
+  /** Karşılama köprüleri: "yeni sohbet başlat" / "bir proje aç". */
+  onStartChat?: () => void;
+  onOpenProjectView?: () => void;
   onRegenerate: (idx: number) => void;
   /** Kullanıcı mesajını düzeltip o noktadan yeniden yanıt üretir. */
   onEditMessage: (idx: number, content: string) => void;
   onAnswerQuestion: (idx: number, answer: string) => void;
-  /** En az bir sağlayıcı anahtarı bağlı mı? Bağlıysa "model bağla" kartı gizlenir. */
-  hasProvider?: boolean;
 }) {
   const [visibleCount, setVisibleCount] = useState(WINDOW_INITIAL);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
@@ -160,83 +155,37 @@ function ChatViewInner({
   return (
     <>
       {messages.length === 0 && !loading ? (
-        <div className="flex flex-col items-center justify-center min-h-[400px] h-full max-w-3xl mx-auto px-4 py-8 select-none">
-          <div className="text-center mb-8">
-            <h2 className="hand text-[26px] leading-tight mb-1" style={{ color: 'rgb(var(--tlm-gold))' }}>{t('chat.welcome')}</h2>
-            <svg className="sketch-underline" viewBox="0 0 220 8" fill="none" aria-hidden="true">
-              <path d="M2 5 C 30 2, 55 7, 85 4 S 150 2, 180 5 S 210 3, 218 4" stroke="#dcb67a" strokeWidth="1.6" strokeLinecap="round" />
-            </svg>
-            <p className="text-xs text-[#A8A49E] max-w-md mx-auto leading-relaxed mt-4">
-              {t('chat.welcomeSub')}
-            </p>
+        showWelcome ? (
+          <div className="flex flex-col items-center justify-center min-h-[400px] h-full max-w-3xl mx-auto px-4 py-8 select-none">
+            <div className="text-center">
+              <h2 className="hand text-[26px] leading-tight mb-1" style={{ color: 'rgb(var(--tlm-gold))' }}>{t('chat.welcome')}</h2>
+              <svg className="sketch-underline" viewBox="0 0 220 8" fill="none" aria-hidden="true">
+                <path d="M2 5 C 30 2, 55 7, 85 4 S 150 2, 180 5 S 210 3, 218 4" stroke="#dcb67a" strokeWidth="1.6" strokeLinecap="round" />
+              </svg>
+              <p className="text-xs text-[#A8A49E] max-w-md mx-auto leading-relaxed mt-4">
+                {t('chat.welcomeA')}
+                <button type="button" onClick={onStartChat} className="welcome-bridge">{t('chat.welcomeLinkChat')}</button>
+                {t('chat.welcomeB')}
+                <button type="button" onClick={onOpenProjectView} className="welcome-bridge">{t('chat.welcomeLinkProject')}</button>
+                {t('chat.welcomeC')}
+              </p>
+            </div>
           </div>
-
-          {/* İçeriğe göre akar: önizleme paneli açıkken daralan sütunda 2 kolona
-              zorlanıp kartlar ezilmez, gerektiğinde tek kolona düşer. */}
-          <div className="grid gap-4 w-full" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))' }}>
-            {/* CARD 1: Sample prompt */}
-            <button
-              type="button"
-              onClick={() => onSampleCode(`def calc_data(items):\n    # Redundant calculation optimization example\n    total = 0\n    for x in items:\n        val = x * 2.0\n        total += val\n    return total`)}
-              className="sketch-border flex items-start gap-3.5 p-4 bg-obsidian-panel/80 hover:bg-obsidian-surface hover:border-[#dcb67a]/60 text-left cursor-pointer transition-all duration-300 group"
-            >
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-[#dcb67a] transition-colors group-hover:border-[#dcb67a]/40 group-hover:bg-[#dcb67a]/10 flex-shrink-0">
-                <FileCode2 size={17} strokeWidth={1.75} />
-              </div>
-              <div className="flex flex-col gap-1 min-w-0">
-                <span className="text-[13px] font-semibold text-obsidian-text group-hover:text-white transition-colors">{t('chat.card.sample.title')}</span>
-                <span className="text-[11px] text-[#A8A49E] leading-normal">{t('chat.card.sample.desc')}</span>
-              </div>
-            </button>
-
-            {/* CARD 2: Open project */}
-            <button
-              type="button"
-              onClick={onOpenProject}
-              className="sketch-border flex items-start gap-3.5 p-4 bg-obsidian-panel/80 hover:bg-obsidian-surface hover:border-[#dcb67a]/60 text-left cursor-pointer transition-all duration-300 group"
-            >
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-[#dcb67a] transition-colors group-hover:border-[#dcb67a]/40 group-hover:bg-[#dcb67a]/10 flex-shrink-0">
-                <FolderOpen size={17} strokeWidth={1.75} />
-              </div>
-              <div className="flex flex-col gap-1 min-w-0">
-                <span className="text-[13px] font-semibold text-obsidian-text group-hover:text-white transition-colors">{t('chat.card.project.title')}</span>
-                <span className="text-[11px] text-[#A8A49E] leading-normal">{t('chat.card.project.desc', { project: projectName })}</span>
-              </div>
-            </button>
-
-            {/* CARD 3: Connect a model — yalnız bağlı sağlayıcı yokken */}
-            {!hasProvider && (
-            <button
-              type="button"
-              onClick={onOpenSettings}
-              className="sketch-border flex items-start gap-3.5 p-4 bg-obsidian-panel/80 hover:bg-obsidian-surface hover:border-[#dcb67a]/60 text-left cursor-pointer transition-all duration-300 group"
-            >
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-[#dcb67a] transition-colors group-hover:border-[#dcb67a]/40 group-hover:bg-[#dcb67a]/10 flex-shrink-0">
-                <KeyRound size={17} strokeWidth={1.75} />
-              </div>
-              <div className="flex flex-col gap-1 min-w-0">
-                <span className="text-[13px] font-semibold text-obsidian-text group-hover:text-white transition-colors">{t('chat.card.model.title')}</span>
-                <span className="text-[11px] text-[#A8A49E] leading-normal">{t('chat.card.model.desc')}</span>
-              </div>
-            </button>
-            )}
-
-            {/* CARD 4: Engine status */}
-            <button
-              type="button"
-              onClick={onEngineDiagnostic}
-              className="sketch-border flex items-start gap-3.5 p-4 bg-obsidian-panel/80 hover:bg-obsidian-surface hover:border-[#dcb67a]/60 text-left cursor-pointer transition-all duration-300 group"
-            >
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-[#dcb67a] transition-colors group-hover:border-[#dcb67a]/40 group-hover:bg-[#dcb67a]/10 flex-shrink-0">
-                <Gauge size={17} strokeWidth={1.75} />
-              </div>
-              <div className="flex flex-col gap-1 min-w-0">
-                <span className="text-[13px] font-semibold text-obsidian-text group-hover:text-white transition-colors">{t('chat.card.engine.title')}</span>
-                <span className="text-[11px] text-[#A8A49E] leading-normal">{t('chat.card.engine.desc')}</span>
-              </div>
-            </button>
+        ) : (
+          /* Karşılama sonrası boş sohbet: proje boş ekranıyla aynı dil —
+             sakin başlık + tek cümle; boş tuval artık kasıtlı duruyor. */
+          <div className="flex flex-col items-center justify-center min-h-[400px] h-full max-w-3xl mx-auto px-4 py-8 select-none">
+            <div className="text-center">
+              <h2 className="hand text-[24px] leading-tight mb-1" style={{ color: 'rgb(var(--tlm-gold))' }}>{t('chat.emptyTitle')}</h2>
+              <svg className="sketch-underline" viewBox="0 0 220 8" fill="none" aria-hidden="true">
+                <path d="M2 5 C 30 2, 55 7, 85 4 S 150 2, 180 5 S 210 3, 218 4" stroke="#dcb67a" strokeWidth="1.6" strokeLinecap="round" />
+              </svg>
+              <p className="text-xs text-[#A8A49E] max-w-md mx-auto leading-relaxed mt-4">
+                {t('chat.emptyBody')}
+              </p>
+            </div>
           </div>
-        </div>
+        )
       ) : (
         <>
           {/* Eskiler burada durur: tek tusla bir sayfa daha getirilir. */}
@@ -466,6 +415,25 @@ function ChatViewInner({
                         )}
                       </div>
                     )}
+                    {msg.role === 'user' && !!msg.files?.length && (
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1 px-1">
+                        <span className="text-[9.5px] font-mono uppercase tracking-wide text-white/50">
+                          {t('chat.attachmentsSent')}
+                        </span>
+                        {msg.files.map((f, i) => (
+                          <span
+                            key={`${f.name}-${i}`}
+                            className="inline-flex items-center gap-1 rounded border border-white/15 bg-white/[0.04] px-1.5 py-0.5 font-mono text-[10px] text-white/75"
+                            title={f.name}
+                          >
+                            <span className="truncate max-w-[180px]">{f.name}</span>
+                            {f.chars !== undefined && (
+                              <span className="text-white/40">{Math.max(1, Math.ceil(f.chars / 1024))} KB</span>
+                            )}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                     {msg.role === 'assistant' && msg.question && !msg.streaming && (
                       <AskQuestionCard
                         question={msg.question}
@@ -604,11 +572,10 @@ export const ChatView = memo(ChatViewInner, (prev, next) =>
   prev.messages === next.messages &&
   prev.loading === next.loading &&
   prev.loadingLabel === next.loadingLabel &&
-  prev.hasProvider === next.hasProvider &&
   prev.userName === next.userName &&
   prev.targetModel === next.targetModel &&
   prev.onlinePricing === next.onlinePricing &&
-  prev.projectName === next.projectName &&
   prev.chatEndRef === next.chatEndRef &&
-  prev.chatKey === next.chatKey
+  prev.chatKey === next.chatKey &&
+  prev.showWelcome === next.showWelcome
 );

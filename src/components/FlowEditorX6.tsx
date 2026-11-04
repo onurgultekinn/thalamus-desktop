@@ -26,7 +26,19 @@ const GRID = 16;
    kimliÄŸidir (PixelOffice sprite'Ä±nÄ±n baÅŸ bÃ¶lÃ¼mÃ¼) â€” aynÄ± ajan = aynÄ± yÃ¼z. */
 const ACCENT = '#dcb67a';
 const EDGE_COLOR = '#4A4741';
-const LINK_COLOR = '#5FA3AE';
+const LINK_COLOR = '#5FB6C8';
+/* Normal (hiyerarşi) bağlantılar yapısal iskelet; ilişkiler ikincil katman. */
+const HIERARCHY_WIDTH = 1.4;
+const LINK_DASH = '2 8';
+const LINK_WIDTH = 1.25;
+const LINK_DIM_OPACITY = 0.75;
+const LINK_FOCUS_OPACITY = 0.95;
+/* Hiyerarşi -2, ilişkiler -1: ikisi de kartların (0) altında; ilişkiler
+   görünürken soluklaşan iskeletin üstünde kalır. */
+const HIERARCHY_Z = -2;
+const LINK_Z = -1;
+/* Bir hiyerarşi çizgisiyle kesişmenin uzunluk cinsinden maliyeti. */
+const LINK_CROSSING_COST = 120;
 
 type AgentData = { agent: PlanAgent; selected: boolean; order: number; linking: boolean };
 
@@ -100,29 +112,25 @@ function ensureShape() {
   } as never);
 }
 
-const LINK_MARKER_SIZE = 7;
+const LINK_MARKER_SIZE = 6;
 
 /**
  * Serbest ilişki oku (mavi kesikli).
  *
- * `offset` KRİTİK — X6'nın klasik işaretçisi `normalize()` ile
- * `tx = -width/2 - offset` kadar kaydırır, yani üretilen yol
- * `[-width/2-offset, +width/2-offset]` aralığına düşer. Ucun TAM olarak
- * port noktasına (kart kenarına) oturması için aralığın `[-size, 0]`
- * olması gerekir:
- *
- *     +width/2 - offset = 0  ⟹  offset = +size/2
- *
- * Varsayılan (offset = -size/2) ucu kartın size/2 px İÇİNE sokuyordu;
- * 0 ise yarı yarıya taşırıyordu. Her ikisi de "ok karta düzgün oturmuyor"
- * görüntüsü verir (kullanıcı raporu).
+ * `offset` İŞARETİ KRİTİK — X6 `classic` işaretçisinde `normalize()` yolu
+ * `tx = -width/2 - offset` kadar kaydırır; işaretçi `marker-end` olduğu
+ * için ayrıca 180° döner. Ok ucunun port noktasına (kart kenarı) oturduğu
+ * ve gövdenin kartın DIŞINDA kaldığı değer `offset = -size/2` (varsayılan).
+ * `+size/2` tüm üçgeni kartın içine sokar; kart üstte çizildiği için ok
+ * görünmez olur (kullanıcı raporu).
  */
-function linkMarker(stroke: string) {
+function linkMarker(stroke: string, opacity = 1) {
   return {
     name: 'classic',
     size: LINK_MARKER_SIZE,
-    offset: LINK_MARKER_SIZE / 2,
+    offset: -LINK_MARKER_SIZE / 2,
     fill: stroke,
+    fillOpacity: opacity,
     strokeWidth: 0,
   };
 }
@@ -202,6 +210,18 @@ function pointInBox(p: FlowPoint, b: FlowBox) {
   return p.x >= b.x && p.x <= b.x + b.width && p.y >= b.y && p.y <= b.y + b.height;
 }
 
+/** İki doğru parçası kesişiyor mu (uç noktalar hariç)? */
+function segmentsCross(a: FlowPoint, b: FlowPoint, c: FlowPoint, d: FlowPoint) {
+  const cross = (p: FlowPoint, q: FlowPoint, r: FlowPoint) =>
+    (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
+  const o1 = cross(a, b, c);
+  const o2 = cross(a, b, d);
+  const o3 = cross(c, d, a);
+  const o4 = cross(c, d, b);
+  return ((o1 > 0 && o2 < 0) || (o1 < 0 && o2 > 0))
+    && ((o3 > 0 && o4 < 0) || (o3 < 0 && o4 > 0));
+}
+
 function segmentHitsBox(a: FlowPoint, b: FlowPoint, box: FlowBox) {
   if (pointInBox(a, box) || pointInBox(b, box)) return true;
   const corners = [
@@ -268,7 +288,15 @@ function pickLinkPort(side: LinkSide, count: number, index: number) {
 /** Serbest iliÅŸkileri kartlarÄ±n dÄ±ÅŸÄ±ndan dolaÅŸtÄ±r: yan porttan Ã§Ä±k, satÄ±r
  *  aralarÄ±ndaki boÅŸ ÅŸeritten geÃ§, hedefin yan portuna gir. DoÄŸrudan hat
  *  temizse gereksiz kÄ±vrÄ±m Ã¼retme. */
-function freeLinkRoute(graph: Graph, from: string, to: string, sourcePort: string, targetPort: string) {
+/** Aynı boşluk şeridini kullanan ilişkiler üst üste binmesin diye bağlantı
+ *  kimliğinden türeyen küçük bir şerit kaydırması (−6/0/+6 px). */
+function laneBias(id: string) {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
+  return ((Math.abs(h) % 3) - 1) * 6;
+}
+
+function freeLinkRoute(graph: Graph, from: string, to: string, sourcePort: string, targetPort: string, bias = 0) {
   const sourceCell = graph.getCellById(from);
   const targetCell = graph.getCellById(to);
   if (!sourceCell?.isNode() || !targetCell?.isNode()) return null;
@@ -283,7 +311,21 @@ function freeLinkRoute(graph: Graph, from: string, to: string, sourcePort: strin
     boxes.push({ x: bb.x - 8, y: bb.y - 8, width: bb.width + 16, height: bb.height + 16 });
     bands.push({ top: bb.y, bottom: bb.y + bb.height });
   }
-  if (!pathHitsBoxes([source, target], boxes)) return [];
+  const directClean = !pathHitsBoxes([source, target], boxes);
+  /* Hiyerarşi çizgileri yaklaşık doğru parçaları olarak alınır; aday yolun
+     bunlarla kesişme sayısı, şerit seçiminde ceza olarak kullanılır. */
+  const hierarchy: { a: FlowPoint; b: FlowPoint }[] = [];
+  for (const edge of graph.getEdges()) {
+    const data = (edge.getData() || {}) as { childId?: string };
+    if (!data.childId) continue;
+    const sc = edge.getSourceCell();
+    const tc = edge.getTargetCell();
+    if (!sc?.isNode() || !tc?.isNode()) continue;
+    hierarchy.push({
+      a: portPoint(sc as X6Node, edgePort(edge, 'source') || 'out'),
+      b: portPoint(tc as X6Node, edgePort(edge, 'target') || 'in'),
+    });
+  }
   const merged: { top: number; bottom: number }[] = [];
   for (const band of bands.sort((a, b) => a.top - b.top)) {
     const last = merged[merged.length - 1];
@@ -305,26 +347,49 @@ function freeLinkRoute(graph: Graph, from: string, to: string, sourcePort: strin
   const sourceExit = { x: source.x + sourceDir * 16, y: source.y };
   const targetExit = { x: target.x + targetDir * 16, y: target.y };
   let best: FlowPoint[] | null = null;
-  let bestLength = Infinity;
-  for (const lane of lanes) {
-    const points = [
-      source,
-      sourceExit,
-      { x: sourceExit.x, y: lane },
-      { x: targetExit.x, y: lane },
-      targetExit,
-      target,
-    ];
-    if (pathHitsBoxes(points, boxes)) continue;
-    let length = 0;
-    for (let i = 0; i < points.length - 1; i++) {
-      length += Math.abs(points[i].x - points[i + 1].x) + Math.abs(points[i].y - points[i + 1].y);
+  let bestScore = Infinity;
+  let laneChosen = false;
+  if (directClean) {
+    let crossings = 0;
+    for (const h of hierarchy) {
+      if (segmentsCross(source, target, h.a, h.b)) crossings += 1;
     }
-    if (length < bestLength) {
-      bestLength = length;
-      best = [sourceExit, { x: sourceExit.x, y: lane }, { x: targetExit.x, y: lane }, targetExit];
-    }
+    if (crossings === 0) return [];
+    const length = Math.abs(source.x - target.x) + Math.abs(source.y - target.y);
+    bestScore = length + crossings * LINK_CROSSING_COST;
+    best = [];
   }
+  const tryLanes = (candidates: number[]) => {
+    for (const lane of candidates) {
+      const points = [
+        source,
+        sourceExit,
+        { x: sourceExit.x, y: lane },
+        { x: targetExit.x, y: lane },
+        targetExit,
+        target,
+      ];
+      if (pathHitsBoxes(points, boxes)) continue;
+      let length = 0;
+      for (let i = 0; i < points.length - 1; i++) {
+        length += Math.abs(points[i].x - points[i + 1].x) + Math.abs(points[i].y - points[i + 1].y);
+      }
+      let crossings = 0;
+      for (let i = 0; i < points.length - 1; i++) {
+        for (const h of hierarchy) {
+          if (segmentsCross(points[i], points[i + 1], h.a, h.b)) crossings += 1;
+        }
+      }
+      const score = length + crossings * LINK_CROSSING_COST;
+      if (score < bestScore) {
+        bestScore = score;
+        best = [sourceExit, { x: sourceExit.x, y: lane }, { x: targetExit.x, y: lane }, targetExit];
+        laneChosen = true;
+      }
+    }
+  };
+  if (bias !== 0) tryLanes(lanes.map((lane) => lane + bias));
+  if (!laneChosen) tryLanes(lanes);
   return best ?? [];
 }
 
@@ -348,7 +413,7 @@ function syncFreeRoutes(graph: Graph) {
     const sourcePort = edgePort(edge, 'source');
     const targetPort = edgePort(edge, 'target');
     if (!from || !to || !sourcePort || !targetPort) continue;
-    const route = freeLinkRoute(graph, from, to, sourcePort, targetPort);
+    const route = freeLinkRoute(graph, from, to, sourcePort, targetPort, laneBias(data.linkId));
     if (route) applyFreeLook(edge, route);
   }
 }
@@ -473,14 +538,20 @@ function replaceEdges(
     graph.removeEdge(e);
     mutated = true;
   }
+  /* İlişkiler görünürken hiyerarşi iskeleti geri çekilir; iki katman aynı
+     anda öne çıkıp görüntüde birbirine karışmaz (özellikle "Bağlantılar"). */
+  const hierarchyOpacity = !showAllLinks
+    ? 1
+    : selectedLinkId ? 0.7 : 0.55;
   for (const [childId, a] of desired) {
     const selected = selectedEdgeId === childId;
     const stroke = selected ? '#D14D41' : EDGE_COLOR;
+    const opacity = selected ? 1 : hierarchyOpacity;
     const existingEdge = existing.get(childId);
     if (existingEdge) {
       // Hiyerarşi çizgileri kartların arkasında kalmalı; port uçları kartın
       // içine girse bile çizgi kartın önüne taşmasın.
-      if (existingEdge.getZIndex() !== -1) existingEdge.setZIndex(-1);
+      if (existingEdge.getZIndex() !== HIERARCHY_Z) existingEdge.setZIndex(HIERARCHY_Z);
       // Silip yeniden eklemek X6 view'Ä±nda kopya bÄ±rakÄ±yor; yerinde gÃ¼ncelle.
       if (existingEdge.getSourceCellId() !== a.parentId || edgePort(existingEdge, 'source') !== 'out') {
         existingEdge.setSource({ cell: a.parentId as string, port: 'out' });
@@ -489,9 +560,15 @@ function replaceEdges(
         existingEdge.setTarget({ cell: childId, port: 'in' });
       }
       applyEdgeLook(existingEdge, 'V');
-      if (existingEdge.attr('line/stroke') !== stroke) {
+      const edgeWidth = selected ? 2 : HIERARCHY_WIDTH;
+      if (
+        existingEdge.attr('line/stroke') !== stroke
+        || existingEdge.attr('line/strokeWidth') !== edgeWidth
+        || existingEdge.attr('line/strokeOpacity') !== opacity
+      ) {
         existingEdge.attr('line/stroke', stroke);
-        existingEdge.attr('line/strokeWidth', selected ? 2 : 1.4);
+        existingEdge.attr('line/strokeWidth', edgeWidth);
+        existingEdge.attr('line/strokeOpacity', opacity);
       }
       continue;
     }
@@ -501,11 +578,12 @@ function replaceEdges(
       target: { cell: a.id, port: 'in' },
       data: { childId: a.id },
       connector: { name: 'smooth', args: { direction: 'V' } },
-      zIndex: -1,
+      zIndex: HIERARCHY_Z,
       attrs: {
         line: {
           stroke,
-          strokeWidth: selected ? 2 : 1.4,
+          strokeWidth: selected ? 2 : HIERARCHY_WIDTH,
+          strokeOpacity: opacity,
           /* X6 varsayÄ±lan klasik ok baÅŸÄ±nÄ± kapat. */
           targetMarker: null,
         },
@@ -515,15 +593,17 @@ function replaceEdges(
   }
   for (const [id, l] of desiredLinks) {
     const selected = selectedLinkId === id;
+    const focused = focusNodeId === l.from || focusNodeId === l.to;
     const stroke = selected ? ACCENT : LINK_COLOR;
     const labelText = l.label.trim();
     const ends = linkEnds.get(id);
     if (!ends) continue;
     const sourcePort = portFor(l.from, ends.source);
     const targetPort = portFor(l.to, ends.target);
-    const route = freeLinkRoute(graph, l.from, l.to, sourcePort, targetPort);
+    const route = freeLinkRoute(graph, l.from, l.to, sourcePort, targetPort, laneBias(id));
     const ex = existingLinks.get(id);
     if (ex) {
+      if (ex.getZIndex() !== LINK_Z) ex.setZIndex(LINK_Z);
       if (ex.getSourceCellId() !== l.from || edgePort(ex, 'source') !== sourcePort) {
         ex.setSource({ cell: l.from, port: sourcePort });
       }
@@ -533,18 +613,27 @@ function replaceEdges(
       if (route) applyFreeLook(ex, route);
       // Ok ucu konumu KOŞULSUZ düzeltilir (eski kenarlar da düzelsin):
       // uç, port noktasına yani kart kenarına tam oturur. Gerekçe: linkMarker.
-      if (ex.attr('line/targetMarker/offset') !== LINK_MARKER_SIZE / 2) {
-        ex.attr('line/targetMarker/offset', LINK_MARKER_SIZE / 2);
+      if (ex.attr('line/targetMarker/offset') !== -LINK_MARKER_SIZE / 2) {
+        ex.attr('line/targetMarker/offset', -LINK_MARKER_SIZE / 2);
       }
-      if (ex.attr('line/strokeDasharray') !== '4 4') {
-        ex.attr('line/strokeDasharray', '4 4');
+      if (ex.attr('line/strokeDasharray') !== LINK_DASH) {
+        ex.attr('line/strokeDasharray', LINK_DASH);
+        ex.attr('line/strokeLinecap', 'round');
         ex.attr('line/targetMarker/size', LINK_MARKER_SIZE);
         ex.attr('line/targetMarker/strokeWidth', 0);
       }
-      if (ex.attr('line/stroke') !== stroke || ex.attr('line/strokeWidth') !== (selected ? 2 : 1.25)) {
+      const width = selected ? 2 : focused ? 1.4 : LINK_WIDTH;
+      const opacity = selected ? 1 : focused ? LINK_FOCUS_OPACITY : LINK_DIM_OPACITY;
+      if (
+        ex.attr('line/stroke') !== stroke
+        || ex.attr('line/strokeWidth') !== width
+        || ex.attr('line/strokeOpacity') !== opacity
+      ) {
         ex.attr('line/stroke', stroke);
-        ex.attr('line/strokeWidth', selected ? 2 : 1.25);
+        ex.attr('line/strokeWidth', width);
+        ex.attr('line/strokeOpacity', opacity);
         ex.attr('line/targetMarker/fill', stroke);
+        ex.attr('line/targetMarker/fillOpacity', opacity);
       }
       const nextLabels = labelText ? [labelItem(labelText)] : [];
       const first = ex.getLabels()[0] as
@@ -556,11 +645,13 @@ function replaceEdges(
       if (!sameText || !samePosition) ex.setLabels(nextLabels);
       continue;
     }
+    const opacity = selected ? 1 : focused ? LINK_FOCUS_OPACITY : LINK_DIM_OPACITY;
     graph.addEdge({
       id: `link:${id}`,
       source: { cell: l.from, port: sourcePort },
       target: { cell: l.to, port: targetPort },
       data: { linkId: id },
+      zIndex: LINK_Z,
       vertices: route ?? [],
       connector: route && route.length > 0
         ? { name: 'rounded', args: { radius: 14 } }
@@ -568,10 +659,12 @@ function replaceEdges(
       attrs: {
         line: {
           stroke,
-          strokeWidth: selected ? 2 : 1.25,
-          strokeDasharray: '4 4',
+          strokeWidth: selected ? 2 : focused ? 1.4 : LINK_WIDTH,
+          strokeOpacity: opacity,
+          strokeDasharray: LINK_DASH,
+          strokeLinecap: 'round',
           sourceMarker: null,
-          targetMarker: linkMarker(stroke),
+          targetMarker: linkMarker(stroke, opacity),
         },
       },
       labels: labelText ? [labelItem(labelText)] : [],

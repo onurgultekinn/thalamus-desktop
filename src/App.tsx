@@ -13,7 +13,6 @@ import { NucleusCommand } from './components/NucleusCommand';
 import { CommandPalette, type PaletteAction } from './components/CommandPalette';
 import { AuthScreen } from './components/auth/AuthScreen';
 import { useToast } from './components/Toast';
-import { API_BASE } from './services/ThalamusClient';
 import { aiChat, aiChatStream, userMessage, getActiveProvider } from './services/aiClient';
 import { setProviderModel } from './lib/models';
 import {
@@ -35,7 +34,7 @@ import {
 } from './lib/localModels';
 import { activeProviderStorageKey, baseStorageKey } from './lib/providers';
 import { connectionName, upsertConnection } from './lib/connections';
-import { getWorkspaceName, getWorkspaceRoot, openProject, pruneRecentProjects, rememberProject } from './lib/workspace';
+import { consumePendingProjectName, getWorkspaceName, getWorkspaceRoot, listRecentProjects, openProject, pruneRecentProjects, rememberProject, setPendingProjectName } from './lib/workspace';
 import { planFileContext, addSavings, loadSavings, estimateTokens, cacheAwareHistory, type SessionSavings } from './lib/contextPlan';
 import { expandCompactDiff } from './lib/compactDiff';
 import { askQuestionHistoryText, parseAskQuestion } from './lib/askQuestion';
@@ -49,6 +48,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { explainError, splitExplanation, type ExplainedError } from './lib/errors';
 import { markSwitchStart, reportSwitchPaint } from './lib/perfTrace';
 import { useT, t } from './lib/i18n';
+import { chatWhen } from './lib/chatTitle';
 import type { Message, ChatItem, User } from './types';
 export type { Message, MessageMetrics, ChatItem } from './types';
 import './App.css';
@@ -491,23 +491,7 @@ export default function App() {
     return () => window.removeEventListener('thalamus_config_changed', syncSettings);
   }, []);
 
-  const { isLoading: engineLoading, checkHealth } = useThalamus();
-
-  /** Welcome card 4: a real engine health check (HTTP + latency). */
-  const handleEngineDiagnostic = async () => {
-    const t0 = performance.now();
-    try {
-      const ok = await checkHealth();
-      const ms = Math.max(1, Math.round(performance.now() - t0));
-      if (ok) {
-        showToast(t('app.engineActive'), t('app.engineActiveMsg', { base: API_BASE, ms }), 'success');
-      } else {
-        showToast(t('app.engineOffline'), t('app.engineOfflineMsg', { base: API_BASE }), 'error', undefined, '[503] health check failed');
-      }
-    } catch {
-      showToast(t('app.engineOffline'), t('app.engineOfflineMsg', { base: API_BASE }), 'error', undefined, '[503] health check failed');
-    }
-  };
+  const { isLoading: engineLoading } = useThalamus();
   const [loading, setLoading] = useState<boolean>(false);
   // İlk mesajda yerel model yüklenirken "Yerel model yükleniyor · X" göster.
   const [localLoadingLabel, setLocalLoadingLabel] = useState<string>('');
@@ -698,11 +682,14 @@ export default function App() {
     }
   }, [activeChatId]);
 
-  const handleNewChat = () => {
+  const handleNewChat = (name?: string, force = false) => {
+    const explicit = name?.trim();
     // C1: uzerinde hic mesaj olmayan bir sohbet zaten aciksa yenisini
     // olusturma (listede ust uste "New Chat Session" satirlari birikiyordu);
-    // mevcut bos sohbeti resetleyip kullan.
-    if (activeChatId && messages.length <= 1) {
+    // mevcut bos sohbeti resetleyip kullan. İsim kutusundan gelen istek
+    // (force) her zaman yeni oturum açar — kullanıcı bunu açıkça istedi;
+    // ad yazmadıysa sıradaki numara verilir (Sohbet 1, Chat 2, …).
+    if (!explicit && !force && activeChatId && messages.length <= 1) {
       let storedEmpty = true;
       try {
         const raw = localStorage.getItem(`thalamus_chat_messages_${activeChatId}`);
@@ -717,11 +704,32 @@ export default function App() {
     const newId = 'chat_' + Date.now();
     const newChat: ChatItem = {
       id: newId,
-      title: t('app.newChatTitle')
+      title: explicit || nextAutoTitle('chat')
     };
     setChats(prev => [newChat, ...prev]);
     setActiveChatId(newId);
     setMessages([]);
+  };
+
+  /** İsim verilmediğinde sıradaki numara: "Sohbet 3" / "Chat 2". Ne zaman
+      açıldığı adın içine gömülmez — tarih satırda ayrıca gösterilir. */
+  const nextAutoTitle = (kind: 'chat' | 'project'): string => {
+    const pattern = kind === 'chat' ? /^(?:sohbet|chat) (\d+)$/i : /^(?:proje|project) (\d+)$/i;
+    const titles = kind === 'chat'
+      ? chats.map(c => c.title || '')
+      : listRecentProjects().map(p => p.name || '');
+    let max = 0;
+    for (const title of titles) {
+      const m = pattern.exec(title);
+      if (m) max = Math.max(max, parseInt(m[1], 10) || 0);
+    }
+    return t(kind === 'chat' ? 'app.chatAutoName' : 'app.projectAutoName', { n: max + 1 });
+  };
+
+  /** İsim kutusundan proje: klasör bağlamadan proje görünümünü açar. */
+  const handleNewProject = (name?: string) => {
+    setPendingProjectName(name?.trim() || undefined);
+    setCurrentView('project');
   };
 
   const handleDeleteChat = (chatId: string) => {
@@ -793,10 +801,11 @@ export default function App() {
     const isNewChat = !currentId || chats.length === 0;
     if (isNewChat) {
       currentId = 'chat_' + Date.now();
-      const generatedTitle = userText.length > 22 ? userText.slice(0, 22) + '...' : userText;
+      // İlk mesaj artık adı belirlemez: otomatik ad (numara) ile açılır.
+      // Kullanıcı isterse kenar çubuğundan yeniden adlandırır.
       const newChat: ChatItem = {
         id: currentId,
-        title: generatedTitle
+        title: nextAutoTitle('chat')
       };
       // V2: onceki sohbetleri SİLME; listeye başa ekle. (setChats([newChat])
       // tüm sohbet geçmişini tek mesajlık yeni sohbetle değiştiriyordu.)
@@ -805,9 +814,6 @@ export default function App() {
       setChats(prev => (prev.some(c => c.id === newChat.id) ? prev : [newChat, ...prev]));
       setActiveChatId(currentId);
       activeChatIdRef.current = currentId;
-    } else if (messages.length <= 1 && !isRegenerate) {
-      const generatedTitle = userText.length > 22 ? userText.slice(0, 22) + '...' : userText;
-      setChats(prev => prev.map(c => c.id === currentId ? { ...c, title: generatedTitle } : c));
     }
 
     // Regenerate, mesaj üzerinde saklanan görselleri yeniden kullanır; aksi
@@ -827,6 +833,9 @@ export default function App() {
       timestamp: nowTime,
       ...(activeImages.length > 0 ? { modelName: t('app.visionModel') } : {}),
       ...(activeImages.length > 0 ? { images: activeImages } : {}),
+      ...(fileContext && fileContext.length > 0
+        ? { files: fileContext.map(f => ({ name: f.name, chars: f.body.length })) }
+        : {}),
     };
 
     if (!isRegenerate) {
@@ -1308,15 +1317,6 @@ export default function App() {
   };
 
   /**
-   * ChatView memo'lu: bu handler'lar sabit kimlikli olmali, yoksa her tus
-   * vurusunde yeni referans uretilir ve tum mesajlar yeniden reconcile edilir.
-   */
-  const handleSampleCode = useCallback((code: string) => {
-    setInput(code);
-    showToast(t('preset.snippetLoaded'), t('preset.snippetLoadedMsg'), 'info');
-  }, [showToast]);
-
-  /**
    * Kullanıcı mesajını düzeltip o noktadan yeniden yanıt üretir: düzenlenen
    * mesajın ardındaki her şey atılır, istem yeni bir kullanıcı mesajı olarak
    * gönderilir (görseller korunur).
@@ -1475,10 +1475,16 @@ export default function App() {
       return;
     }
     setWorkspaceVersion(v => v + 1);
+    // İsim kutusundan gelen ad varsa klasörle birlikte listeye işle.
+    const pendingName = consumePendingProjectName();
+    if (pendingName) rememberProject(root, pendingName);
     setCurrentView('project');
   };
 
   const projectName = getWorkspaceName();
+  // Karşılama ekranı yalnızca ilk giriş: hiç sohbet, bağlı klasör ve geçmiş
+  // proje yokken gösterilir; bir oturum/proje varken boş sohbet sade kalır.
+  const showWelcome = chats.length === 0 && !getWorkspaceRoot() && listRecentProjects().length === 0;
   const activePath = currentView === 'project' 
     ? `${t('header.projects')} / ${projectName} / ${activeTab}` 
     : `${t('header.chats')} / ${activeChat.title}`;
@@ -1574,6 +1580,7 @@ export default function App() {
       <div className="header-wrapper">
         <Header
           activePath={activePath}
+          activeChatWhen={currentView === 'chat' ? chatWhen(activeChat.id) ?? undefined : undefined}
           onOpenNucleus={toggleNucleus}
           onOpenPalette={() => setIsPaletteOpen(true)}
         />
@@ -1593,6 +1600,7 @@ export default function App() {
             setCurrentView('chat');
           }}
           onNewChat={handleNewChat}
+          onNewProject={handleNewProject}
           onOpenSettings={() => setIsSettingsOpen(true)}
           user={user}
           userAvatarUrl={user?.avatar}
@@ -1623,17 +1631,14 @@ export default function App() {
                   userName={user?.name?.trim()?.toLowerCase() === 'guest user' ? '' : (user?.name?.trim() || '')}
                   targetModel={activeModel}
                   onlinePricing={onlinePricing}
-                  projectName={projectName}
                   chatEndRef={chatEndRef}
                   chatKey={activeChatId}
-                  onSampleCode={handleSampleCode}
-                  onOpenProject={handleOpenProjectView}
-                  onOpenSettings={handleOpenSettings}
-                  onEngineDiagnostic={handleEngineDiagnostic}
+                  showWelcome={showWelcome}
+                  onStartChat={() => handleNewChat()}
+                  onOpenProjectView={handleOpenProjectView}
                   onRegenerate={handleRegenerate}
                   onEditMessage={handleEditMessage}
                   onAnswerQuestion={handleAnswerQuestion}
-                  hasProvider={!!activeProviderId}
                 />
               </div>
 

@@ -2,6 +2,8 @@ import { t } from '../lib/i18n';
 
 interface HeaderProps {
   activePath?: string;
+  /** Aktif sohbetin ne zaman açıldığı ("14:32" / "3 Kas") — breadcrumb'da adın başına ince çizgiyle akar. */
+  activeChatWhen?: string;
   /** Komut paletini açar (Ctrl+K). */
   onOpenPalette?: () => void;
   /** Uygulama geneli Nucleus komut yüzeyini açar. */
@@ -10,6 +12,7 @@ interface HeaderProps {
 
 export function Header({
   activePath = "",
+  activeChatWhen,
   onOpenPalette,
   onOpenNucleus
 }: HeaderProps) {
@@ -44,6 +47,9 @@ export function Header({
           {pathSegments.map((segment, index) => {
             const isLast = index === pathSegments.length - 1;
             const isRoot = index === 0;
+            // Sohbet modunda adın başına açılış zamanı ince çizgiyle akar:
+            // "chats / 14:32 │ Sohbet 1". Proje modunda zaman yoktur.
+            const when = isLast && !isRoot ? activeChatWhen : null;
 
             return (
               <div key={index} className="flex items-center gap-2">
@@ -56,7 +62,15 @@ export function Header({
                       : "text-obsidian-muted"
                   }
                 >
-                  {segment}
+                  {when ? (
+                    <span className="flex items-center gap-1.5">
+                      <span className="text-[10px] font-normal tabular-nums opacity-60">{when}</span>
+                      <span aria-hidden="true" className="h-[9px] w-px flex-shrink-0 bg-white/12" />
+                      <span>{segment}</span>
+                    </span>
+                  ) : (
+                    segment
+                  )}
                 </span>
                 {!isLast && (
                   <span className="text-obsidian-muted select-none" aria-hidden="true">/</span>

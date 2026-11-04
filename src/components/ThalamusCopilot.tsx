@@ -25,12 +25,13 @@ import {
   PictureInPicture2, 
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
-import { pickFiles, readAttachedFiles } from '../lib/workspace';
+import { pickFiles, readAttachedFiles, type AttachedFileContent } from '../lib/workspace';
 import { aiChat, aiChatStream, userMessage, type AiChatResponse, type AiEditResult } from '../services/aiClient';
 import { cacheAwareHistory } from '../lib/contextPlan';
 import { prepareImageFile, IMAGE_MODE_ORDER, DEFAULT_IMAGE_MODE, type AttachedImage, type ImageMode } from '../lib/imageAttach';
 import { MarkdownMessage } from './MarkdownMessage';
 import { CopilotDiffModal } from './CopilotDiffModal';
+import type { PreviewItem } from './FilePreviewDrawer';
 import { useT, type TranslationKey } from '../lib/i18n';
 
 export interface ActionPayload {
@@ -49,6 +50,8 @@ export interface Message {
   timestamp: string;
   modeUsed?: 'chat' | 'agent';
   actionPayload?: ActionPayload;
+  /** Files that were read and sent to the model with this message. */
+  files?: { name: string; chars?: number; error?: string }[];
 }
 
 interface ThalamusCopilotProps {
@@ -67,6 +70,13 @@ interface ThalamusCopilotProps {
   onHeaderPointerDown?: React.PointerEventHandler<HTMLDivElement>;
   /** Ref to the header row (used to measure the unbreakable minimum width). */
   headerRef?: React.RefObject<HTMLDivElement | null>;
+  /** Opens the shared file preview panel (chips are clickable). */
+  onOpenPreview?: (item: PreviewItem) => void;
+}
+
+/** Base name of a Windows or POSIX path. */
+function baseName(path: string): string {
+  return path.replace(/\\/g, '/').split('/').pop() || path;
 }
 
 /** Slash command templates (Claude Code / ZCode style). */
@@ -176,6 +186,7 @@ export function ThalamusCopilot({
   onClose,
   onHeaderPointerDown,
   headerRef,
+  onOpenPreview,
 }: ThalamusCopilotProps) {
   const t = useT();
   const IMAGE_LABEL_KEY = { auto: 'image.auto', economy: 'image.economy', balanced: 'image.balanced', high: 'image.high' } as const;
@@ -306,9 +317,39 @@ export function ThalamusCopilot({
 
   const [showFileMentionMenu, setShowFileMentionMenu] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
+  const [fileInfo, setFileInfo] = useState<Record<string, AttachedFileContent & { loading?: boolean }>>({});
+  const fileInfoRef = useRef<Record<string, AttachedFileContent & { loading?: boolean }>>({});
   const [mentionSearch, setMentionSearch] = useState('');
   const mentionInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  /** Reads selected files immediately so the chip can show size/errors and preview. */
+  const loadFiles = async (paths: string[]) => {
+    const pending = paths.filter((p) => !fileInfoRef.current[p] || fileInfoRef.current[p].loading);
+    if (pending.length === 0) return;
+    const mark = (p: string, info: AttachedFileContent & { loading?: boolean }) => {
+      fileInfoRef.current = { ...fileInfoRef.current, [p]: info };
+      setFileInfo(fileInfoRef.current);
+    };
+    for (const p of pending) mark(p, { name: baseName(p), body: '', truncated: false, loading: true });
+    const read = await readAttachedFiles(pending, { perFileChars: 60_000, totalChars: 180_000 });
+    pending.forEach((p, i) => mark(p, { ...read[i], loading: false }));
+  };
+
+  const removeSelectedFile = (path: string) => {
+    setSelectedFiles((prev) => prev.filter((f) => f !== path));
+    const next = { ...fileInfoRef.current };
+    delete next[path];
+    fileInfoRef.current = next;
+    setFileInfo(next);
+  };
+
+  const openFilePreview = (path: string) => {
+    if (!onOpenPreview) return;
+    const info = fileInfoRef.current[path];
+    const body = info?.body ?? (info?.error ? `// ${t('cop.fileReadError')}: ${info.error}` : '');
+    onOpenPreview({ name: baseName(path), kind: 'text', body, path });
+  };
 
   // Yazı alanı içeriğe göre KENDİLİĞİNDEN büyür (elle boyutlandırma yok);
   // sınırı aşınca kendi içinde kaydırır.
@@ -408,6 +449,7 @@ export function ThalamusCopilot({
     setShowFileMentionMenu(false);
     if (!selectedFiles.includes(fileName)) {
       setSelectedFiles(prev => [...prev, fileName]);
+      void loadFiles([fileName]);
     }
     textareaRef.current?.focus();
   };
@@ -422,6 +464,7 @@ export function ThalamusCopilot({
       for (const p of paths) if (!next.includes(p)) next.push(p);
       return next;
     });
+    void loadFiles(paths);
     setShowFileMentionMenu(false);
   };
 
@@ -443,7 +486,12 @@ export function ThalamusCopilot({
         ? 'bg-[#D14D41]/15 text-[#D14D41]'
         : 'bg-[#4385BE]/20 text-[#4385BE]';
 
-    const callRealAI = async (prompt: string, streamMsgId?: string): Promise<AiChatResponse> => {
+    const callRealAI = async (
+      prompt: string,
+      streamMsgId?: string,
+      attachmentPaths: string[] = [],
+      attachmentInfo: Record<string, AttachedFileContent & { loading?: boolean }> = {},
+    ): Promise<AiChatResponse> => {
     // Code context: a SCHEMA is sent instead of the body; the LLM requests the body via get_code_body.
     // No loss — the original code stays in the editor/locally.
     const codeBlocks: { id: string; name: string; body: string }[] = activeFileCode.trim()
@@ -452,18 +500,25 @@ export function ThalamusCopilot({
     // SEÇİLEN DOSYALAR: içerik gerçekten okunur (eskiden yalnız yol gidiyordu,
     // model dosyayı göremiyordu). Bütçe: dosya başına 60k, toplam 180k karakter
     // (motor bu metni kayıpsız sıkıştırır). Okunamayan dosya sessizce düşmez.
-    if (selectedFiles.length > 0) {
-      const attached = await readAttachedFiles(selectedFiles, {
-        perFileChars: 60_000,
-        totalChars: 180_000,
-      });
-      for (const a of attached) {
+    if (attachmentPaths.length > 0) {
+      const info = { ...attachmentInfo };
+      const missing = attachmentPaths.filter((p) => !info[p] || info[p].loading);
+      if (missing.length > 0) {
+        const read = await readAttachedFiles(missing, {
+          perFileChars: 60_000,
+          totalChars: 180_000,
+        });
+        missing.forEach((p, i) => { info[p] = { ...read[i], loading: false }; });
+      }
+      for (const p of attachmentPaths) {
+        const a = info[p];
+        if (!a) continue;
         if (a.body) {
-          codeBlocks.push({ id: a.name, name: a.name, body: a.body });
+          codeBlocks.push({ id: baseName(p), name: baseName(p), body: a.body });
         } else if (a.error) {
           codeBlocks.push({
-            id: a.name,
-            name: a.name,
+            id: baseName(p),
+            name: baseName(p),
             body: `// okunamadı: ${a.error}`,
           });
         }
@@ -520,36 +575,51 @@ export function ThalamusCopilot({
 
   const doSend = (raw: string) => {
     const imageCount = pendingImagesRef.current.length;
-    if (!raw.trim() && imageCount === 0) return;
+    const filePaths = [...selectedFiles];
+    const fileSnapshot = { ...fileInfoRef.current };
+    const fileCount = filePaths.length;
+    if (!raw.trim() && imageCount === 0 && fileCount === 0) return;
 
     const userText = raw.trim();
-    const contextInfo = selectedFiles.length > 0 ? ` [Reference: ${selectedFiles.join(', ')}]` : '';
     // D4: @referansi SUS donanin otesi — modele dosya adlari verilir ve
     // read_file araciyla gercekten acabilecekleri soylenir (backend araclari
     // workspace icinde dosya okuyabiliyor).
-    const referenceNote = selectedFiles.length > 0
-      ? `\nAttached file references (open their contents with the read_file tool when needed): ${selectedFiles.join(', ')}`
+    const referenceNote = fileCount > 0
+      ? `\nAttached file references (open their contents with the read_file tool when needed): ${filePaths.join(', ')}`
       : '';
 
     // Slash command expansion: /explain, /review, /refactor, /tests
     const firstTok = userText.split(/\s+/)[0];
     const slashKey = SLASH_TEMPLATES[firstTok];
     const slashTemplate = slashKey ? t(slashKey) : undefined;
+    const emptyFallback = imageCount > 0
+      ? t('cop.lookAtImage')
+      : fileCount > 0 ? t('cop.lookAtFiles') : '';
     const aiText = slashTemplate
       ? slashTemplate + (userText.length > firstTok.length ? ' ' + userText.slice(firstTok.length).trim() : '')
-      : (userText || t('cop.lookAtImage'));
+      : (userText || emptyFallback);
 
     const userMsg: Message = {
       id: newId(),
       sender: 'user',
-      text: (userText || `[${imageCount} image${imageCount > 1 ? 's' : ''}]`) + contextInfo,
+      text: userText
+        || (imageCount > 0 ? `[${imageCount} image${imageCount > 1 ? 's' : ''}]` : '')
+        || `[${fileCount} file${fileCount > 1 ? 's' : ''}]`,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      modeUsed: mode
+      modeUsed: mode,
+      ...(fileCount > 0 ? {
+        files: filePaths.map((p) => {
+          const info = fileSnapshot[p];
+          return { name: baseName(p), chars: info?.body?.length, error: info?.error };
+        }),
+      } : {}),
     };
 
     setMessages(prev => [...prev, userMsg]);
     setInput("");
     setSelectedFiles([]);
+    setFileInfo({});
+    fileInfoRef.current = {};
     setShowFileMentionMenu(false);
 
     const isAgent = mode === 'agent';
@@ -600,7 +670,7 @@ export function ThalamusCopilot({
       systemPrompt = `You are Nucleus, Thalamus' coding assistant. Help the user analyze or understand their code. Always answer in the same language the user writes in (Turkish user → answer in Turkish).\nActive file: ${activeFile}${referenceNote}\n\nUser question: ${aiText}`;
     }
 
-    callRealAI(systemPrompt, placeholderId)
+    callRealAI(systemPrompt, placeholderId, filePaths, fileSnapshot)
       .then(async res => {
         // Remove "Thinking..." message
         setMessages(prev => prev.filter(m => m.id !== placeholderId));
@@ -905,6 +975,31 @@ export function ThalamusCopilot({
             }`}>
               <MarkdownMessage content={msg.text} />
 
+              {msg.files && msg.files.length > 0 && (
+                <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t border-white/10 pt-1.5">
+                  <span className="text-[9.5px] font-mono uppercase tracking-wide text-white/60">
+                    {t('cop.attachmentsSent')}
+                  </span>
+                  {msg.files.map((f, i) => (
+                    <span
+                      key={`${f.name}-${i}`}
+                      title={f.error || undefined}
+                      className={`flex items-center gap-1 rounded border px-1 py-0.5 font-mono text-[10px] ${
+                        f.error
+                          ? 'border-[#D14D41]/60 text-[#F0A8A2]'
+                          : 'border-white/20 text-white/80'
+                      }`}
+                    >
+                      <FileText size={8} className="flex-shrink-0" />
+                      <span className="truncate max-w-[160px]">{f.name}</span>
+                      {f.chars !== undefined && (
+                        <span className="text-white/50">{Math.max(1, Math.ceil(f.chars / 1024))} KB</span>
+                      )}
+                    </span>
+                  ))}
+                </div>
+              )}
+
               {msg.actionPayload && msg.actionPayload.type === 'RUN_TERMINAL' && (
                 <div className="mt-2 rounded border border-[#2a2a2c] bg-[#0E0E0E] p-2 flex items-center justify-between gap-2 overflow-hidden">
                   <div className="flex items-center gap-1.5 min-w-0 font-mono text-[11px]">
@@ -1012,7 +1107,8 @@ export function ThalamusCopilot({
                   src={img.url}
                   alt={img.name}
                   title={`${img.name} · ${img.width}×${img.height} · detail:${img.detail} · ${img.reason}${img.visionDiag ? ' · ' + img.visionDiag : ''}\n${img.options.map((o) => `${o.label}: ${Math.round(o.ratio * 100)}% · ≈${o.tokens} tok · ${o.retention}% detail`).join('\n')}`}
-                  className="h-10 w-10 rounded-md object-cover border border-obsidian-raise"
+                  onClick={() => onOpenPreview?.({ name: img.name, kind: 'image', url: img.url })}
+                  className="h-10 w-10 rounded-md object-cover border border-obsidian-raise cursor-pointer hover:border-[#dcb67a]/60 transition-colors"
                 />
                 <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 rounded bg-obsidian-panel/90 px-1 text-[8px] font-mono text-[#dcb67a] whitespace-nowrap">
                   ≈{img.estTokens} · %{img.retention}
@@ -1129,20 +1225,52 @@ export function ThalamusCopilot({
         <div className="relative bg-obsidian-bg border border-obsidian-raise focus-within:border-[#4385BE] rounded p-1.5 transition-all">
           {selectedFiles.length > 0 && (
             <div className="flex items-center gap-1 flex-wrap mb-1 pb-1 border-b border-[#282726]">
-              {selectedFiles.map(file => (
-                <span key={file} className="flex items-center gap-1 max-w-[190px] bg-obsidian-surface border border-obsidian-raise text-[#3AA99F] px-1.5 py-0.5 rounded text-[11px] font-mono">
-                  <FileText size={9} className="flex-shrink-0" />
-                  <span className="truncate">@{file}</span>
-                  <button
-                    type="button"
-                    aria-label={t('common.remove')}
-                    onClick={() => setSelectedFiles(selectedFiles.filter(f => f !== file))}
-                    className="hover:text-red-400 ml-0.5 cursor-pointer flex-shrink-0"
+              {selectedFiles.map(file => {
+                const info = fileInfo[file];
+                const name = baseName(file);
+                const hasError = !!info?.error;
+                const status = info?.loading
+                  ? t('cop.fileReading')
+                  : hasError
+                    ? t('cop.fileReadError')
+                    : info?.body
+                      ? `${Math.max(1, Math.ceil(info.body.length / 1024))} KB`
+                      : '';
+                return (
+                  <div
+                    key={file}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => openFilePreview(file)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        openFilePreview(file);
+                      }
+                    }}
+                    title={`${file}${info?.error ? `\n${info.error}` : ''}`}
+                    className={`group flex items-center gap-1 max-w-[240px] bg-obsidian-surface border px-1.5 py-0.5 rounded text-[11px] font-mono cursor-pointer transition-colors ${
+                      hasError
+                        ? 'border-[#D14D41]/60 text-[#D14D41]'
+                        : 'border-obsidian-raise text-[#3AA99F] hover:border-[#3AA99F]/60'
+                    }`}
                   >
-                    ×
-                  </button>
-                </span>
-              ))}
+                    <FileText size={9} className="flex-shrink-0" />
+                    <span className="truncate">{name}</span>
+                    {status && (
+                      <span className={`flex-shrink-0 ${hasError ? 'text-[#D14D41]' : 'text-obsidian-muted'}`}>{status}</span>
+                    )}
+                    <button
+                      type="button"
+                      aria-label={t('common.remove')}
+                      onClick={(e) => { e.stopPropagation(); removeSelectedFile(file); }}
+                      className="hover:text-red-400 ml-0.5 cursor-pointer flex-shrink-0"
+                    >
+                      ×
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           )}
 
@@ -1201,9 +1329,9 @@ export function ThalamusCopilot({
               type="button"
               onClick={handleSend}
               aria-label={t('cop.send')}
-              disabled={!input.trim()}
+              disabled={!input.trim() && selectedFiles.length === 0 && pendingImages.length === 0}
               className={`p-1 rounded transition-all ${
-                input.trim() 
+                input.trim() || selectedFiles.length > 0 || pendingImages.length > 0
                   ? 'bg-[#205EA6] text-white hover:bg-[#4385BE] cursor-pointer' 
                   : 'bg-obsidian-surface text-[#575654] cursor-not-allowed'
               }`}

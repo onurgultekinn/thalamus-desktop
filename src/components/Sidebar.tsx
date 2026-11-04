@@ -14,18 +14,34 @@ import {
   UserRound,
   ChevronUp,
   X,
-  Search,
   Pin,
   PinOff,
   Download,
   MoreHorizontal
 } from 'lucide-react';
 import type { ChatItem, User } from '../types';
-import { getWorkspaceName, getWorkspaceRoot, listRecentProjects, forgetProject, pickFolder } from '../lib/workspace';
+import { getWorkspaceName, getWorkspaceRoot, listRecentProjects, forgetProject } from '../lib/workspace';
 import { searchChats, type ChatSearchHit } from '../lib/chatSearch';
+import { chatWhen } from '../lib/chatTitle';
 import { visiblePlanLabel } from '../lib/plan';
 import { useT } from '../lib/i18n';
-import { useToast } from './Toast';
+
+/** Her sohbet satırı: açılış zamanı · ince çizgi · ad. Zaman küçük ve sönük
+    kalır — ad asıl içeriktir, satırı tarih şişirmez. Uzun adlarda ad kırpılır,
+    zaman her zaman okunur. Zaman okunamıyorsa yalnız ad çizilir. */
+function ChatTitleLabel({ id, title }: { id: string; title: string }) {
+  const when = chatWhen(id);
+  if (!when) return <span className="tlm-fade-truncate block">{title}</span>;
+  return (
+    <span className="flex min-w-0 items-center gap-[3px]">
+      <span className="flex-shrink-0 text-[9.5px] tabular-nums opacity-60">{when}</span>
+      <span aria-hidden="true" className="h-[8px] w-px flex-shrink-0 bg-white/12" />
+      {/* flex-1: kutu satırın kalanına yayılır — maske sağ kenara taşınır.
+          Kısa adlar maske bölgesine ulaşmaz, yalnız sığmayanlar solar. */}
+      <span className="tlm-fade-truncate min-w-0 flex-1 text-[11.5px]">{title}</span>
+    </span>
+  );
+}
 
 interface SidebarProps {
   currentView: 'chat' | 'project';
@@ -35,7 +51,9 @@ interface SidebarProps {
   chats?: ChatItem[];
   activeChatId?: string;
   onSelectChat?: (id: string) => void;
-  onNewChat?: () => void;
+  onNewChat?: (name?: string, force?: boolean) => void;
+  /** İsim kutusundan proje oluşturma: klasör seçmeden proje görünümüne geçer. */
+  onNewProject?: (name?: string) => void;
   onOpenSettings?: () => void;
   user?: User | null;
   onLogout?: () => void;
@@ -57,6 +75,7 @@ export function Sidebar({
   activeChatId,
   onSelectChat,
   onNewChat,
+  onNewProject,
   onOpenSettings,
   user,
   onLogout,
@@ -69,20 +88,10 @@ export function Sidebar({
   projectsVersion
 }: SidebarProps) {
   const t = useT();
-  const { showToast } = useToast();
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [isNewBtnHovered, setIsNewBtnHovered] = useState(false);
   const [projects, setProjects] = useState(() => listRecentProjects());
   const [sessionMenu, setSessionMenu] = useState<'closed' | 'split' | 'project'>('closed');
-  // "Open project" opens the OS-native folder picker directly (no typed path).
-  const handleChooseFolder = async () => {
-    try {
-      const selected = await pickFolder(t('sidebar.chooseFolder'));
-      if (selected) { setSessionMenu('closed'); onOpenProject?.(selected); }
-    } catch (e) {
-      showToast(t('sidebar.chooseFolder'), String(e), 'error');
-    }
-  };
   // Destructive actions are two-step: first click arms, second confirms.
   const [pendingDelete, setPendingDelete] = useState<{ kind: 'chat' | 'project'; id: string } | null>(null);
   const profileMenuRef = useRef<HTMLDivElement>(null);
@@ -92,6 +101,44 @@ export function Sidebar({
   const [editTitle, setEditTitle] = useState<string>("");
   // Sohbet satırının "⋯" menüsü: açıkken hangi sohbete ait olduğu.
   const [rowMenuId, setRowMenuId] = useState<string | null>(null);
+
+  // Yeni oturum isim kutusu: Chat/Project seçilince düğmenin altına iner,
+  // gönderilince yukarı doğru kayarak kaybolur. value boşsa otomatik ad verilir.
+  const [naming, setNaming] = useState<{ target: 'chat' | 'project'; value: string } | null>(null);
+  const [namingClosing, setNamingClosing] = useState(false);
+  const namingInputRef = useRef<HTMLInputElement>(null);
+  const namingTimerRef = useRef<number | null>(null);
+
+  const closeNaming = (afterMs: number, submit?: () => void) => {
+    if (namingTimerRef.current !== null) window.clearTimeout(namingTimerRef.current);
+    setNamingClosing(true);
+    namingTimerRef.current = window.setTimeout(() => {
+      namingTimerRef.current = null;
+      setNaming(null);
+      setNamingClosing(false);
+      setSessionMenu('closed');
+      submit?.();
+    }, afterMs);
+  };
+
+  const submitNaming = () => {
+    if (!naming || namingClosing) return;
+    const { target, value } = naming;
+    const name = value.trim() || undefined;
+    closeNaming(160, () => {
+      if (target === 'chat') onNewChat?.(name, true);
+      else onNewProject?.(name);
+    });
+  };
+
+  // İsim kutusu açılınca odağı al; kapanış planlanmışsa yeniden açma.
+  useEffect(() => {
+    if (naming && !namingClosing) namingInputRef.current?.focus();
+  }, [naming, namingClosing]);
+
+  useEffect(() => () => {
+    if (namingTimerRef.current !== null) window.clearTimeout(namingTimerRef.current);
+  }, []);
 
   // Menü açıkken dışarı tık / Escape kapatır.
   useEffect(() => {
@@ -160,10 +207,22 @@ export function Sidebar({
     const onDown = (e: MouseEvent) => {
       if (sessionMenuRef.current && !sessionMenuRef.current.contains(e.target as Node)) {
         setSessionMenu('closed');
+        if (namingTimerRef.current !== null) window.clearTimeout(namingTimerRef.current);
+        namingTimerRef.current = null;
+        setNaming(null);
+        setNamingClosing(false);
       }
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setSessionMenu('closed');
+      if (e.key === 'Escape') {
+        // İsim kutusunun kendi Escape'i animasyonlu kapanışı yönetir.
+        if (sessionMenuRef.current && sessionMenuRef.current.contains(e.target as Node)) return;
+        setSessionMenu('closed');
+        if (namingTimerRef.current !== null) window.clearTimeout(namingTimerRef.current);
+        namingTimerRef.current = null;
+        setNaming(null);
+        setNamingClosing(false);
+      }
     };
     document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
@@ -251,26 +310,26 @@ export function Sidebar({
             >
               <button
                 type="button"
-                onClick={() => {
-                  setSessionMenu('closed');
-                  setCurrentView('chat');
-                  if (onNewChat) onNewChat();
-                }}
+                onClick={() => setNaming({ target: 'chat', value: '' })}
                 title={t('sidebar.newChat')}
-                className={`flex-1 min-w-0 flex items-center justify-center gap-1.5 rounded-md border border-[#353f4f] bg-[#282f3d] text-[#A8A49E] hover:border-[#575654] hover:bg-[#575654] hover:text-obsidian-text cursor-pointer transition-colors ${
-                  isOpen ? 'text-[11.5px] font-medium' : ''
-                }`}
+                className={`flex-1 min-w-0 flex items-center justify-center gap-1.5 rounded-md border cursor-pointer transition-colors ${
+                  naming?.target === 'chat'
+                    ? 'border-[#dcb67a]/60 bg-[#dcb67a]/10 text-[#dcb67a]'
+                    : 'border-[#353f4f] bg-[#282f3d] text-[#A8A49E] hover:border-[#575654] hover:bg-[#575654] hover:text-obsidian-text'
+                } ${isOpen ? 'text-[11.5px] font-medium' : ''}`}
               >
                 <MessageSquare size={13} className="flex-shrink-0" />
                 {isOpen && <span className="truncate">{t('sidebar.chat')}</span>}
               </button>
               <button
                 type="button"
-                onClick={handleChooseFolder}
-                title={t('sidebar.openProject')}
-                className={`flex-1 min-w-0 flex items-center justify-center gap-1.5 rounded-md border border-[#353f4f] bg-[#282f3d] text-[#A8A49E] hover:border-[#575654] hover:bg-[#575654] hover:text-obsidian-text cursor-pointer transition-colors ${
-                  isOpen ? 'text-[11.5px] font-medium' : ''
-                }`}
+                onClick={() => setNaming({ target: 'project', value: '' })}
+                title={t('sidebar.newProject')}
+                className={`flex-1 min-w-0 flex items-center justify-center gap-1.5 rounded-md border cursor-pointer transition-colors ${
+                  naming?.target === 'project'
+                    ? 'border-[#dcb67a]/60 bg-[#dcb67a]/10 text-[#dcb67a]'
+                    : 'border-[#353f4f] bg-[#282f3d] text-[#A8A49E] hover:border-[#575654] hover:bg-[#575654] hover:text-obsidian-text'
+                } ${isOpen ? 'text-[11.5px] font-medium' : ''}`}
               >
                 <FolderOpen size={13} className="flex-shrink-0" />
                 {isOpen && <span className="truncate">{t('sidebar.project')}</span>}
@@ -278,7 +337,45 @@ export function Sidebar({
             </div>
           </div>
 
-          {/* open project → OS-native folder picker (direct; recents listed below) */}
+          {/* İsim kutusu: hedef seçilince düğmelerin altına yukarıdan iner,
+              gönderilince aşağıdan yukarı kayarak kaybolur. Boş girişte otomatik
+              ad verilir (Adsız sohbet N / Untitled chat N). */}
+          {naming && (
+            <div className={`mx-0.5 mt-1.5 ${namingClosing ? 'tlm-namebox-out' : 'tlm-namebox-in'}`}>
+              <div className="relative">
+                <input
+                  ref={namingInputRef}
+                  value={naming.value}
+                  onChange={(e) => setNaming(n => (n ? { ...n, value: e.target.value } : n))}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      submitNaming();
+                    } else if (e.key === 'Escape') {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (!namingClosing) closeNaming(160);
+                    }
+                  }}
+                  placeholder={naming.target === 'chat' ? t('sidebar.nameChat') : t('sidebar.nameProject')}
+                  title={t('sidebar.nameHint')}
+                  maxLength={80}
+                  spellCheck={false}
+                  autoComplete="off"
+                  className="tlm-sidebar-input w-full pr-7"
+                />
+                <button
+                  type="button"
+                  onClick={submitNaming}
+                  aria-label={t('common.save')}
+                  title={t('common.save')}
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 cursor-pointer rounded p-0.5 text-obsidian-muted hover:text-[#dcb67a] transition-colors"
+                >
+                  <Check size={11} />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="flex flex-col w-full flex-1 min-h-0 overflow-y-auto overflow-x-hidden pretty-scrollbar">
@@ -399,10 +496,9 @@ export function Sidebar({
           {isOpen && <h2 className="px-1.5 mb-2 text-[11px] font-semibold uppercase tracking-widest text-obsidian-muted">{t('sidebar.chats')}</h2>}
 
           {/* Arama: başlık + mesaj içeriği; sonuçlar aşağıda listelenir.
-              Kutu kompakt: listeye baskın gelmesin. */}
-          {isOpen && (
+              Sohbet hiç yokken aramanın anlamı yok — sakin bir "yok" yazısı. */}
+          {isOpen && (chats.length > 0 ? (
             <div className="relative mb-1.5 mx-0.5">
-              <Search size={10} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-obsidian-muted/60" />
               <input
                 type="text"
                 value={chatQuery}
@@ -411,20 +507,22 @@ export function Sidebar({
                 placeholder={t('sidebar.searchPlaceholder')}
                 spellCheck={false}
                 autoComplete="off"
-                className="w-full rounded-md border border-white/[0.06] bg-white/[0.02] py-[3px] pl-6 pr-5 text-[10.5px] text-obsidian-text outline-none transition-colors placeholder:text-obsidian-muted/45 focus:border-[#dcb67a]/40"
+                className="tlm-sidebar-input w-full pr-6"
               />
               {chatQuery && (
                 <button
                   type="button"
                   onClick={() => setChatQuery('')}
                   title={t('common.cancel')}
-                  className="absolute right-1 top-1/2 -translate-y-1/2 cursor-pointer rounded p-0.5 text-obsidian-muted hover:text-obsidian-text"
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 cursor-pointer rounded p-0.5 text-obsidian-muted hover:text-obsidian-text transition-colors"
                 >
                   <X size={10} />
                 </button>
               )}
             </div>
-          )}
+          ) : (
+            <span className="px-2 py-1 text-[11px] text-obsidian-muted/60">{t('sidebar.noChats')}</span>
+          ))}
 
           {isOpen && !!chatQuery.trim() && (
             <div className="flex flex-col gap-0.5 w-full">
@@ -557,7 +655,7 @@ export function Sidebar({
                   onClick={() => {
                     if (onSelectChat) onSelectChat(chat.id);
                   }}
-                  className={`flex-1 min-w-0 flex items-center gap-2 px-2 py-1.5 rounded-md transition-colors duration-150 cursor-pointer ${
+                  className={`flex-1 min-w-0 flex items-center gap-2 px-2 py-1.5 rounded-md text-left transition-colors duration-150 cursor-pointer ${
                     isOpen ? 'justify-start' : 'justify-center'
                   }`}
                   // Başlıksız (henüz adlandırılmamış) sohbetlerde düğme
@@ -573,7 +671,7 @@ export function Sidebar({
                   )}
                   {/* Eylem düğmeleri satırın içinden çıkarıldı: başlık artık
                       tam genişlikte akar, yarıya kadar "…" ile kırpılmaz. */}
-                  {isOpen && <span className="truncate text-[11.5px]">{chat.title}</span>}
+                  {isOpen && <span className="min-w-0 flex-1 text-[11.5px]"><ChatTitleLabel id={chat.id} title={chat.title} /></span>}
                   {isOpen && chat.pinned && (
                     <Pin size={9} className="ml-auto flex-shrink-0 text-[#dcb67a]/80" aria-label={t('sidebar.pinned')} />
                   )}
@@ -595,8 +693,8 @@ export function Sidebar({
                       e.stopPropagation();
                       setRowMenuId(rowMenuId === chat.id ? null : chat.id);
                     }}
-                    className={`absolute right-1 top-1/2 z-30 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded cursor-pointer text-obsidian-muted opacity-0 transition-opacity hover:text-obsidian-text focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 ${
-                      rowMenuId === chat.id ? 'opacity-100 text-obsidian-text' : ''
+                    className={`tlm-rowchip absolute right-1 top-1/2 z-30 flex h-6 w-6 items-center justify-center rounded-full border border-[#3a3936] bg-obsidian-surface shadow-[0_2px_8px_rgba(0,0,0,0.35)] cursor-pointer text-obsidian-muted hover:text-obsidian-text ${
+                      rowMenuId === chat.id ? 'is-open text-obsidian-text' : ''
                     }`}
                   >
                     <MoreHorizontal size={12} />

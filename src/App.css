@@ -940,6 +940,88 @@ html[data-theme='nord-red'] .text-\[\#dcb67a\]\/80 { color: rgb(219 168 113 / 80
   }
 }
 
+/* Kenar çubuğu isim kutusu: hedef seçilince yüksekliği ve konumu birlikte
+   yumuşayarak açılır (expo-out), gönderilince aynı yolu tersine kayar.
+   max-height animasyonu, altındaki listeyi zıplatmadan yer açar/kapar. */
+@keyframes tlm_namebox_in {
+  from { opacity: 0; max-height: 0; transform: translateY(-6px) scale(0.99); }
+  to { opacity: 1; max-height: 48px; transform: translateY(0) scale(1); }
+}
+@keyframes tlm_namebox_out {
+  from { opacity: 1; max-height: 48px; transform: translateY(0) scale(1); }
+  to { opacity: 0; max-height: 0; transform: translateY(-4px) scale(0.99); }
+}
+.tlm-namebox-in { animation: tlm_namebox_in 280ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+.tlm-namebox-out { animation: tlm_namebox_out 220ms cubic-bezier(0.55, 0, 0.55, 0.2) both; }
+
+/* Kenar çubuğu giriş alanları (arama + oturum adı): tek aile. Hover yok,
+   halka yok, iç gölge yok — kutu yalnızca odaklanınca hafifçe aydınlanır;
+   başka hiçbir tepki vermez. Fareyle üzerine gelmek odak değildir. */
+.tlm-sidebar-input {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 9px;
+  padding: 7px 11px;
+  font-size: 11.5px;
+  color: #F2F0E5;
+  outline: none;
+  transition: border-color 160ms ease, background-color 160ms ease;
+}
+.tlm-sidebar-input::placeholder { color: rgba(168, 164, 158, 0.48); }
+.tlm-sidebar-input:focus {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.26);
+}
+
+/* Uzun başlıklar üç nokta yerine soldurularak kırpılır: CSS ellipsis'inin
+   "…" işareti satır sağındaki ⋯ eylem düğmesiyle karışıyordu. Maske son
+   ~22px'te devreye girer; başlık kutusu satırın kalanına yayıldığı için
+   kısa başlıklar maskeye hiç ulaşmaz, yalnız sığmayanlar solar. */
+.tlm-fade-truncate {
+  overflow: hidden;
+  white-space: nowrap;
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 22px), rgba(0, 0, 0, 0) 100%);
+  mask-image: linear-gradient(to right, #000 calc(100% - 22px), rgba(0, 0, 0, 0) 100%);
+}
+
+/* Sohbet satırı eylem çipi (⋯): dairesel, avatar diliyle aynı zemin/kenarlık.
+   Görünürlük Tailwind yerine burada: satıra hover/focus-within'da küçük bir
+   pop ile belirir (ölçek 0.85 → 1), menü açıkken kalıcıdır. transform bu
+   tek kuralla yönetilir — dikey ortalama da içinde (top-1/2 ile çift olur). */
+.tlm-rowchip {
+  opacity: 0;
+  transform: translateY(-50%) scale(0.85);
+  transition: opacity 140ms ease, transform 160ms cubic-bezier(0.22, 1, 0.36, 1), color 140ms ease;
+  pointer-events: none;
+}
+.group:hover .tlm-rowchip,
+.group:focus-within .tlm-rowchip,
+.tlm-rowchip:focus-visible,
+.tlm-rowchip.is-open {
+  opacity: 1;
+  transform: translateY(-50%) scale(1);
+  pointer-events: auto;
+}
+
+/* Karşılama metnindeki tıklanabilir köprüler ("yeni sohbet başlat",
+   "bir proje aç"): el yazısı başlıkla aynı altın tonu, kesikli alt çizgi. */
+.welcome-bridge {
+  color: #dcb67a;
+  font-weight: 600;
+  cursor: pointer;
+  border-bottom: 1px dashed rgba(220, 182, 122, 0.55);
+  padding-bottom: 1px;
+  transition: color 150ms ease, border-color 150ms ease;
+}
+.welcome-bridge:hover {
+  color: #fffcf0;
+  border-color: rgba(220, 182, 122, 0.9);
+}
+.welcome-bridge:focus-visible {
+  outline: 1px dashed rgba(220, 182, 122, 0.8);
+  outline-offset: 2px;
+}
+
 /* Nucleus mini-chat: yeni turlar abartısız bir yükselmeyle oturur. */
 @keyframes nucleus_msg_in {
   from { opacity: 0; transform: translateY(3px); }
@@ -1231,6 +1313,18 @@ html[data-theme='nord-red'] .text-\[\#dcb67a\]\/80 { color: rgb(219 168 113 / 80
   outline-offset: 2px;
 }
 
+/* Metin girişleri istisna: altın çerçeve metin kutusunda yerleşik odak
+   dilleriyle çelişiyordu (Chromium metin alanlarında :focus-visible'ı fare
+   tıklamasında da tetikler) ve kutunun içine çizilmiş dikdörtgen gibi
+   duruyordu. Metin girişlerinde gösterge bizzat imleçtir — dış çizgi yok.
+   Düğme/bağlantı/özel parçacıklar ([tabindex]) altın göstergeyi korur.
+   Özgüllük global kuralı geçecek kadar yüksek tutulur (0,3,1 > 0,3,0). */
+:is(input[type]:not([type="checkbox"]):not([type="radio"]),
+    input:not([type]),
+    textarea):focus-visible {
+  outline: none;
+}
+
 /* Radyo/checkbox gibi tarayıcı varsayılanı olan öğelerde halka yeterli;
    ekstra kutu gölgesi eklemiyoruz (çift gösterge olurdu). */
 :is(input[type="checkbox"], input[type="radio"]):focus-visible {
@@ -1262,6 +1356,13 @@ html[data-theme='nord-red'] .text-\[\#dcb67a\]\/80 { color: rgb(219 168 113 / 80
 }
 .x6-thalamus .x6-edge path {
   transition: stroke 120ms ease, stroke-width 120ms ease;
+}
+/* Üzerine gelince çizgi belirginleşsin; kalabalıkta tek hattı ayırt etmek için. */
+.x6-thalamus .x6-edge {
+  transition: filter 120ms ease;
+}
+.x6-thalamus .x6-edge:hover {
+  filter: brightness(1.55);
 }
 .x6-thalamus .x6-widget-selection-box {
   border: 1px dashed rgba(58, 169, 159, 0.7);
