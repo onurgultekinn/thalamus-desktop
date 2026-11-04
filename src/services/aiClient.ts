@@ -238,6 +238,7 @@ async function providerForRequest(): Promise<ActiveProvider | null> {
   await reviveManaged();
   return getActiveProvider();
 }
+export { providerForRequest };
 
 async function waitUntilStopped(target: string, maxMs = 1500): Promise<void> {
   const deadline = Date.now() + maxMs;

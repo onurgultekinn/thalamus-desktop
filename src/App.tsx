@@ -13,7 +13,7 @@ import { NucleusCommand } from './components/NucleusCommand';
 import { CommandPalette, type PaletteAction } from './components/CommandPalette';
 import { AuthScreen } from './components/auth/AuthScreen';
 import { useToast } from './components/Toast';
-import { aiChat, aiChatStream, userMessage, getActiveProvider } from './services/aiClient';
+import { aiChat, aiChatStream, userMessage, getActiveProvider, providerForRequest } from './services/aiClient';
 import { setProviderModel } from './lib/models';
 import {
   LOCAL_LOADING_EVENT,
@@ -892,7 +892,10 @@ export default function App() {
       // mesaj üzerinde zaten durur.
       if (pendingImages.length > 0) setPendingImages([]);
       try {
-        const provider = await getActiveProvider();
+        // providerForRequest: bekleyen yerel model seçimini işler ve motoru
+        // başlatır — getActiveProvider yalnızca kayıtlı duruma bakar, seçim
+        // henüz işlenmemişken "sağlayıcı yok" kısa devresi yapardı.
+        const provider = await providerForRequest();
         if (!provider) {
           const fallback = images.map((i) => `- ${i.name}: ${i.summary}`).join('\n');
           applyMessages(prev => [...prev, {
@@ -970,7 +973,10 @@ export default function App() {
     // motoru backend `/api/ai/chat` içinde istek başına sessizce ve lossless
     // çalışır (P2), ön yüz sıkıştırmayı içerik olarak göstermez.
     try {
-      const provider = await getActiveProvider();
+      // providerForRequest: bekleyen yerel model seçimini ilk istekte motor
+      // başlatarak işler (getActiveProvider bunu yapmaz — v0.1.0'da seçim
+      // sonrası ilk mesaj "No AI provider" dönüyordu).
+      const provider = await providerForRequest();
       if (!provider) {
         applyMessages(prev => [...prev, {
           role: 'assistant',

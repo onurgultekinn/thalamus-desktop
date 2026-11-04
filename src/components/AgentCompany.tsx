@@ -7,7 +7,7 @@ import {
 import { PixelOffice, agentHeadDataUrl } from './PixelOffice';
 import { AgentMesh } from './AgentMesh';
 import { FlowEditorX6 } from './FlowEditorX6';
-import { aiChat, getActiveProvider, type AiMessage } from '../services/aiClient';
+import { aiChat, getActiveProvider, providerForRequest, type AiMessage } from '../services/aiClient';
 import { getProviderModel, modelChoices } from '../lib/models';
 import { getLang, useT, type Lang } from '../lib/i18n';
 
@@ -951,7 +951,9 @@ export function AgentCompany({
     const ac = new AbortController();
     aiAbort.current = ac;
     try {
-      const provider = await getActiveProvider().catch(() => null);
+      // providerForRequest: bekleyen yerel model seçimini işler (getActiveProvider
+      // yalnızca kayıtlı duruma bakar; seçimden sonraki ilk koşu hata verirdi).
+      const provider = await providerForRequest().catch(() => null);
       if (ac.signal.aborted) return;
       if (!provider) { setAiError(t('company.noProvider')); return; }
       const messages: AiMessage[] = [
