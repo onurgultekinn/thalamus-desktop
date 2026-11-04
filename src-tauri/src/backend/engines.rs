@@ -257,6 +257,40 @@ fn pkg_version(pkgs: &[(String, String)], name: &str) -> Option<String> {
         .map(|(_, v)| v.clone())
 }
 
+/// Python ortamında tek bir paket var mı? (tarama süresinde çağrılır;
+/// python_packages zaten önbellekli — ikinci çağrı bedava.)
+pub fn python_has_package(name: &str) -> bool {
+    let Some(python) = python_exe() else { return false };
+    pkg_version(&python_packages(&python), name).is_some()
+}
+
+/// Python motoru bir kez erken ölürse (exit != 0) tarama onu "hazır" saymayı
+/// bırakır: HF modelleri `servable=false` + insan-okur notla listelenir.
+/// Uygulama yeniden başlatılınca unutulur (kullanıcı ortamı düzeltmiş olabilir).
+pub fn mark_python_broken(reason: String) {
+    let short: String = reason
+        .lines()
+        .rev()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or("bilinmeyen hata")
+        .trim()
+        .chars()
+        .take(220)
+        .collect();
+    *PYTHON_BROKEN
+        .lock()
+        .unwrap_or_else(|e| e.into_inner()) = Some(short);
+}
+
+pub fn python_broken() -> Option<String> {
+    PYTHON_BROKEN
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+}
+
+static PYTHON_BROKEN: Mutex<Option<String>> = Mutex::new(None);
+
 /// GPU adı/belleği (varsa). `nvidia-smi` yoksa boş.
 fn gpu_info() -> String {
     let out = std::process::Command::new("nvidia-smi")

@@ -202,7 +202,33 @@ fn scan_ollama(home: &Path) -> Vec<Value> {
 
 /// `~/.cache/huggingface/hub/models--org--ad` → safetensors klasörleri ve
 /// indirilmiş `.gguf` dosyaları. `datasets--*` atlanır (model değiller).
-fn scan_hf_hub(home: &Path, llama_ready: bool, python_ready: bool) -> Vec<Value> {
+/// `config.json` içindeki `quantization_config` bitsandbytes 4-bit mi?
+/// (bnb-4bit modeller `bitsandbytes` paketi olmadan yüklenemez — ImportError
+/// ile motor exit 1 olur; tarama bunu baştan "çalıştırılamaz" işaretler.)
+fn config_needs_bnb(dir: &Path, saw_config: bool) -> bool {
+    if !saw_config {
+        return false;
+    }
+    let Ok(text) = std::fs::read_to_string(dir.join("config.json")) else {
+        return false;
+    };
+    let Ok(v) = serde_json::from_str::<Value>(&text) else {
+        return false;
+    };
+    let q = v.get("quantization_config");
+    let method = q
+        .and_then(|q| q.get("quant_method"))
+        .and_then(|m| m.as_str())
+        .map(|s| s.eq_ignore_ascii_case("bitsandbytes"))
+        .unwrap_or(false);
+    let load4 = q
+        .and_then(|q| q.get("load_in_4bit"))
+        .and_then(|b| b.as_bool())
+        .unwrap_or(false);
+    method || load4
+}
+
+fn scan_hf_hub(home: &Path, llama_ready: bool, python_ready: bool, python_broken: Option<&str>, has_bnb: bool) -> Vec<Value> {
     let hub = home.join(".cache").join("huggingface").join("hub");
     let Ok(entries) = std::fs::read_dir(&hub) else { return Vec::new() };
     let mut out = Vec::new();
@@ -267,6 +293,19 @@ fn scan_hf_hub(home: &Path, llama_ready: bool, python_ready: bool) -> Vec<Value>
             // "çalıştırılabilir" sayılır; sınıflandırma/embedding modelleri
             // listelenir ama "sohbet modeli değil" notuyla işaretlenir.
             let chat = config_is_causal(&dir, has_config);
+            let needs_bnb = config_needs_bnb(&dir, has_config);
+            // Sıra önemlidir: kırık motor > eksik paket > sohbet değil.
+            let (servable, note) = if let Some(reason) = python_broken {
+                (false, json!(format!("Python motoru başlatılamadı: {reason}")))
+            } else if !chat {
+                (false, json!("Sohbet modeli değil (metin üretmez)"))
+            } else if needs_bnb && !has_bnb {
+                (false, json!("bitsandbytes paketi gerekli (4-bit quantize model)"))
+            } else if !python_ready {
+                (false, json!("Python ortamı gerekli (transformers + torch)"))
+            } else {
+                (python_ready && chat, Value::Null)
+            };
             out.push(json!({
                 "id": format!("hf:{}", repo),
                 "kind": "safetensors",
@@ -274,15 +313,9 @@ fn scan_hf_hub(home: &Path, llama_ready: bool, python_ready: bool) -> Vec<Value>
                 "path": dir.to_string_lossy(),
                 "size_bytes": bytes,
                 "engine": "python",
-                "servable": python_ready && chat,
+                "servable": servable,
                 "model": repo,
-                "note": if !chat {
-                    json!("Sohbet modeli değil (metin üretmez)")
-                } else if !python_ready {
-                    json!("Python ortamı gerekli (transformers + torch)")
-                } else {
-                    Value::Null
-                },
+                "note": note,
             }));
         }
     }
@@ -461,7 +494,15 @@ pub async fn local_models(
         let home = home_dir();
         let mut seen: Vec<PathBuf> = Vec::new();
         let mut files = scan_ollama(&home);
-        files.extend(scan_hf_hub(&home, llama_ready, python_ready));
+        let broken = engines::python_broken();
+        let has_bnb = engines::python_has_package("bitsandbytes");
+        files.extend(scan_hf_hub(
+            &home,
+            llama_ready,
+            python_ready,
+            broken.as_deref(),
+            has_bnb,
+        ));
         files.extend(scan_gguf_dirs(&dirs, llama_ready, &mut seen));
         files.truncate(MAX_FILES);
         // Büyükten küçüğe: en kullanışlı modeller üstte.

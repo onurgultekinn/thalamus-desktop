@@ -802,9 +802,22 @@ pub async fn serve_model(
                 .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, e))?,
             );
             let base = format!("http://127.0.0.1:{}/v1", port);
-            wait_ready(&client, &base, READY_TIMEOUT_HF, Some(child.get_mut()), &log)
-                .await
-                .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+            if let Err(e) = wait_ready(
+                &client,
+                &base,
+                READY_TIMEOUT_HF,
+                Some(child.get_mut()),
+                &log,
+            )
+            .await
+            {
+                // Python motoru erken öldüyse tarama bir daha "hazır" saymasın:
+                // HF modelleri notlu şekilde çalıştırılamaz listesine düşer.
+                if e.contains("erken kapandı") {
+                    crate::backend::engines::mark_python_broken(e.clone());
+                }
+                return Err(err(StatusCode::INTERNAL_SERVER_ERROR, e));
+            }
             log::info!(
                 "Yerel model hazır ({} ms): {}",
                 load_started.elapsed().as_millis(),

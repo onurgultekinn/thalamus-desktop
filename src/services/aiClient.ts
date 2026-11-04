@@ -30,6 +30,7 @@ import {
   serveLocalModel,
   stopLocalModel,
   unloadLocalModel,
+  LOCAL_MODELS_EVENT,
   type ServeResult,
 } from '../lib/localModels';
 import { hasStoredKey } from '../lib/secrets';
@@ -189,6 +190,15 @@ async function beginPendingLocal(): Promise<void> {
   try {
     await freeOllamaBeforeServe(pending.id, pending.model);
     served = await serveLocalModel(pending.id, pending.path);
+  } catch (err) {
+    // Motor başlatılamadıysa seçim geri alınsın: çip eski haline döner,
+    // her göndermede aynı çöken motor tekrar denenmez. Hata mesajı
+    // (motorun son logu dahil) çağıranın catch'ine aynen gider.
+    clearPendingLocalModel();
+    try {
+      window.dispatchEvent(new Event(LOCAL_MODELS_EVENT));
+    } catch { /* noop */ }
+    throw err;
   } finally {
     // Yükleme bitti ya da başarısız: durum yazısını kaldır.
     announceLocalLoading('');
