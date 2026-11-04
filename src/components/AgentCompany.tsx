@@ -461,7 +461,14 @@ function toMarkdown(plan: Plan, companyFallback: string, agentFallback: string, 
   return `${lines.join('\n').trim()}\n`;
 }
 
-export function AgentCompany({ active = true }: { active?: boolean }) {
+export function AgentCompany({
+  active = true,
+  onOpenFile,
+}: {
+  active?: boolean;
+  /** Koşu sonucundaki dosyayı editörde açmak için dışa verilen köprü. */
+  onOpenFile?: (path: string) => void;
+}) {
   const t = useT();
   const lang = getLang();
   const [plan, setPlan] = useState<Plan>(() => loadPlan());
@@ -1317,6 +1324,8 @@ export function AgentCompany({ active = true }: { active?: boolean }) {
                 <AgentMesh
                   embedded
                   initialTask={agents.find((a) => !a.parentId)?.mission || plan.name}
+                  org={plan}
+                  onOpenFile={onOpenFile}
                 />
               </div>
             </div>

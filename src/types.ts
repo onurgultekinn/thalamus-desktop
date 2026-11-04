@@ -79,6 +79,11 @@ export interface Message {
    */
   images?: AttachedImage[];
   /**
+   * Metin dosyaları bu mesajla modele gönderildi (ad + boyut). İçerik saklanmaz;
+   * yalnız "neyin gönderildiği" görünür kalsın diye tutulur.
+   */
+  files?: { name: string; chars?: number }[];
+  /**
    * Sağlayıcının bildirdiği GERÇEK token kullanımı (akışın `done` olayı).
    * Yoksa arayüz karakter/4 tahminine düşer — uydurma değer yazılmaz.
    */

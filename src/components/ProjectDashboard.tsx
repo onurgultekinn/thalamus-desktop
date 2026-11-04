@@ -203,6 +203,9 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview, onCon
   const fileEolRef = useRef<Record<string, string>>({});
   const t = useT();
   const [workspaceName, setWorkspaceName] = useState<string>(() => getWorkspaceName());
+  // Klasör bağlı mı? Bağlı değilken zorlamalı klasör seçimi yerine karşılama
+  // boş ekranı gösterilir (sohbet tarafındaki karşılama gibi).
+  const [hasRoot, setHasRoot] = useState(() => !!getWorkspaceRoot());
   const lineNumbersRef = useRef<HTMLDivElement>(null);
   const editorTextareaRef = useRef<HTMLTextAreaElement>(null);
   const editorHighlightRef = useRef<HTMLPreElement>(null);
@@ -218,7 +221,11 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview, onCon
         root = info.root;
       }
     }
-    if (!root) return;
+    if (!root) {
+      setHasRoot(false);
+      return;
+    }
+    setHasRoot(true);
     setWorkspaceName(getWorkspaceName());
 
     const walk = async (relPath: string, depth: number): Promise<FileNode[]> => {
@@ -255,6 +262,9 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview, onCon
     setFileTree(tree);
     syncOpenFolders(tree);
     treeLoadedRef.current = true;
+    // Çağıranın taze ağacı hemen kullanabilmesi için (ajan koşusu yeni dosya
+    // ürettiğinde "editörde aç" yolunun ihtiyacı).
+    return tree;
   }, []);
 
   useEffect(() => {
@@ -1295,9 +1305,29 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview, onCon
     [rootExpanded, visibleTree, activeTab, fileContents, openTabs]
   );
 
+  // Klasör bağlı değilken: sohbet karşılamasıyla aynı dilde boş ekran —
+  // köprü bir "Klasör seç" eylemi; bağlamak istemeyenler sonra da yapabilir.
+  if (!hasRoot) {
+    return (
+      <div className="w-full h-full flex items-center justify-center bg-[#1C1B1A] text-[#CECDC3] font-sans border-t border-[#34332F]">
+        <div className="text-center max-w-md px-6 select-none">
+          <h2 className="hand text-[24px] leading-tight mb-1" style={{ color: 'rgb(var(--tlm-gold))' }}>{t('project.emptyTitle')}</h2>
+          <svg className="sketch-underline" viewBox="0 0 220 8" fill="none" aria-hidden="true">
+            <path d="M2 5 C 30 2, 55 7, 85 4 S 150 2, 180 5 S 210 3, 218 4" stroke="#dcb67a" strokeWidth="1.6" strokeLinecap="round" />
+          </svg>
+          <p className="text-xs text-[#A8A49E] leading-relaxed mt-4">
+            {t('project.emptyA')}
+            <button type="button" onClick={handleChooseFolder} className="welcome-bridge">{t('project.emptyLink')}</button>
+            {t('project.emptyB')}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="w-full h-full flex bg-[#1C1B1A] text-[#CECDC3] font-sans overflow-hidden select-none border-t border-[#34332F] relative">
-      
+
       {/* DRAGGED ITEM BADGE */}
       {draggedNode && (
         <div 
@@ -1856,7 +1886,23 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview, onCon
           <div className={`flex-1 min-h-0 ${
             paneMode === 'agents' ? 'flex animate-in fade-in duration-150' : 'hidden'
           }`}>
-            <AgentCompany active={paneMode === 'agents'} />
+            <AgentCompany
+              active={paneMode === 'agents'}
+              onOpenFile={(path) => {
+                // Koşu sonucundaki dosyayı kod panosunda aç; dosya ağaçta
+                // yoksa (yeni üretildi) ağacı tazeleyip tekrar dene.
+                void (async () => {
+                  const node = findFileNode(fileTree, path);
+                  if (node) {
+                    await handleOpenFile(node);
+                    return;
+                  }
+                  const fresh = (await loadTree()) ?? [];
+                  const after = findFileNode(fresh, path);
+                  if (after) await handleOpenFile(after);
+                })();
+              }}
+            />
           </div>
         )}
       </div>
@@ -1906,6 +1952,7 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview, onCon
               workspaceFiles={workspaceFiles}
               onApplyCode={handleApplyCode}
               onOpenTerminal={() => setIsTerminalOpen(true)}
+              onOpenPreview={onOpenPreview}
               floating
               onClose={() => setNucleusOpen(false)}
               onHeaderPointerDown={nucleusFloat.onDragStart}
