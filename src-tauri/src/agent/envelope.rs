@@ -104,6 +104,80 @@ pub fn validate_reply(content: &str) -> Result<(String, Value), String> {
     Ok((status, payload))
 }
 
+/// Tel zarfının kısa anahtar eşlemesi.
+///
+/// Zarf başlığı her turda yeniden gider; uzun anahtarlar (`from`, `status`,
+/// `data`…) her mesajda tekrar token harcar. Tel biçimi bu yüzden kısa
+/// anahtarlar kullanır; insan-okur biçim (`raw`) uzun anahtarlı tipli zarf
+/// olarak kalır. Eşleme iki yönlüdür ve `decode_wire_envelope` ile kanıtlanır.
+pub const KEY_MAP: &[(&str, &str)] = &[
+    ("v", "v"),
+    ("i", "id"),
+    ("r", "run"),
+    ("f", "from"),
+    ("o", "to"),
+    ("k", "kind"),
+    ("t", "task"),
+    ("q", "ref"),
+    ("s", "status"),
+    ("e", "enc"),
+    ("d", "data"),
+];
+
+/// Modelin tel biçimini çözmesi için verilen kısa sözleşme (dekoder satırı).
+pub fn wire_decoder_contract() -> String {
+    let keys: Vec<String> = KEY_MAP
+        .iter()
+        .map(|(short, long)| format!("{}={}", short, long))
+        .collect();
+    format!(
+        "{}\nWire keys: {}. Absent keys are omitted. \
+         e=\"@t\" means d is an @T table; e=\"json\" means d is plain JSON.",
+        crate::engine::MINIMAL_DECODER_INSTRUCTION,
+        keys.join(" ")
+    )
+}
+
+/// Tel biçimindeki zarfı tipli zarfa geri çevirir. İki biçimi de kabul eder:
+/// kısa anahtarlı tel ve (kazanç yoksa geçen) ham uzun anahtarlı zarf.
+/// Kayıpsızlık testlerinin dayanağıdır; üretim akışında çağrılmaz.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn decode_wire_envelope(wire: &str) -> Result<AgentEnvelope, String> {
+    let v: Value = serde_json::from_str(wire).map_err(|e| e.to_string())?;
+    if v.get("d").is_none() {
+        // Ham zarf: kısa anahtar yok, doğrudan tipli biçim.
+        return serde_json::from_value(v).map_err(|e| e.to_string());
+    }
+    let enc = v
+        .get("e")
+        .and_then(|e| e.as_str())
+        .unwrap_or("json")
+        .to_string();
+    let data = v.get("d").cloned().unwrap_or(Value::Null);
+    let payload = if enc == "@t" {
+        let table = data.as_str().ok_or_else(|| "@t data must be a string".to_string())?;
+        JsonCompressor::decompress(table)?
+    } else {
+        data
+    };
+    Ok(AgentEnvelope {
+        v: v.get("v").and_then(|x| x.as_u64()).unwrap_or(PROTOCOL_VERSION as u64) as u32,
+        id: v.get("i").and_then(|x| x.as_str()).unwrap_or_default().to_string(),
+        run: v.get("r").and_then(|x| x.as_str()).unwrap_or_default().to_string(),
+        from: v.get("f").and_then(|x| x.as_str()).unwrap_or_default().to_string(),
+        to: v
+            .get("o")
+            .and_then(|x| x.as_array())
+            .map(|a| a.iter().filter_map(|s| s.as_str().map(str::to_string)).collect())
+            .unwrap_or_default(),
+        kind: v.get("k").and_then(|x| x.as_str()).unwrap_or_default().to_string(),
+        task: v.get("t").and_then(|x| x.as_str()).map(str::to_string),
+        r#ref: v.get("q").and_then(|x| x.as_str()).map(str::to_string),
+        status: v.get("s").and_then(|x| x.as_str()).unwrap_or("ok").to_string(),
+        payload,
+    })
+}
+
 /// Zarfın tel biçimini üretir.
 ///
 /// Önemli: motorun @T kodlayıcısı YALNIZCA üst-düzey nesne DİZİLERİNİ sıkıştırır
@@ -137,20 +211,24 @@ pub fn encode_wire(env: &AgentEnvelope, bpe: &CoreBPE) -> WirePayload {
         }
     }
 
-    let wire_obj = serde_json::json!({
-        "v": env.v,
-        "id": env.id,
-        "run": env.run,
-        "from": env.from,
-        "to": env.to,
-        "kind": env.kind,
-        "task": env.task,
-        "ref": env.r#ref,
-        "status": env.status,
-        "enc": enc,
-        "data": data,
-    });
-    let wire = serde_json::to_string(&wire_obj).unwrap_or_default();
+    // Kısa başlık: her turda tekrar eden sabit maliyeti düşürür.
+    let mut wire_obj = serde_json::Map::new();
+    wire_obj.insert("v".into(), serde_json::json!(env.v));
+    wire_obj.insert("i".into(), serde_json::json!(env.id));
+    wire_obj.insert("r".into(), serde_json::json!(env.run));
+    wire_obj.insert("f".into(), serde_json::json!(env.from));
+    wire_obj.insert("o".into(), serde_json::json!(env.to));
+    wire_obj.insert("k".into(), serde_json::json!(env.kind));
+    if let Some(task) = &env.task {
+        wire_obj.insert("t".into(), serde_json::json!(task));
+    }
+    if let Some(r) = &env.r#ref {
+        wire_obj.insert("q".into(), serde_json::json!(r));
+    }
+    wire_obj.insert("s".into(), serde_json::json!(env.status));
+    wire_obj.insert("e".into(), serde_json::json!(enc));
+    wire_obj.insert("d".into(), data);
+    let wire = Value::Object(wire_obj).to_string();
     let wire_tokens = crate::engine::code_shrink::count(bpe, &wire);
 
     if !compressed || wire_tokens >= raw_tokens {
@@ -217,11 +295,41 @@ mod tests {
         assert!(w.compressed, "kolonlu plan yükü @T ile sıkışmalı");
         assert!(w.lossless, "sıkıştırma kayıpsız doğrulanmalı");
         assert!(w.wire_tokens < w.raw_tokens);
-        // Tel biçimindeki `data` gerçekten geri açılabilmeli.
+        // Tel biçimindeki `d` gerçekten geri açılabilmeli.
         let wire: Value = serde_json::from_str(&w.wire).unwrap();
-        assert_eq!(wire["enc"], json!("@t"));
-        let back = JsonCompressor::decompress(wire["data"].as_str().unwrap()).unwrap();
+        assert_eq!(wire["e"], json!("@t"));
+        let back = JsonCompressor::decompress(wire["d"].as_str().unwrap()).unwrap();
         assert_eq!(back, env.payload);
+        // Kısa anahtarlar: uzun anahtarlar telde YER ALMAZ.
+        assert!(wire.get("from").is_none());
+        assert!(wire.get("data").is_none());
+    }
+
+    #[test]
+    fn compact_wire_round_trips_to_typed_envelope() {
+        let env = sample_plan_env();
+        let w = encode_wire(&env, &bpe());
+        let back = decode_wire_envelope(&w.wire).expect("tel biçimi çözülebilmeli");
+        assert_eq!(back, env, "kısa anahtarlı tel kayıpsız olmalı");
+    }
+
+    #[test]
+    fn compact_wire_round_trips_when_payload_does_not_compress() {
+        let mut env = sample_plan_env();
+        env.payload = json!({"summary": "tek nesne"});
+        let w = encode_wire(&env, &bpe());
+        let back = decode_wire_envelope(&w.wire).expect("ham zarf da çözülebilmeli");
+        assert_eq!(back, env);
+    }
+
+    #[test]
+    fn savings_acceptance_still_holds_after_short_keys() {
+        // Kabul ölçütü: kolonlu yükte net tasarruf OLMALI. Kısa anahtarlar
+        // bunu artırır; hiçbir durumda negatife çevirmemeli.
+        let w = encode_wire(&sample_plan_env(), &bpe());
+        assert!(w.wire_tokens < w.raw_tokens, "raw {} wire {}", w.raw_tokens, w.wire_tokens);
+        let pct = 100.0 * (w.raw_tokens - w.wire_tokens) as f64 / w.raw_tokens as f64;
+        assert!(pct > 10.0, "tasarruf %{:.1} beklenenden düşük", pct);
     }
 
     #[test]

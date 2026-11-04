@@ -10,12 +10,13 @@
 use super::envelope::AgentEnvelope;
 use super::roles::{self, Role};
 use crate::backend::ai::{provider_url, Transport};
-use crate::engine::MINIMAL_DECODER_INSTRUCTION;
 use serde_json::{json, Value};
 
 /// Bir sonraki ajana giden tel mesajı (başlık + gövde).
 #[derive(Clone)]
 pub struct WireIncoming {
+    /// Zarf sırası — bağlam listesinde tekrarları ayıklamak için.
+    pub seq: usize,
     pub from: String,
     pub kind: String,
     pub task: Option<String>,
@@ -25,6 +26,10 @@ pub struct WireIncoming {
 }
 
 /// Beynin gördüğü bağlam. `incoming` tel biçimindedir (gerekirse @T sıkıştırılmış).
+///
+/// `Clone`: bağımsız ajanlar aynı anda (paralel) çalışabilsin diye her iş
+/// parçacığı kendi bağlam kopyasını alır; paylaşılan mutable durum yoktur.
+#[derive(Clone)]
 pub struct AgentContext {
     /// Kullanıcının verdiği üst görev.
     pub task: String,
@@ -37,6 +42,12 @@ pub struct AgentContext {
     pub repair: Option<String>,
     /// Denetçi "error" bulduğu için yapılan yeniden çalıştırma turu mu.
     pub rework: bool,
+    /// Üretici rolüne verilecek gerçek dosya içerikleri (yol, gövde).
+    /// Orkestratör workspace köküne sınırlayarak okur; boşsa dosya eklenmez.
+    pub files: Vec<(String, String)>,
+    /// Repo şema haritası (önem-sıralı, bütçeli). Planlayıcıya GERÇEK dosya
+    /// adlarını verir; aksi halde planlayıcı hiç görmediği yollar uydurur.
+    pub repo_map: String,
 }
 
 pub trait Brain: Send + Sync {
@@ -71,18 +82,47 @@ impl LlmBrain {
             out.push_str(&format!("ASSIGNED SUBTASK: {}\n\n", a));
         }
         out.push_str(&format!("WORKSPACE (top level):\n{}\n\n", ctx.repo_hint));
+        // Planlayıcının dosya adlarını UYDURMAMASI için: gerçek dosyaların
+        // şemaları önem sırasıyla.
+        if !ctx.repo_map.is_empty() {
+            out.push_str("REPO MAP (important files and their schemas):\n");
+            out.push_str(&ctx.repo_map);
+            out.push_str("\n\n");
+        }
+        // Üreticiye verilen gerçek dosya içerikleri.
+        if !ctx.files.is_empty() {
+            out.push_str("FILES (current contents):\n");
+            for (path, body) in &ctx.files {
+                out.push_str(&format!("--- {} ---\n{}\n", path, body));
+            }
+            out.push('\n');
+        }
         if !ctx.incoming.is_empty() {
             out.push_str("INCOMING MESSAGES (JSON envelopes from other agents):\n");
+            // Karakter bütçesi: tek büyük zarf prompt'u şişirmesin; en yeni
+            // mesajlar korunur, eskiler düşer.
+            const INCOMING_CHAR_BUDGET: usize = 12_000;
+            let mut kept: Vec<&WireIncoming> = Vec::new();
+            let mut used = 0usize;
+            for m in ctx.incoming.iter().rev() {
+                let cost = m.wire.len();
+                if used + cost > INCOMING_CHAR_BUDGET && !kept.is_empty() {
+                    break;
+                }
+                used += cost;
+                kept.push(m);
+            }
+            kept.reverse();
             let mut decoder_sent = false;
-            for m in &ctx.incoming {
+            for m in &kept {
                 if m.compressed && !decoder_sent {
                     // Sıkıştırılmış tel mesajının model tarafı sözleşmesi.
-                    out.push_str(MINIMAL_DECODER_INSTRUCTION);
+                    out.push_str(&super::envelope::wire_decoder_contract());
                     out.push('\n');
                     decoder_sent = true;
                 }
                 out.push_str(&format!(
-                    "[from={} kind={} task={} status={}]\n{}\n",
+                    "[{} {} {} {}]\n{}\n",
                     m.from,
                     m.kind,
                     m.task.clone().unwrap_or_else(|| "-".into()),
@@ -98,8 +138,10 @@ impl LlmBrain {
                 repair
             ));
         }
-        let _ = role;
-        out.push_str("Reply with ONE JSON object: {\"status\":\"ok|warn|fail\",\"payload\":{...}}");
+        out.push_str(&format!(
+            "Reply as {} with ONE JSON object: {{\"status\":\"ok|warn|fail\",\"payload\":{}}}",
+            role.label, "<payload-schema>"
+        ));
         out
     }
 }
@@ -119,7 +161,12 @@ impl Brain for LlmBrain {
         let body = json!({ "model": self.model, "messages": messages });
         // Yerel model uykudaysa uyandır ve istek boyunca meşgul tut.
         let _local_use = crate::backend::serve::begin_use(&self.url);
-        let resp = transport.post_json(&self.url, &headers, &body)?;
+        // Geçici sağlayıcı hataları (429/5xx/bağlantı) geri çekilmeli tekrar
+        // edilir: tek bir 429 tüm koşuyu öldürmemeli (sohbet hattıyla aynı
+        // sözleşme).
+        let resp = crate::backend::ai::post_with_retry(|| {
+            transport.post_json(&self.url, &headers, &body)
+        })?;
         let content = resp["choices"][0]["message"]["content"]
             .as_str()
             .ok_or_else(|| "provider returned no message content".to_string())?
@@ -158,17 +205,31 @@ impl MockBrain {
 
     fn coder(&self, ctx: &AgentContext, rework: bool) -> Value {
         let task = ctx.assigned.clone().unwrap_or_else(|| "t1".into());
+        // Mock GERÇEK kaynak dosyaları değiştirmez: her düğüm kendi demo
+        // dosyasını oluşturur. Böylece "Uygula" yolu uçtan uca sınanabilir ve
+        // hiçbir kullanıcı dosyası mock koşusunda ezilmez.
+        let slug: String = task
+            .chars()
+            .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+            .collect();
         let body = if rework {
-            "// rework: denetçi bulgusu giderildi"
+            format!("# {}
+
+rework: denetçi bulgusu giderildi.
+", task)
         } else {
-            "// uygulandı"
+            format!("# {}
+
+Ajan ağı demo çıktısı.
+", task)
         };
-        Value::Array(vec![
-            json!({"task": task, "file": "src/components/AgentMesh.tsx",
-                   "op": "replace", "search": "export function AgentMesh() {", "body": body}),
-            json!({"task": task, "file": "src/services/agentClient.ts",
-                   "op": "replace", "search": "const API = API_BASE;", "body": body}),
-        ])
+        Value::Array(vec![json!({
+            "task": task,
+            "file": format!("agent-demo/{}.md", slug),
+            "op": "create",
+            "search": "",
+            "body": body
+        })])
     }
 
     fn reviewer(&self, ctx: &AgentContext, rework: bool) -> Value {
@@ -213,15 +274,15 @@ impl Brain for MockBrain {
         if self.delay_ms > 0 {
             std::thread::sleep(std::time::Duration::from_millis(self.delay_ms));
         }
-        let payload = match role.id {
-            "planner" => self.plan(ctx),
-            "coder" => self.coder(ctx, ctx.rework),
-            "reviewer" => self.reviewer(ctx, ctx.rework),
-            "reporter" => self.reporter(&ctx.incoming),
-            other => return Err(format!("mock has no behaviour for role '{}'", other)),
+        let payload = match role.kind.as_str() {
+            "plan" => self.plan(ctx),
+            "review" => self.reviewer(ctx, ctx.rework),
+            "report" => self.reporter(&ctx.incoming),
+            "result" => self.coder(ctx, ctx.rework),
+            other => return Err(format!("mock has no behaviour for kind '{}'", other)),
         };
         // Model gibi davran: yalnızca minimal sözleşme nesnesi döndür.
-        let status = if role.id == "reviewer"
+        let status = if role.kind == "review"
             && payload.as_array().map(|a| !a.is_empty()).unwrap_or(false)
         {
             "warn"
@@ -235,6 +296,11 @@ impl Brain for MockBrain {
 /// Orkestratörün `incoming`i zarflardan kurmasına yardım.
 pub fn wire_of(env: &AgentEnvelope, wire: &str, compressed: bool) -> WireIncoming {
     WireIncoming {
+        seq: env
+            .id
+            .strip_prefix("e-")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0),
         from: env.from.clone(),
         kind: env.kind.clone(),
         task: env.task.clone(),

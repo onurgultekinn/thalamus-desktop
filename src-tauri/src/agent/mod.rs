@@ -9,11 +9,13 @@
 //   envelope  → zarf yapısı + model yanıtı doğrulama + tel kodlama (lossless)
 //   roles     → ajan rolleri ve JSON sözleşmeleri
 //   brain     → LLM beyni (gerçek sağlayıcı) + mock beyin (ağsız test)
-//   orchestrator → boru hattı, durum, bütçe/sayaç, iptal
+//   scheduler → dalga hesabı + sınırlı paralellik (mekanik katman)
+//   orchestrator → politika: kim ne zaman, hangi girdiyle koşar
 
 pub mod brain;
 pub mod envelope;
 pub mod orchestrator;
 pub mod roles;
+pub mod scheduler;
 
 pub use orchestrator::{cancel_run, start_run, RunRequest, SharedRuns};
