@@ -71,6 +71,29 @@ const LEGACY: Record<
 const MIGRATABLE_IDS = Object.keys(LEGACY).filter((id) => LEGACY[id].endpoint);
 
 /**
+ * "Yeni bağlantı" akışında önerilen presetler — isim/endpoint LEGACY'den
+ * türetilir (tek kaynak), sıra popülerlik: küresel sağlayıcılar üstte,
+ * bölgesel orta, yerel (Ollama/LM Studio) sonda.
+ */
+export interface ProviderPreset {
+  id: string;
+  name: string;
+  endpoint: string;
+}
+
+const PRESET_ORDER = [
+  'openai', 'openrouter', 'deepseek', 'google', 'groq', 'xai', 'mistral',
+  'together', 'fireworks', 'perplexity', 'zhipu', 'moonshot', 'qwen',
+  'siliconflow', 'deepbricks', 'ollama', 'lmstudio',
+];
+
+export const PROVIDER_PRESETS: ProviderPreset[] = PRESET_ORDER.map((id) => ({
+  id,
+  name: LEGACY[id]?.name ?? id,
+  endpoint: LEGACY[id]?.endpoint ?? '',
+})).filter((p) => !!p.endpoint);
+
+/**
  * Loopback / private-network host → local (key optional, local model scan…).
  * Empty or unparseable URLs count as remote so the key field stays required
  * until a real endpoint is typed.

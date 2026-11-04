@@ -51,10 +51,12 @@ import {
   isLocalBaseUrl,
   listConnections,
   newConnectionId,
+  PROVIDER_PRESETS,
   readDismissedEndpoints,
   saveConnection,
   undismissEndpoint,
   type Connection,
+  type ProviderPreset,
 } from '../lib/connections';
 import { hasStoredKey, setStoredKey, clearStoredKeys } from '../lib/secrets';
 import { readShowReasoning, writeShowReasoning } from '../lib/reasoning';
@@ -710,7 +712,22 @@ export function SettingsModal({
     setConfirmingDelete(false);
   };
 
-  const addConnection = () => {
+  // "Yeni bağlantı" artık önce preset sorar: isim + Base URL doğru gelir,
+  // kullanıcı yalnızca anahtarını yapıştırır. "Özel" boş bağlantı açar.
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  const seedConnectionState = (id: string, name: string, baseUrl: string) => {
+    setConnections(saveConnection({ id, name, baseUrl }));
+    setNames((prev) => ({ ...prev, [id]: name }));
+    setBaseUrls((prev) => ({ ...prev, [id]: baseUrl }));
+    setModels((prev) => ({ ...prev, [id]: '' }));
+    setDeepModels((prev) => ({ ...prev, [id]: '' }));
+    setFetchedModels((prev) => ({ ...prev, [id]: [] }));
+    setKeys((prev) => ({ ...prev, [id]: '' }));
+    selectConnection(id);
+  };
+
+  const addBlankConnection = () => {
     const id = newConnectionId();
     const name = t('settings.conn.untitled');
     setConnections(saveConnection({ id, name, baseUrl: '' }));
@@ -721,6 +738,22 @@ export function SettingsModal({
     setFetchedModels((prev) => ({ ...prev, [id]: [] }));
     setKeys((prev) => ({ ...prev, [id]: '' }));
     selectConnection(id);
+  };
+
+  /** Preset seçimi: aynı Base URL zaten kayıtlıysa yeni satır açmak yerine
+      o bağlantıyı seçer; yeni id preset kimliğidir (çakışıyorsa üretilir). */
+  const addFromPreset = (preset: ProviderPreset) => {
+    setPickerOpen(false);
+    const norm = (u: string) => u.trim().replace(/\/+$/, '').toLowerCase();
+    const existing = listConnections().find((c) => norm(c.baseUrl) === norm(preset.endpoint));
+    if (existing) {
+      selectConnection(existing.id);
+      return;
+    }
+    const id = listConnections().some((c) => c.id === preset.id)
+      ? newConnectionId()
+      : preset.id;
+    seedConnectionState(id, preset.name, preset.endpoint);
   };
 
   const deleteSelectedConnection = () => {
@@ -1237,7 +1270,7 @@ export function SettingsModal({
                     <div className="flex items-center justify-between gap-2">
                       <button
                         type="button"
-                        onClick={addConnection}
+                        onClick={() => setPickerOpen((o) => !o)}
                         className="flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-left text-[12px] text-obsidian-muted transition-colors hover:bg-white/[0.03] hover:text-obsidian-soft"
                       >
                         <Plus size={12} />
@@ -1253,6 +1286,45 @@ export function SettingsModal({
                         {t('settings.localScan')}
                       </button>
                     </div>
+
+                    {/* Preset seçici: ad + endpoint tek satırda; zaten ekli
+                        olanlar ✓ ile işaretli, tıklayınca o bağlantı seçilir. */}
+                    {pickerOpen && (
+                      <div className="mt-1 flex max-h-[280px] flex-col gap-0.5 overflow-y-auto rounded-md border border-white/10 bg-[#1b1a19] p-1 pretty-scrollbar">
+                        <span className="px-2 py-1 text-[10px] uppercase tracking-widest text-obsidian-muted/60">
+                          {t('settings.conn.pickTitle')}
+                        </span>
+                        {PROVIDER_PRESETS.map((preset) => {
+                          const norm = (u: string) => u.trim().replace(/\/+$/, '').toLowerCase();
+                          const added = listConnections().some(
+                            (c) => norm(c.baseUrl) === norm(preset.endpoint)
+                          );
+                          return (
+                            <button
+                              key={preset.id}
+                              type="button"
+                              onClick={() => void addFromPreset(preset)}
+                              className="flex items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-white/[0.05] cursor-pointer transition-colors"
+                            >
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate text-[12px] text-obsidian-soft">{preset.name}</span>
+                                <span className="block truncate font-mono text-[10px] text-obsidian-muted/70">{preset.endpoint}</span>
+                              </span>
+                              {added && (
+                                <span className="flex-shrink-0 text-[10px] text-[#3AA99F]">✓</span>
+                              )}
+                            </button>
+                          );
+                        })}
+                        <button
+                          type="button"
+                          onClick={() => { setPickerOpen(false); addBlankConnection(); }}
+                          className="mt-0.5 flex items-center gap-2 rounded border border-dashed border-white/15 px-2 py-1.5 text-left text-[11.5px] text-obsidian-muted hover:bg-white/[0.04] hover:text-obsidian-soft cursor-pointer transition-colors"
+                        >
+                          {t('settings.conn.custom')}
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   {activeLocal && (
