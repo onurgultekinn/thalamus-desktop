@@ -6,6 +6,63 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Bounded context for long sessions.** Agent messages are compacted to a token
+  budget instead of dropped: an old tool result becomes a deterministic,
+  readable one-line summary carrying a `recall(id=N)` handle, and the model can
+  fetch the full original text losslessly at any time. Every tool result, user
+  message, and reply is stored with lossless compression and content
+  deduplication; a message is only compacted when the store can resolve it
+  again, so compaction cannot make information unreachable.
+- The readable summary now keeps *singleton* values (`Distinct: field=value`).
+  Previously it reported only item counts, status distributions, and field
+  names, which silently dropped the one unique value a user is usually looking
+  for (an identifier, a key, a one-off file).
+- `recall` tool, and a context-store balance (`items`, `stored`, `savings_pct`,
+  `unverified`, `budget_tokens`) in the `done` event so the UI can show that the
+  window is bounded and nothing was lost.
+- `/api/ai/chat` and `/api/ai/chat/stream` responses now include a `context`
+  block: `window_tokens`, `budget_tokens`, and `window_verified`.
+
+### Fixed
+
+- **Silent truncation on local runtimes.** The context budget was derived from
+  the model's *declared* window. Ollama does not report `context_length` on
+  `/v1/models`, loads a 32K model at **4096** by default, and silently truncates
+  longer prompts rather than erroring — measured: 150,000 characters sent to a
+  32K-loaded instance came back as `prompt_tokens=16386`, and the fact in the
+  middle was gone. The budget now uses the window the server actually loaded
+  (`/api/ps` → `context_length`, llama.cpp `/v1/models` → `meta.n_ctx`), takes
+  the smaller of declared and loaded, and falls back to 4096 when a local server
+  reports nothing (`backend/model_caps.rs`, `backend/ai.rs`).
+- Context-window documentation corrected. The claim that compressed `@T` tables
+  "fit the window but the model cannot read them" (0/20) was not supported: that
+  test varied length and format at once (27,420 vs 6,640 tokens) and planted the
+  needle in a *user* message, which compaction never touches. The claim is
+  withdrawn and replaced by `examples/presentation_test.rs`, which puts the
+  needle inside a tool output and adds a length-matched `@T` condition. See
+  `docs/context-window.md` Result 4.
+
+### Changed
+
+- The run screen is a four-cell management board on one screen: agents (a card
+  per node with its kind, state, calls, tokens, last-turn duration and message
+  count — click to filter its trail), the live stream, the plan, and the changes
+  with review notes. Each cell scrolls inside itself, so the page never scrolls
+  and a lead can see the whole run at a glance; below ~900px panel width the
+  same cells stack into one column.
+- Telemetry left the main surface: the KPI strip, savings meter and per-agent
+  token bars are gone. Tokens/cost/calls are one quiet line under the task box,
+  and the envelope-level detail lives behind a collapsed "Details" section.
+- Company runs, dependency waves and bounded parallelism are back in place
+  after the tree was reset: `run_org` executes the user's own nodes, an edge
+  A→B means B waits for A (a producer no longer waits on its own reviewer), a
+  reviewer's `error` re-runs the producer with both the finding and its own
+  previous output and the result is re-reviewed, and a failing node no longer
+  discards its siblings' results.
+
+
 ## [0.1.0-beta] - 2026-10-27
 
 First public beta. Every item below is grounded in a commit in this repository;

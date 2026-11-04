@@ -531,23 +531,59 @@ fn whole_file_fallback(
 /// çağırabilir — bağlam pencerisi her turda şişmez.
 const TOOL_RESULT_TRIM: usize = 2_000;
 
-/// Tool loop'ta güncel turdan önceki `tool` mesajlarını kırpır. Her tur tüm
-/// konuşma sağlayıcıya yeniden gönderildiği için, kırpılmamış eski read_file/
-/// grep çıktıları prompt token'ını turlarla üstel büyütüyordu.
+/// Etkin bağlam penceresi ile doğrulanıp doğrulanmadığı.
+///
+/// Bildirilen pencere ile sunucunun GERÇEKTEN yüklediği pencere çelişebilir.
+/// Ölçüldü (Ollama 0.40.11): `/v1/models` `context_length` döndürmüyor,
+/// model 4096'da yükleniyor, aşan prompt sessizce pencere/2'ye kırpılıyor
+/// (150.000 karakter → 16.386 token, ortadaki bilgi kayboldu). Bu yüzden
+/// yerel sunucuda doğrulanamayan pencereye 32K varsaymak tehlikeli.
+///
+/// Döndürülen `guessed`, pencerenin ÖLÇÜLMEDİĞİNİ (muhafazakâr varsayım
+/// olduğunu) söyler; arayüz bunu kullanıcıya bildirebilir.
+fn effective_context_window(
+    caps: &model_caps::ModelCaps,
+    loaded: Option<u64>,
+    local: bool,
+) -> (usize, bool) {
+    const DEFAULT_CONTEXT: u64 = 32_768;
+    let (window, guessed) = match (caps.context_length, loaded) {
+        // Sunucu gerçek pencereyi söyledi: bildirilenle çelişirse küçüğü.
+        (Some(d), Some(l)) => (d.min(l), false),
+        (None, Some(l)) => (l, false),
+        // Bulut sağlayıcı: bildirilen pencerenin dışında "yüklenen" kavramı yok.
+        (Some(d), None) if !local => (d, false),
+        // Yerel + doğrulanamayan bildirim: muhafazakâr tavan.
+        (Some(d), None) => (d.min(LOCAL_DEFAULT_CONTEXT), true),
+        (None, None) if local => (LOCAL_DEFAULT_CONTEXT, true),
+        (None, None) => (DEFAULT_CONTEXT, true),
+    };
+    (window.max(1_024) as usize, guessed)
+}
+
+/// Yerel sunucu penceresini bildirmezse kullanılan tavan.
+///
+/// Neden 4096: Ollama'nın varsayılan yüklemesi budur ve OpenAI-uyumlu uç
+/// nokta `num_ctx` kabul etmez (ölçüldü: model önden `num_ctx=8192` ile
+/// yüklenmiş olsa bile compat isteği onu 4096'ya geri yüklüyor).
+const LOCAL_DEFAULT_CONTEXT: u64 = 4_096;
+
 /// Modele giden bağlam için token bütçesi.
 ///
-/// Modelin bildirilen penceresinin **%55**'i. Neden yarıdan az:
+/// **Etkin** pencerenin (bkz. `effective_context_window`) %55'i. Neden
+/// yarıdan az:
 /// - çıktı (max_tokens) için yer gerekir;
 /// - araç şemaları her turda gider (~5 KB);
 /// - ve pencerenin dolması "lost in the middle" etkisini artırır
 ///   (2026 RULER/NoLiMa: çok-faktör isabeti ~%60). Bilinçli olarak
 ///   muhafazakâr: dar bağlam, geniş bağlamdan daha isabetli.
-fn context_budget_for(caps: &model_caps::ModelCaps) -> usize {
-    const DEFAULT_CONTEXT: u64 = 32_768;
-    let window = caps.context_length.unwrap_or(DEFAULT_CONTEXT).max(4_096) as usize;
-    (window * 55 / 100).max(2_048)
+fn context_budget_for_window(window: usize) -> usize {
+    (window * 55 / 100).max(512)
 }
 
+/// Tool loop'ta güncel turdan önceki `tool` mesajlarını kırpır. Her tur tüm
+/// konuşma sağlayıcıya yeniden gönderildiği için, kırpılmamış eski read_file/
+/// grep çıktıları prompt token'ını turlarla üstel büyütüyordu.
 fn trim_old_tool_results(messages: &mut [Value], fresh_count: usize) {
     let tool_idx: Vec<usize> = messages
         .iter()
@@ -1669,8 +1705,17 @@ pub async fn ai_chat_stream(
         schema_cache: Some(state.schema_cache.clone()),
     };
 
-    // Bağlam bütçesi model penceresinden türetilir (muhafazakâr: %55).
-    let context_budget = context_budget_for(&caps);
+    // Bağlam bütçesi ETKİN pencereden türetilir: sunucunun gerçekten
+    // yüklediği pencere bildirilenden küçükse bütçe ona göre kırpılır
+    // (yoksa sunucu içeriği sessizce atar — bkz. effective_context_window).
+    let loaded_window = model_caps::loaded_context_window(
+        base_url_of(&url),
+        &resolve_api_key(&req)?,
+        &req.model,
+    );
+    let (window, window_guessed) =
+        effective_context_window(&caps, loaded_window, is_local_endpoint(&url));
+    let context_budget = context_budget_for_window(window);
 
     let (tx, rx) = tokio::sync::mpsc::channel::<String>(64);
     let _ = tx.try_send(
@@ -1680,6 +1725,13 @@ pub async fn ai_chat_stream(
                 "compressed_messages": engine.2,
                 "original_tokens": engine.0,
                 "compressed_tokens": engine.1,
+            },
+            // Pencere doğrulandı mı: yerel sunucu gerçek yüklü pencereyi
+            // bildirdiyse true; tahminse false (kullanıcıya söylenebilir).
+            "context": {
+                "window_tokens": window,
+                "budget_tokens": context_budget,
+                "window_verified": !window_guessed,
             }
         })
         .to_string(),
@@ -1735,10 +1787,21 @@ pub async fn ai_chat(
 
     let effort_for_task = req.reasoning_effort.clone();
     let gen_for_task = GenOptions::from_request(&req).with_caps(&caps);
-    let context_budget = context_budget_for(&caps);
+    // Bütçe ETKİN pencereden (bildirilen ≠ yüklenen olabilir, bkz.
+    // effective_context_window).
+    let api_key_for_task = resolve_api_key(&req)?;
+    let loaded_window =
+        model_caps::loaded_context_window(base_url_of(&url), &api_key_for_task, &req.model);
+    let (window, window_guessed) =
+        effective_context_window(&caps, loaded_window, is_local_endpoint(&url));
+    let context_budget = context_budget_for_window(window);
+    let context_meta = json!({
+        "window_tokens": window,
+        "budget_tokens": context_budget,
+        "window_verified": !window_guessed,
+    });
     let blocks_for_task = blocks.clone();
     let url_for_task = url.clone();
-    let api_key_for_task = resolve_api_key(&req)?;
     let model_for_task = req.model.clone();
     let permission_for_task = req.permission.clone();
     let root_for_task = state
@@ -1824,6 +1887,9 @@ pub async fn ai_chat(
             "original_tokens": engine_original,
             "compressed_tokens": engine_compressed,
         },
+        // Etkin pencere/bütçe: yerel sunucu gerçek bağlamı bildirmezse
+        // `window_verified=false` (muhafazakâr varsayım kullanıldı).
+        "context": context_meta,
     })))
 }
 
@@ -1831,9 +1897,71 @@ pub async fn ai_chat(
 mod tests {
     use super::*;
 
+    /// ÖLÇÜLMÜŞ HATA (Ollama 0.40.11, qwen2.5-coder:7b): model 4096'da yüklü
+    /// ama beyan edilen pencere 32K. Bütçe beyana göre hesaplanırsa 18.022
+    /// token'a izin verilirdi — sunucu 4096'yı aşan kısmı sessizce atar
+    /// (20.000 karakterlik prompt → prompt_tokens 2050, ortadaki bilgi kayıp).
     #[test]
-    fn tool_loop_aborts_when_round_budget_exceeded() {
-        // 5 × ~32 KB read_file = ~164k karakter > TOOL_RESULT_BUDGET (150k):
+    fn loaded_window_overrides_optimistic_declared_window() {
+        let caps = model_caps::ModelCaps {
+            context_length: Some(32_768),
+            ..Default::default()
+        };
+        let (w, guessed) = effective_context_window(&caps, Some(4_096), true);
+        assert_eq!(w, 4_096, "yüklenen pencere kazanmalı");
+        assert!(!guessed);
+        assert_eq!(context_budget_for_window(w), 2_252);
+        // Beyana göre hesaplansaydı ne olurdu:
+        assert!(context_budget_for_window(32_768) > 18_000);
+    }
+
+    /// Yerel sunucu pencereyi bildirmiyorsa 32K varsaymak yerine muhafazakâr
+    /// tavan kullanılır (Ollama'nın varsayılan yüklemesi 4096).
+    #[test]
+    fn local_unverified_window_falls_back_to_conservative_default() {
+        let caps = model_caps::ModelCaps {
+            context_length: None,
+            ..Default::default()
+        };
+        let (w, guessed) = effective_context_window(&caps, None, true);
+        assert_eq!(w, LOCAL_DEFAULT_CONTEXT as usize);
+        assert!(guessed, "doğrulanmadığı bildirilmeli");
+    }
+
+    /// Bulut sağlayıcıda bildirilen pencere güvenilirdir; "yüklenen" kavramı
+    /// yoktur, muhafazakâr tavana düşülmez.
+    #[test]
+    fn cloud_provider_trusts_declared_window() {
+        let caps = model_caps::ModelCaps {
+            context_length: Some(200_000),
+            ..Default::default()
+        };
+        let (w, guessed) = effective_context_window(&caps, None, false);
+        assert_eq!(w, 200_000);
+        assert!(!guessed);
+    }
+
+    /// Daha küçük olan kazanır; bildirilen < yüklenen de olabilir (vLLM).
+    #[test]
+    fn smaller_of_declared_and_loaded_wins() {
+        let caps = model_caps::ModelCaps {
+            context_length: Some(8_192),
+            ..Default::default()
+        };
+        assert_eq!(effective_context_window(&caps, Some(32_768), true).0, 8_192);
+    }
+
+    /// Bütçe hiçbir zaman 0 veya pencereyi aşan bir değer olmamalı.
+    #[test]
+    fn budget_stays_within_window() {
+        for window in [1_024usize, 4_096, 32_768, 200_000] {
+            let b = context_budget_for_window(window);
+            assert!(b > 0 && b <= window, "pencere {} → bütçe {}", window, b);
+        }
+    }
+
+    #[test]
+    fn tool_loop_aborts_when_round_budget_exceeded() {        // 5 × ~32 KB read_file = ~164k karakter > TOOL_RESULT_BUDGET (150k):
         // döngü hata ile durmalı, kullanıcı sessizce büyük faturaya boğulmamalı.
         let tmp = std::env::temp_dir().join(format!("thx_bud_{}", std::process::id()));
         let _ = std::fs::create_dir_all(&tmp);
@@ -2316,6 +2444,52 @@ mod tests {
 
         // Düz JSON olmayan metin → None.
         assert!(rescue_text_tool_call("sadece cevap", &tools).is_none());
+    }
+
+    /// Kurtarma yolu İZİN KAPILARINI ATLAMAZ. Kanıt, iki savunma hattında:
+    /// 1. `tool_names(allow_shell=false)` `run_command` içermez → izin
+    ///    verilmeyen bir kabuk çağrısı metinden kurtarılamaz.
+    /// 2. Kurtarılan çağrı aynı `tools::execute` yolundan geçer; sub-ajan
+    ///    bayrağı değiştiren araçları reddeder.
+    #[test]
+    fn rescued_calls_cannot_bypass_permission_gates() {
+        // (1) run_command yalnız izinli modlarda kurtarılabilir.
+        let restricted = tools::tool_names(false);
+        assert!(!restricted.contains(&"run_command"));
+        assert!(
+            rescue_text_tool_call(
+                r#"{"name": "run_command", "arguments": {"command": "rm -rf /"}}"#,
+                &restricted
+            )
+            .is_none(),
+            "read-only/ask modunda kabuk çağrısı metinden kurtarılmamalı"
+        );
+        // İzinli modda aynı metin kurtarılır — kapı izin moduna bağlı.
+        assert!(rescue_text_tool_call(
+            r#"{"name": "run_command", "arguments": {"command": "cargo test"}}"#,
+            &tools::tool_names(true)
+        )
+        .is_some());
+
+        // (2) Kurtarılan çağrı execute'ta da reddedilir (savunma derinliği):
+        // sub-ajan bağlamında edit_file yazamaz.
+        let tmp = std::env::temp_dir().join(format!("thx_rescue_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&tmp);
+        let blocks: Vec<(String, String, String)> = vec![];
+        let mut ctx = tools::ToolCtx::new(&tmp, &blocks);
+        ctx.read_only = true;
+        let out = tools::execute(
+            "edit_file",
+            &json!({"path": "a.txt", "search": "x", "replace": "y"}),
+            &ctx,
+        );
+        assert!(out.contains("not allowed"), "read_only edit reddi: {}", out);
+        assert!(!tmp.join("a.txt").exists(), "dosya yazılmamalı");
+        // read_only + allow_shell: run_command yine reddedilir.
+        ctx.allow_shell = true;
+        let out = tools::execute("run_command", &json!({"command": "echo hi"}), &ctx);
+        assert!(out.contains("not allowed"), "read_only kabuk reddi: {}", out);
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]

@@ -24,6 +24,8 @@ use serde_json::{json, Value};
 const BASE: &str = "http://127.0.0.1:11434";
 const MODEL: &str = "qwen2.5-coder:7b";
 const BUDGET: usize = 1_500;
+/// Sondalanacak turlar: tek koşu yerine örneklem (bkz. SONUC kapsam notu).
+const PROBE_TURNS: [u32; 5] = [0, 3, 6, 9, 11];
 
 struct Lcg(u64);
 impl Lcg {
@@ -88,7 +90,7 @@ fn main() {
         "content": "You are a coding assistant. Use the recall tool to fetch full content of stored context items when the message says so. Always answer concisely."
     })];
 
-    let mut secret_store_id: Option<u32> = None;
+    let mut store_ids: Vec<u32> = Vec::new();
     for t in 0..12u32 {
         // Kullanıcı mesajı
         let user = if t == 0 {
@@ -115,9 +117,9 @@ fn main() {
         let payload = Value::Array(rows);
         let raw = serde_json::to_string(&payload).unwrap();
         let sid = store.push(t, Kind::Tool, &format!("grep_search turn {t}"), &payload, None, None);
+        store_ids.push(sid);
         if t == 0 {
-            secret_store_id = Some(sid);
-            println!("Tur 0 araç çıktısı depoda id={sid} (gizli kod bunun içinde DEĞİL — kullanıcı mesajında)");
+            println!("Tur 0 araç çıktısı depoda id={sid}");
         }
         messages.push(json!({"role": "tool", "tool_call_id": format!("call_{t}"), "content": raw}));
 
@@ -170,8 +172,16 @@ fn main() {
     }
     println!("  tum id'ler cozuldu : EVET");
 
-    // ── Model testi: gizli kodu sor (kullanıcı mesajı sıkıştırılmış olabilir) ──
-    println!("\n=== Model testi ===");
+    // ── Model testi: ÇOKLU SONDA ─────────────────────────────────────────
+    //
+    // ÖNEMLİ (önceki sürümün hatası): tek koşu "kanıt" değildir. Bir başarı
+    // "her zaman çalışır" ile "bir kez çalıştı"yı ayırt edemez. Bu sürüm
+    // birden çok depo öğesini sorar ve ORAN yazar.
+    //
+    // Ayrıca: sıcaklık 0 olduğu için AYNI soruyu tekrarlamak aynı cevabı
+    // verir — o yüzden farklı öğeler sorulur. Gerçek bir "oran" için
+    // sıcaklık > 0 ile tekrar koşmak gerekir; bu test onu iddia etmez.
+    println!("\n=== Model testi ({} sonda) ===", PROBE_TURNS.len());
 
     // Not: kullanıcı mesajları sıkıştırılmaz (kayipsizlik ilkesi), o yüzden
     // gizli kod hâlâ ham metinde. Bunu doğrulayalım.
@@ -192,106 +202,120 @@ fn main() {
         }
     }]);
 
-    // Tur 0'ın araç çıktısını geri istet → model recall çağırmalı
-    messages.push(json!({
-        "role": "user",
-        "content": format!(
-            "Earlier tool output was compacted. Fetch the FULL content of the stored item id={} using the recall tool, then report how many items it contained and the first item's file path. Be brief.",
-            secret_store_id.unwrap()
-        )
-    }));
+    // Sıkıştırılmış taban: her sonda buradan başlar (önceki sondanın
+    // eklediği mesajlar bir sonrakine sızmasın).
+    let base_messages = messages.clone();
+    let mut chain_ok_n = 0usize;
+    let mut recall_ok_n = 0usize;
+    let mut lossless_n = 0usize;
 
-    let mut rounds = 0usize;
-    let mut recall_called = false;
-    let mut recall_payload: Option<String> = None;
-    let mut final_answer = String::new();
+    for (i, &turn) in PROBE_TURNS.iter().enumerate() {
+        let target = store_ids[turn as usize];
+        let mut messages = base_messages.clone();
+        messages.push(json!({
+            "role": "user",
+            "content": format!(
+                "Earlier tool output was compacted. Fetch the FULL content of the stored item id={} using the recall tool, then report the first item's file path. Be brief.",
+                target
+            )
+        }));
 
-    loop {
-        rounds += 1;
-        if rounds > 4 { break; }
-        let resp = chat(&messages, Some(tools.clone()));
-        let msg = resp["message"].clone();
-        let text = msg["content"].as_str().unwrap_or("").to_string();
-        if !text.is_empty() { final_answer = text.clone(); }
+        let mut rounds = 0usize;
+        let mut recall_called = false;
+        let mut recall_payload: Option<String> = None;
+        let mut final_answer = String::new();
 
-        let calls = msg["tool_calls"].as_array().cloned().unwrap_or_default();
-        if calls.is_empty() {
-            // Kurtarma: model araç çağrısını content içine yazmış olabilir.
-            if let Some((name, args)) = rescue_text_tool_call(&text) {
-                println!("  (kurtarildi: content icindeki arac cagrisi — üretimde de aynı kurtarma var)");
-                let id = args["id"].as_i64().unwrap_or(-1) as u32;
-                if name == "recall" {
+        while rounds < 4 {
+            rounds += 1;
+            let resp = chat(&messages, Some(tools.clone()));
+            let msg = resp["message"].clone();
+            let text = msg["content"].as_str().unwrap_or("").to_string();
+            if !text.is_empty() { final_answer = text.clone(); }
+
+            let calls = msg["tool_calls"].as_array().cloned().unwrap_or_default();
+            if calls.is_empty() {
+                // Kurtarma: model araç çağrısını content içine yazmış olabilir.
+                if let Some((name, args)) = rescue_text_tool_call(&text) {
+                    let id = args["id"].as_i64().unwrap_or(-1) as u32;
+                    if name == "recall" && id != -1i64 as u32 {
+                        recall_called = true;
+                        let content = store.recall(id)
+                            .map(|v| serde_json::to_string(&v).unwrap_or_default())
+                            .unwrap_or_else(|| format!("no item with id {id}"));
+                        let original = store.recall(target)
+                            .map(|v| serde_json::to_string(&v).unwrap_or_default())
+                            .unwrap_or_default();
+                        recall_payload = Some(if content == original { "LOSSLESS".into() } else { "DIFFERENT".into() });
+                        messages.push(json!({"role": "assistant", "content": text.clone()}));
+                        messages.push(json!({"role": "user", "content": format!("TOOL RESULT for recall(id={id}):\n{content}")}));
+                        continue;
+                    }
+                }
+                break;
+            }
+
+            messages.push(msg.clone());
+            for c in &calls {
+                let name = c["function"]["name"].as_str().unwrap_or("");
+                let args = &c["function"]["arguments"];
+                let id = args["id"].as_i64()
+                    .or_else(|| args.as_str().and_then(|s| serde_json::from_str::<Value>(s).ok()).and_then(|v| v["id"].as_i64()))
+                    .unwrap_or(-1) as u32;
+                if name == "recall" && id != -1i64 as u32 {
                     recall_called = true;
                     let content = store.recall(id)
                         .map(|v| serde_json::to_string(&v).unwrap_or_default())
                         .unwrap_or_else(|| format!("no item with id {id}"));
-                    let original = store.recall(secret_store_id.unwrap())
+                    let original = store.recall(target)
                         .map(|v| serde_json::to_string(&v).unwrap_or_default())
                         .unwrap_or_default();
                     recall_payload = Some(if content == original { "LOSSLESS".into() } else { "DIFFERENT".into() });
-                    messages.push(json!({"role": "assistant", "content": text.clone()}));
-                    messages.push(json!({"role": "user", "content": format!("TOOL RESULT for recall(id={id}):
-{content}")}));
-                    continue;
+                    messages.push(json!({"role": "tool", "content": content}));
+                } else {
+                    messages.push(json!({"role": "tool", "content": format!("unknown tool: {name}")}));
                 }
             }
-            break;
         }
 
-        messages.push(msg.clone());
-        for c in &calls {
-            let name = c["function"]["name"].as_str().unwrap_or("");
-            let args = &c["function"]["arguments"];
-            let id = args["id"].as_i64()
-                .or_else(|| args.as_str().and_then(|s| serde_json::from_str::<Value>(s).ok()).and_then(|v| v["id"].as_i64()))
-                .unwrap_or(-1) as u32;
-            println!("  model cagirdi: {name}(id={id})");
-            if name == "recall" && id != u32::MAX {
-                recall_called = true;
-                let content = store.recall(id)
-                    .map(|v| serde_json::to_string(&v).unwrap_or_default())
-                    .unwrap_or_else(|| format!("no item with id {id}"));
-                // Doğrulama: dönen içerik ORİJİNAL mi?
-                let original = store.recall(secret_store_id.unwrap())
-                    .map(|v| serde_json::to_string(&v).unwrap_or_default())
-                    .unwrap_or_default();
-                recall_payload = Some(if content == original { "LOSSLESS".into() } else { "DIFFERENT".into() });
-                messages.push(json!({"role": "tool", "content": content}));
-            } else {
-                messages.push(json!({"role": "tool", "content": format!("unknown tool: {name}")}));
-            }
-        }
+        // Depodaki GERÇEK içerik: ilk dosya yolu.
+        let recalled = store.recall(target).expect("depoda olmali");
+        let real_first_file = recalled
+            .as_array()
+            .and_then(|a| a.first())
+            .and_then(|v| v.get("file"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("?")
+            .to_string();
+        let chain_ok = final_answer.contains(&real_first_file);
+        let lossless = recall_payload.as_deref() == Some("LOSSLESS");
+        if recall_called { recall_ok_n += 1; }
+        if lossless { lossless_n += 1; }
+        if chain_ok { chain_ok_n += 1; }
+
+        println!(
+            "  [{}] tur {:>2} id={:<3} recall={:<3} icerik={:<9} cevap={:.60}",
+            i + 1,
+            turn,
+            target,
+            if recall_called { "VAR" } else { "YOK" },
+            recall_payload.as_deref().unwrap_or("-"),
+            final_answer.trim().replace('\n', " ")
+        );
     }
 
-    println!("\n=== SONUC ===");
-    println!("  model recall cagirdi  : {}", if recall_called { "EVET" } else { "HAYIR" });
-    println!("  donen icerik          : {:?}", recall_payload);
-    println!("  model cevabi          : {:.120}", final_answer.trim());
-
-    // Depodan gelen GERÇEK içerik: kaç öğe, ilk dosya ne?
-    let recalled = store.recall(secret_store_id.unwrap()).expect("depoda olmali");
-    let real_count = recalled.as_array().map(|a| a.len()).unwrap_or(0);
-    let real_first_file = recalled
-        .as_array()
-        .and_then(|a| a.first())
-        .and_then(|v| v.get("file"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("?")
-        .to_string();
-    println!("  depodaki gercek icerik: {} oge, ilk dosya {}", real_count, real_first_file);
-    // ZİNCİR TESTİ: model depodaki dosya yolunu doğru söyledi mi?
-    // (Bu, kayıpsız içeriğin modele gerçekten ulaştığının kanıtı.)
-    let chain_ok = final_answer.contains(&real_first_file);
-    // SAYMA TESTİ ayrı: 7B model saymada zayıf; zincir kanıtı değil.
-    let count_ok = final_answer.contains(&real_count.to_string());
-    println!("  zincir (dosya yolu)   : {}", if chain_ok { "OK" } else { "BASARISIZ" });
-    println!("  sayma (7B zaafi)      : {}", if count_ok { "OK" } else { "yanlis saydi" });
+    let n = PROBE_TURNS.len();
+    println!("\n=== SONUC ({} sonda) ===", n);
+    println!("  recall cagrisi        : {}/{}", recall_ok_n, n);
+    println!("  kayipsiz donen icerik : {}/{}", lossless_n, n);
+    println!("  zincir (dosya yolu)   : {}/{}", chain_ok_n, n);
 
     println!("\n=== ZINCIR OZETI ===");
-    println!("  1. depoya yazma      : OK (id={})", secret_store_id.unwrap());
+    println!("  1. depoya yazma      : OK ({} arac ciktisi)", store_ids.len());
     println!("  2. kompaksiyon       : OK ({} mesaj, butce saglandi)", compacted_count);
-    println!("  3. recall cagrisi    : {}", if recall_called { "OK" } else { "BASARISIZ" });
-    println!("  4. kayipsiz icerik   : {:?}", recall_payload);
-    println!("  5. icerik ulasti     : {}", if chain_ok { "OK (model depodaki dosya yolunu dogru soyledi)" } else { "BASARISIZ" });
-    println!("  6. sayma dogrulugu   : {} (7B icin beklenen zayiflik)", if count_ok { "OK" } else { "yanlis" });
+    println!("  3. recall cagrisi    : {}/{}", recall_ok_n, n);
+    println!("  4. kayipsiz icerik   : {}/{}", lossless_n, n);
+    println!("  5. icerik ulasti     : {}/{} (model depodaki dosya yolunu soyledi)", chain_ok_n, n);
+    println!("\n  KAPSAM: bu bir ORAN degil, {n} sondalik bir orneklemdir. Sıcaklık 0\n  \
+             olduğu için aynı soru aynı cevabı verir; tekrarlı güvenilirlik\n  \
+             ölçümü için sıcaklık > 0 ile koşmak gerekir.");
 }

@@ -1,3 +1,15 @@
+// ⚠️ BU TESTİN SONUCU GEÇERSİZ — `presentation_test.rs` kullanın.
+//
+// İki metodoloji hatası (bkz. docs/context-window.md, Sonuç 4):
+//   1. Uzunluk ile biçim karıştı: B 27.420 token, C 6.640 token. Fark biçime
+//      mi uzunluğa mı ait, ayrıştırılamaz.
+//   2. İğne (gizli kod) KULLANICI mesajındaydı; sıkıştırma kullanıcı
+//      mesajlarına dokunmaz. 0/20 → 20/20 "özet araç çıktısını korudu"
+//      demek değil, "kısa bağlamda arama kolay" demekti.
+//
+// Düzeltilmiş ölçüm: @T tam boyda 11/11, okunabilir 11/11 — "@T okunamıyor"
+// iddiası YANLIŞ. Fark ~5x daha az token.
+//
 // "Modellerin anlamasını kolaylaştırma" testi — model-bağımsızlık kanıtı.
 //
 //   ollama serve

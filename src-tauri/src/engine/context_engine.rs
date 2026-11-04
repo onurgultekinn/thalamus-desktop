@@ -327,8 +327,13 @@ impl ContextEngine {
                     let l = arr.last().and_then(|i| i.get("id")).map(|v| v.to_string()).unwrap_or("?".into());
                     format!(" IDs: {}–{}.", f, l)
                 };
-                format!("Found {} items.{}{}{} Fields: {}.",
-                    n, ids, files_str, status, fields.join(", "))
+                // NADİR DEĞERLER: dağılım özeti (sayı + status) satırlardaki
+                // TEKİL bilgiyi siler — gizli anahtar, özel kimlik, benzersiz
+                // dosya adı. Bunlar genellikle kullanıcının aradığı tek şeydir;
+                // deterministik olarak (model yok) korunur.
+                let distinct = rare_values(arr, 8);
+                format!("Found {} items.{}{}{} Fields: {}.{}",
+                    n, ids, files_str, status, fields.join(", "), distinct)
             }
             Value::Object(map) => {
                 let n = map.len();
@@ -425,6 +430,67 @@ impl ContextEngine {
     }
 }
 
+/// Özetin sildiği TEKİL değerleri kurtarır (deterministik, model yok).
+///
+/// Sayı + durum dağılımı satırların ortak yapısını anlatır ama tekil bilgiyi
+/// (kimlik anahtarı, özel kimlik, benzersiz dosya/etiket) tamamen düşürür.
+/// Ölçüm: iğne araç çıktısındaysa dağılım özeti onu yok ediyordu (bkz.
+/// `examples/presentation_test.rs`). Burada bir alanda **az sayıda** geçen
+/// kısa metin değerleri listelenir; yaygın değerler (status/ok/warn) zaten
+/// dağılımda sayıldığı için atlanır.
+///
+/// Dönen: `" Distinct: field=value, …."` ya da boş dizge (nadir değer yok).
+fn rare_values(arr: &[Value], limit: usize) -> String {
+    use std::collections::HashMap;
+    if arr.len() < 3 || limit == 0 {
+        return String::new();
+    }
+    // Alan → değer → kaç satırda geçtiği.
+    let mut counts: HashMap<String, HashMap<String, usize>> = HashMap::new();
+    for item in arr {
+        let Some(obj) = item.as_object() else { continue };
+        for (field, val) in obj {
+            let Value::String(s) = val else { continue };
+            let s = s.trim();
+            // Kısa değerler taşınabilir; uzun metin zaten özetlenemez.
+            if s.is_empty() || s.chars().count() > 64 || s.chars().count() < 3 {
+                continue;
+            }
+            *counts
+                .entry(field.clone())
+                .or_default()
+                .entry(s.to_string())
+                .or_insert(0) += 1;
+        }
+    }
+    // Satır sayısına göre "nadir" eşiği: 30 satırda 2 kez geçen değer hâlâ
+    // nadirdir; 3 satırlık çıktıda her şey nadir olurdu (o yüzden >=3 satır).
+    let threshold = (arr.len() / 10).max(2);
+    let mut picked: Vec<(String, String, usize)> = Vec::new();
+    for (field, vals) in &counts {
+        // Dağılımı zaten verilen kategorik alanları tekrar etme.
+        if matches!(field.as_str(), "status" | "severity" | "level" | "type") {
+            continue;
+        }
+        for (val, n) in vals {
+            if *n <= threshold {
+                picked.push((field.clone(), val.clone(), *n));
+            }
+        }
+    }
+    if picked.is_empty() {
+        return String::new();
+    }
+    // En nadir önce, sonra alan/değer adı (deterministik sıralama).
+    picked.sort_by(|a, b| a.2.cmp(&b.2).then(a.0.cmp(&b.0)).then(a.1.cmp(&b.1)));
+    picked.truncate(limit);
+    let parts: Vec<String> = picked
+        .iter()
+        .map(|(f, v, _)| format!("{f}={v}"))
+        .collect();
+    format!(" Distinct: {}.", parts.join(", "))
+}
+
 /// JSON değerinden dosya yolları çıkarır (deterministik, derinlemesine).
 fn extract_paths(v: &Value, files: &mut Vec<(String, u32)>) {
     match v {
@@ -485,6 +551,54 @@ fn count_tokens(bpe: Option<&CoreBPE>, text: &str) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ÖLÇÜLMÜŞ EKSİK: dağılım özeti araç çıktısındaki TEKİL değeri siliyordu.
+    /// İğne araç çıktısındaysa özet onu yok eder — kullanıcı "kayıpsız" sanır
+    /// ama bağlamda göremez (tam içerik yalnız `recall(id)` ile gelir).
+    #[test]
+    fn readable_summary_keeps_singleton_values() {
+        let rows: Vec<Value> = (0..30)
+            .map(|r| {
+                let st = ["ok", "warn", "error"][(r % 3) as usize];
+                json!({
+                    "id": r, "file": format!("src/m{}.rs", r % 7),
+                    "status": st, "ms": r * 5,
+                    // Tek satırda geçen tekil bilgi (kimlik anahtarı).
+                    "note": if r == 13 { "AUTH-KEY-7f3d9b2e" } else { "" }
+                })
+            })
+            .collect();
+        let s = ContextEngine::render_readable(&Value::Array(rows));
+        assert!(s.contains("AUTH-KEY-7f3d9b2e"), "tekil değer özette kalmalı: {}", s);
+        assert!(s.contains("Found 30 items"), "özet hâlâ sayı vermeli: {}", s);
+    }
+
+    /// Yaygın değerler (her satırda geçen file) "nadir" sayılmamalı; özet
+    /// şişmemeli. Sınır: en fazla `limit` değer.
+    #[test]
+    fn rare_values_ignores_common_and_caps_output() {
+        // 40 satır; file değeri 5 farklı değer arasında → hepsi yaygın.
+        let rows: Vec<Value> = (0..40)
+            .map(|r| json!({"file": format!("src/f{}.rs", r % 5), "status": "ok"}))
+            .collect();
+        let s = rare_values(&Value::Array(rows.clone()).as_array().unwrap(), 8);
+        assert!(s.is_empty(), "yaygın değerler nadir sayılmamalı: {}", s);
+
+        // Her satırda farklı bir değer: sınır uygulanır.
+        let uniq: Vec<Value> = (0..40)
+            .map(|r| json!({"tag": format!("t{:03}", r)}))
+            .collect();
+        let s = rare_values(&Value::Array(uniq).as_array().unwrap(), 8);
+        assert_eq!(s.matches("tag=").count(), 8, "limit uygulanmalı: {}", s);
+    }
+
+    /// Çok küçük çıktıda (1-2 satır) nadir değer taraması yapılmaz: her şey
+    /// nadir görünür ve özet gereksiz şişerdi.
+    #[test]
+    fn rare_values_skips_tiny_arrays() {
+        let one = vec![json!({"note": "tek"})];
+        assert!(rare_values(&one, 8).is_empty());
+    }
 
     #[test]
     fn context_stays_bounded_across_many_turns() {

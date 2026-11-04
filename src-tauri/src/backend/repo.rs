@@ -79,7 +79,12 @@ pub fn walk(
         let path = entry.path();
         let name = entry.file_name().to_string_lossy().to_string();
         if path.is_dir() {
-            if SKIP_DIRS.contains(&name.as_str()) || name.starts_with('.') {
+            // "target*" (target, target_verify …) tamamen atla: derleme çıktısı
+            // ağaçları binlerce dizindir ve taramayı saniyelerle uzatır.
+            if SKIP_DIRS.contains(&name.as_str())
+                || name.starts_with('.')
+                || name.starts_with("target")
+            {
                 continue;
             }
             walk(&path, root, depth + 1, cache, ignore, out);

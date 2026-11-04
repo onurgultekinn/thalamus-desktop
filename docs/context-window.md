@@ -27,7 +27,8 @@ So "just use a bigger window" is not a solution to either problem.
 | `examples/pyramid_probe.rs` | How much does lossless compression actually save, and on what shape of data? |
 | `examples/tok_probe.rs` | Does savings depend on the tokenizer? |
 | `examples/context_soak.rs` | Over 200 turns, can old information still be reached, and at what context cost? |
-| `examples/readable_test.rs` | Which *presentation* lets a small model use the context? |
+| `examples/readable_test.rs` | **Superseded** — see Result 4 for why its verdict was wrong. |
+| `examples/presentation_test.rs` | Which presentation lets a small model use the context (needle in tool output, length-matched control). |
 | `examples/continuity_test.rs` | Does compression alone make a 60-turn session fit? |
 | `examples/map_navigation_test.rs` | Can the model navigate a context map by itself? (negative result) |
 | `examples/deterministic_test.rs` | Is keyword matching enough to pick the right item? (negative result) |
@@ -99,31 +100,68 @@ were kept, and `recall(id)` still resolved every one of them.
 
 ## Result 4 — presentation decides whether a model can use the context
 
-This was the most surprising measurement.
+> **Correction (2026-10-31).** The first version of this result claimed
+> "compressed `@T` tables fit the window but the model cannot read them" (0/20).
+> That claim was wrong and is withdrawn. Two flaws invalidated it:
+>
+> 1. **Length and format were mixed.** B was 27,420 tokens against C's 6,640 —
+>    four times larger. A score difference could not be attributed to format
+>    while length varied freely.
+> 2. **The needle was in a user message.** The secret code was planted in a
+>    *user* turn, and compaction never touches user messages. So 0/20 → 20/20
+>    showed that searching a short context is easier — not that summaries
+>    preserved tool output.
 
-`readable_test`, 60-turn session, 20 questions about secret codes in old turns,
-`qwen2.5-coder:7b`, temperature 0:
+### The corrected measurement
+
+`presentation_test.rs`, 40 turns, 11 probes, `qwen2.5-coder:7b`, temperature 0,
+`num_ctx=32768` verified through `/api/ps` before the run started.
+
+The needle (`KEY-nnnn-nnnn`) sits in a `note` field **inside one tool output**,
+on one row of one turn. User and assistant text never contain it. Every probe
+names the turn it asks about (a concrete handle — see Result 6).
+
+| Condition | Tokens | Correct | `prompt_tokens` |
+|---|---:|---:|---:|
+| A — raw JSON | 33,260 | **4/11** | 16,386 |
+| B — `@T` full | 20,740 | **11/11** | 27,314 |
+| C — readable sentences | 4,300 | **11/11** | 5,051 |
+| D — `@T` truncated to C's budget | 5,696 | **11/11** | 7,577 |
+
+**What this says:**
+
+- **`@T` is perfectly readable.** D and C both score 11/11 at essentially the
+  same length. The earlier "unreadable" verdict was a length artifact.
+- **Raw history is the one that fails**, and it fails for the boring reason: A
+  exceeds the loaded window, the server truncates it to half the window
+  (16,386 = 32768/2), and the information is gone. This is the same silent
+  truncation as Result 8, seen from the model's side.
+- **Readable presentation is much cheaper** at equal accuracy: 4,300 vs 20,740
+  tokens. That is the real win, and it is ~4.8× on this data, not 7×.
+
+**What this still does not say:** nothing about retrieval without a handle, and
+nothing about how often the chain completes (one run is not a rate).
+
+Original (invalidated) numbers, kept so the error is traceable:
 
 | Presentation | Tokens | Fits 32K? | Correct |
 |---|---:|---|---:|
-| A — raw JSON history | 46,680 | no | **0/20** |
-| B — compressed `@T` tables | 27,420 | yes | **0/20** |
-| C — readable plain sentences | **6,640** | yes | **20/20** |
+| A — raw JSON history | 46,680 | no | 0/20 |
+| B — compressed `@T` tables | 27,420 | yes | 0/20 |
+| C — readable plain sentences | 6,640 | yes | 20/20 |
 
-Same information, same model. The only difference is how it was written:
+### What this means for the design
 
-```
-Turn 120: Tool found 30 items. Status: ok:10, warn:10, error:10.
-```
-
-`@T` tables fit the window but the model cannot read them. Plain sentences are
-**7× smaller than raw and 100% correct**.
-
-So compression has two jobs, and they are different:
+Compression still has two separate jobs — that conclusion survives:
 
 - **Storage** — lossless, tight, machine-oriented (`@T`, dedup). Nothing lost.
 - **Presentation** — readable, derived deterministically from the stored data.
   No LLM call, no summary written by a model.
+
+The correction changes *why* presentation matters. Not because `@T` is
+unreadable, but because readable sentences carry the same answer in **~5× fewer
+tokens** at equal accuracy. Fewer tokens is what keeps the request inside the
+loaded window — which, for local runtimes, is the binding constraint.
 
 ## Result 5 — compression alone makes a session fit
 
@@ -171,15 +209,37 @@ the model to navigate, and we do not pretend keyword matching is retrieval.
 
 ## Result 7 — the chain works end to end (live model)
 
-`e2e_context_live.rs`, real `qwen2.5-coder:7b` through Ollama:
+> **Scope, stated plainly.** This is **five probes in one run**, at temperature
+> 0. It shows the chain completes several times, including for different stored
+> items. It is still **not a rate**: temperature 0 makes repeated identical
+> questions deterministic, so the repeat count says nothing about reliability
+> under sampling. Treat it as a demonstration of the mechanism, not an estimate
+> of how often it succeeds.
+
+`e2e_context_live.rs`, real `qwen2.5-coder:7b` through Ollama, 12 turns each
+with a 45-record tool output, budget deliberately narrow (1,500 tokens) so
+compaction fires early. Five different stored items are probed:
 
 ```
-12 turns, 37 messages, 21,168 tokens   → budget 1,500 exceeded
-compaction: 12 messages → readable summaries, 20,048 chars saved
-1,120 tokens (budget met), recall ids [1,4,7,10,13] — all resolvable
-model called recall(id=1) → returned content: LOSSLESS
-model answer: "45 items, src/module_00.rs"  — matches the store exactly
+12 turns, 37 messages   → budget 1,500 exceeded
+compaction: 12 messages → readable summaries, recall ids [1,10,19,28,34]
+all ids resolvable in the store
+
+probe  stored id  recall called  returned content  model answer
+  1        1          yes           LOSSLESS          src/module_00.rs
+  2       10          yes           LOSSLESS          src/module_06.rs
+  3       19          yes           LOSSLESS          src/module_05.rs
+  4       28          yes           LOSSLESS          src/module_04.rs
+  5       34          yes           LOSSLESS          src/module_01.rs
+
+recall calls          5/5
+lossless content      5/5
+chain (file path)     5/5
 ```
+
+Each answer names the first file path from *that* stored item, so the model
+could not have answered from a summary alone — it had to call `recall` and read
+the restored content.
 
 ### A real bug found by this test
 
@@ -203,6 +263,58 @@ call only when:
 
 Wired into **both** tool loops (`run_tool_loop` and `stream_tool_loop` — the
 latter is the path the UI actually uses).
+
+## Result 8 — a local server's *declared* window is not its *loaded* window
+
+This is the most dangerous failure in the whole chain, because it is silent.
+
+The budget is derived from the context window. For cloud providers the declared
+window is trustworthy. For a local server (Ollama) it is not, measured on
+Ollama 0.40.11 with `qwen2.5-coder:7b`:
+
+| Observation | Result |
+|---|---|
+| `GET /v1/models` fields | **no `context_length`** at all |
+| `GET /api/ps` → `context_length` after a default load | **4096** (not 32K) |
+| Declared model window | 32768 |
+| Budget the old code derived (55% of 32768) | **18,022 tokens** |
+| Actual usable window | 4096 |
+
+What happens when the request exceeds the loaded window — the server does not
+error, it **truncates**:
+
+| Prompt sent | `prompt_tokens` returned | Needle (mid-prompt) found? |
+|---|---:|---|
+| 20,000 chars | 2,050 | no |
+| 40,000 chars | 2,050 | no |
+| 150,000 chars (32K-loaded instance) | 16,386 | no |
+
+The last row is not a rounding error: Ollama kept exactly half the window
+(32768 → 16386) and the information in the middle was simply gone. A user would
+see a confident wrong answer, not an error.
+
+Also measured: `num_ctx` cannot be fixed over the OpenAI-compatible endpoint.
+
+| Attempt | `/api/ps` after the compat request |
+|---|---|
+| `options.num_ctx=32768` in `/v1/chat/completions` | **ignored** (stayed 4096) |
+| Preload via `/api/generate` with `num_ctx=8192`, then compat call | **reloaded back to 4096** |
+| `OLLAMA_CONTEXT_LENGTH=32768 ollama serve`, then compat call | **32768 — honoured** |
+
+**Fix in the code** (`backend/model_caps.rs::loaded_context_window`,
+`backend/ai.rs::effective_context_window`):
+
+1. Ask the server what it actually loaded: Ollama `/api/ps` →
+   `context_length`; llama.cpp `/v1/models` → `meta.n_ctx` (the allocated
+   window) before `meta.n_ctx_train` (the training window).
+2. Take the **smaller** of declared and loaded.
+3. If a local server reports nothing, fall back to **4096** — Ollama's default
+   load — instead of 32768.
+4. Report `window_verified: false` in the response so the UI can say the window
+   was assumed rather than measured.
+
+Cloud providers are unaffected: they have no "loaded window", so the declared
+value is used as before.
 
 ## The design that follows from these measurements
 
@@ -245,11 +357,30 @@ Two rules make this trustworthy:
   "100 items" for a 45-item array. The file path was right; the count was not.
   This is a model limitation, not a pipeline one — the store returned the
   correct content (verified `LOSSLESS`).
-- **Budget is deliberately conservative** — 55% of the model's declared window.
-  Room is needed for output and tool schemas, and narrower context reduces the
-  lost-in-the-middle effect.
+- **Budget is deliberately conservative** — 55% of the *effective* window (the
+  smaller of declared and loaded). Room is needed for output and tool schemas,
+  and narrower context reduces the lost-in-the-middle effect.
 - **The window is not eliminated, it is bounded.** Nothing can make the window
   infinite; the goal is to keep it small while keeping information reachable.
+- **Compaction summaries drop values unless they are rare.** The readable
+  summary reports item count, status distribution and field names. A value that
+  appears on every row is folded into the distribution; a value that appears on
+  one or two rows is listed as `Distinct: field=value`. If a summary is ever
+  wrong about a value, the full text is still in the store — but the model will
+  only see it if it calls `recall(id)`. A summary is a *view*, not the record.
+- **Retrieval is only as good as the handle.** Every test that scored well gave
+  the question a concrete handle (turn number, file path). With no handle, the
+  right item is not selected (Result 6).
+- **The end-to-end run is a demonstration, not a rate.** Five probes at
+  temperature 0. It shows the mechanism works across different stored items; it
+  does not estimate how often it succeeds under sampling.
+- **The `@T`-is-unreadable claim is withdrawn.** It came from a test that
+  varied length and format at the same time (Result 4). Use
+  `presentation_test` before asserting anything about format.
+- **A local server can silently truncate.** Even with the fix, a server that
+  reports nothing is assumed to be 4096. If the real loaded window is smaller
+  than that, prompts are still truncated — and the response only says
+  `window_verified: false`.
 
 ## How to reproduce
 
@@ -259,13 +390,22 @@ cargo run --manifest-path src-tauri/Cargo.toml --example pyramid_probe --release
 cargo run --manifest-path src-tauri/Cargo.toml --example tok_probe --release
 cargo run --manifest-path src-tauri/Cargo.toml --example context_soak --release
 
-# Needs a local model (Ollama)
-ollama serve
+# Needs a local model (Ollama).
+# IMPORTANT: set the context length explicitly. A default `ollama serve` loads
+# the model at 4096 and silently truncates longer prompts (Result 8), which
+# makes every long-context measurement below meaningless.
+OLLAMA_CONTEXT_LENGTH=32768 ollama serve
 ollama pull qwen2.5-coder:7b
-cargo run --manifest-path src-tauri/Cargo.toml --example readable_test --release
+
+cargo run --manifest-path src-tauri/Cargo.toml --example presentation_test --release
 cargo run --manifest-path src-tauri/Cargo.toml --example continuity_test --release
 cargo run --manifest-path src-tauri/Cargo.toml --example e2e_context_live --release
 ```
+
+`presentation_test` refuses to run unless `/api/ps` confirms the loaded window
+is at least 32K, so a truncated-window run cannot be mistaken for a result. If
+you use a second instance (`OLLAMA_BASE=http://127.0.0.1:11435`), point it
+there.
 
 The negative results are reproducible too — `map_navigation_test` and
 `deterministic_test` are kept in the repository on purpose.

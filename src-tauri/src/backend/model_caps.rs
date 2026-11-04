@@ -114,6 +114,154 @@ pub fn parse_models(payload: &Value) -> HashMap<String, ModelCaps> {
     out
 }
 
+/// Yerel sunucunun **gerçekten yüklediği** bağlam penceresi (token).
+///
+/// Neden gerekli — ölçüldü (Ollama 0.40.11, `qwen2.5-coder:7b`, 8 GB GPU):
+///
+/// - Ollama'nın `/v1/models` yanıtı `context_length` **döndürmüyor**; uygulama
+///   o zaman modelin beyan edilen penceresini (32K) varsayıyordu.
+/// - Ollama modeli kendi varsayılanıyla yüklüyor: **4096**. OpenAI-uyumlu
+///   `/v1/chat/completions` uç noktası `options`/`num_ctx` alanını yok sayıyor;
+///   model önden native `/api/generate` ile `num_ctx=8192` yüklenmiş olsa bile
+///   compat isteği onu **4096'ya geri yüklüyor** (ölçüldü, `/api/ps` 8192 → 4096).
+/// - Aşan prompt sessizce kırpılıyor: 32K yüklü modelde 150.000 karakter
+///   gönderildi → `prompt_tokens=16386` (pencerenin tam yarısı) ve ortadaki
+///   iğne cevapta **yok**. 4096 yüklü modelde 20.000 karakter → 2050 token.
+///
+/// Yani bütçe "bildirilen pencere"den hesaplanırsa sunucu içeriği sessizce
+/// atar ve kullanıcı bunu asla görmez. Bütçe yüklenen pencereye göre
+/// kırpılmalı.
+///
+/// Sıra: (1) Ollama `/api/ps` → `context_length` (yüklü modelin gerçek
+/// penceresi), (2) `/v1/models` → `meta.n_ctx` (llama.cpp yüklenen pencere) ya
+/// da `meta.n_ctx_train`/`max_context_length` (bildirilen). Hiçbiri yoksa
+/// `None` — çağıran yerel sunucu için muhafazakâr varsayımı kullanır.
+pub fn loaded_context_window(base_url: &str, api_key: &str, model: &str) -> Option<u64> {
+    if base_url.trim().is_empty() || model.trim().is_empty() {
+        return None;
+    }
+    let key = format!(
+        "{}#{}#{}",
+        base_url.trim_end_matches('/'),
+        model,
+        api_key.len()
+    );
+    {
+        let guard = CTX_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(map) = guard.as_ref() {
+            if let Some((at, v)) = map.get(&key) {
+                if at.elapsed() < CTX_TTL {
+                    return *v;
+                }
+            }
+        }
+    }
+    let loaded = probe_loaded_ctx(base_url, api_key, model);
+    let mut guard = CTX_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    guard
+        .get_or_insert_with(HashMap::new)
+        .insert(key, (Instant::now(), loaded));
+    loaded
+}
+
+/// Model yükleme/boşaltma sık değişebilir; kapasite önbelleği kısa tutulur.
+const CTX_TTL: Duration = Duration::from_secs(30);
+
+/// (ölçüm zamanı, pencere) — `None` = sunucu bildirmedi.
+type CtxEntry = (Instant, Option<u64>);
+type CtxCache = HashMap<String, CtxEntry>;
+
+static CTX_CACHE: Mutex<Option<CtxCache>> = Mutex::new(None);
+
+fn probe_loaded_ctx(base_url: &str, api_key: &str, model: &str) -> Option<u64> {
+    let base = base_url.trim_end_matches('/');
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(4))
+        .no_proxy()
+        .build()
+        .ok()?;
+    // (1) Ollama native: /api/ps yüklü modelin context_length'ini verir.
+    //     /v1 → kök; kullanıcı tabanı zaten kök de verebilir.
+    let root = base.strip_suffix("/v1").unwrap_or(base);
+    for root in [root, base] {
+        if let Ok(resp) = client.get(format!("{}/api/ps", root)).send() {
+            if resp.status().is_success() {
+                if let Ok(v) = resp.json::<Value>() {
+                    if let Some(n) = parse_loaded_ctx_ps(&v, model) {
+                        return Some(n);
+                    }
+                }
+            }
+        }
+    }
+    // (2) OpenAI-uyumlu /v1/models meta alanı (llama.cpp, LM Studio, vLLM).
+    let mut req = client.get(format!("{}/models", base));
+    if !api_key.trim().is_empty() {
+        req = req.bearer_auth(api_key);
+    }
+    let resp = req.send().ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let payload: Value = resp.json().ok()?;
+    parse_loaded_ctx_models(&payload, model)
+}
+
+/// `/api/ps` yanıtı: `models[]` içinden istenen modelin `context_length`.
+fn parse_loaded_ctx_ps(v: &Value, model: &str) -> Option<u64> {
+    let models = v.get("models")?.as_array()?;
+    let norm = |s: &str| s.trim().trim_end_matches(":latest").to_string();
+    let want = norm(model);
+    models
+        .iter()
+        .find(|m| {
+            ["name", "model"].iter().any(|k| {
+                m.get(*k)
+                    .and_then(|x| x.as_str())
+                    .map(|n| norm(n) == want)
+                    .unwrap_or(false)
+            })
+        })
+        .and_then(|m| m.get("context_length"))
+        .and_then(|c| c.as_u64())
+        .filter(|n| *n > 0)
+}
+
+/// `/v1/models` yanıtında model başına yüklenen/bildirilen pencere.
+///
+/// llama.cpp `/v1/models`: `meta.n_ctx` = sunucunun ayırdığı pencere,
+/// `meta.n_ctx_train` = modelin eğitim penceresi. İlki gerçek sınırdır.
+fn parse_loaded_ctx_models(v: &Value, model: &str) -> Option<u64> {
+    let items = v.get("data")?.as_array()?;
+    let norm = |s: &str| s.trim().trim_end_matches(":latest").to_string();
+    let want = norm(model);
+    let item = items.iter().find(|m| {
+        m.get("id")
+            .and_then(|i| i.as_str())
+            .map(|id| norm(id) == want)
+            .unwrap_or(false)
+    })?;
+    let meta = item.get("meta");
+    for path in [
+        ("loaded_context_length", None),
+        ("context_length", None),
+        ("max_context_length", None),
+        ("meta.n_ctx", Some("n_ctx")),
+        ("meta.n_ctx_train", Some("n_ctx_train")),
+    ] {
+        let found = match path.1 {
+            Some(k) => meta.and_then(|m| m.get(k)),
+            None => item.get(path.0),
+        };
+        if let Some(n) = found.and_then(|n| n.as_u64()) {
+            if n > 0 {
+                return Some(n);
+            }
+        }
+    }
+    None
+}
+
 fn fetch(base_url: &str, api_key: &str) -> Option<HashMap<String, ModelCaps>> {
     let url = format!("{}/models", base_url.trim_end_matches('/'));
     let client = reqwest::blocking::Client::builder()
@@ -218,5 +366,48 @@ mod tests {
         // clef: vision var, tools yok.
         let clef = m.get("clef").unwrap();
         assert!(clef.vision && !clef.tools);
+    }
+
+    /// Ollama `/api/ps`: yüklü modelin GERÇEK penceresi okunur.
+    /// Ölçüm: `qwen2.5-coder:7b` varsayılan yüklemede 4096 bildirir —
+    /// beyan edilen 32K değil. Bütçe buna göre kırpılmalı.
+    #[test]
+    fn ps_reports_loaded_window_not_declared_one() {
+        let ps = json!({"models":[
+            {"name":"qwen2.5-coder:7b","model":"qwen2.5-coder:7b","context_length":4096},
+            {"name":"llama3.1:latest","context_length":8192}
+        ]});
+        assert_eq!(parse_loaded_ctx_ps(&ps, "qwen2.5-coder:7b"), Some(4096));
+        // Etiket uyuşmazlığı (":latest") eşleşmeli.
+        assert_eq!(parse_loaded_ctx_ps(&ps, "llama3.1"), Some(8192));
+        assert_eq!(parse_loaded_ctx_ps(&ps, "yok:1b"), None);
+        // Boş liste (model yüklü değil) → bilinmiyor.
+        assert_eq!(parse_loaded_ctx_ps(&json!({"models":[]}), "x"), None);
+    }
+
+    /// llama.cpp `/v1/models` meta: `n_ctx` (ayrılan) `n_ctx_train`den önce gelir.
+    #[test]
+    fn llama_meta_prefers_allocated_over_train_window() {
+        let v = json!({"data":[{"id":"qwen2.5-coder:7b","meta":{
+            "n_ctx":4096,"n_ctx_train":32768}}]});
+        assert_eq!(parse_loaded_ctx_models(&v, "qwen2.5-coder:7b"), Some(4096));
+        // Yalnız eğitim penceresi varsa o kullanılır (en azından bir sınır).
+        let only_train = json!({"data":[{"id":"m","meta":{"n_ctx_train":32768}}]});
+        assert_eq!(parse_loaded_ctx_models(&only_train, "m"), Some(32768));
+        // OpenAI-uyumlu düz alan.
+        let flat = json!({"data":[{"id":"m","max_context_length":8192}]});
+        assert_eq!(parse_loaded_ctx_models(&flat, "m"), Some(8192));
+        // Ollama'nın /v1/models yanıtı: hiçbir alan yok → None (varsayım yok).
+        let ollama = json!({"object":"list","data":[{"id":"qwen2.5-coder:7b","object":"model"}]});
+        assert_eq!(parse_loaded_ctx_models(&ollama, "qwen2.5-coder:7b"), None);
+    }
+
+    /// Sıfır/bozuk değerler pencere sayılmaz (0'a bölme ve 0 bütçe olmasın).
+    #[test]
+    fn zero_context_is_rejected() {
+        let v = json!({"data":[{"id":"m","context_length":0,"meta":{"n_ctx":0}}]});
+        assert_eq!(parse_loaded_ctx_models(&v, "m"), None);
+        let ps = json!({"models":[{"name":"m","context_length":0}]});
+        assert_eq!(parse_loaded_ctx_ps(&ps, "m").filter(|n| *n > 0), None);
     }
 }
