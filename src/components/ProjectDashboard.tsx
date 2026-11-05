@@ -1335,10 +1335,7 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview, onCon
     return (
       <div className="w-full h-full flex items-center justify-center bg-[#1C1B1A] text-[#CECDC3] font-sans border-t border-[#34332F]">
         <div className="text-center max-w-md px-6 select-none">
-          <h2 className="hand text-[24px] leading-tight mb-1" style={{ color: 'rgb(var(--tlm-gold))' }}>{t('project.emptyTitle')}</h2>
-          <svg className="sketch-underline" viewBox="0 0 220 8" fill="none" aria-hidden="true">
-            <path d="M2 5 C 30 2, 55 7, 85 4 S 150 2, 180 5 S 210 3, 218 4" stroke="#dcb67a" strokeWidth="1.6" strokeLinecap="round" />
-          </svg>
+          <h2 className="text-[16px] font-semibold tracking-tight text-obsidian-text mb-1">{t('project.emptyTitle')}</h2>
           <p className="text-xs text-[#A8A49E] leading-relaxed mt-4">
             {t('project.emptyA')}
             <button type="button" onClick={handleChooseFolder} className="welcome-bridge">{t('project.emptyLink')}</button>

@@ -29,30 +29,9 @@
   font-display: swap;
 }
 
-/* Ink Free: yalnizca SISTEM fontu olarak kullanilir (Windows ile gelir).
-   Daha once burada `/fonts/Inkfree.ttf` isaret eden bir @font-face vardi, ama
-   dosya depoya hic eklenmemisti: her acilista 404 uretiyor, font yine de
-   yuklenmiyordu. Microsoft fontu yeniden dagitilamadigi icin @font-face
-   kaldirildi; `--sketch-hand` yigini kurulu sistem fontunu kullanmaya devam
-   eder, yoksa Segoe Print/cursive'e duser. */
+/* El yazısı fontları (Ink Free/Caveat) söküldü: arayüz tek tipografik dil
+   konuşur — Segoe UI Variable + Cascadia Code mono. */
 
-/* Caveat — primary handwriting (self-host, OFL; Turkish characters in latin-ext) */
-@font-face {
-  font-family: 'Caveat';
-  src: url('/fonts/Caveat-latin-ext.woff2') format('woff2');
-  font-weight: 400 700;
-  font-style: normal;
-  font-display: swap;
-  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
-}
-@font-face {
-  font-family: 'Caveat';
-  src: url('/fonts/Caveat-latin.woff2') format('woff2');
-  font-weight: 400 700;
-  font-style: normal;
-  font-display: swap;
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
 
 /* Thalamus palette — single source of truth (Obsidian by default).
    Tailwind's obsidian-* utilities + the App.css chrome both read these triples,
@@ -92,12 +71,6 @@
   --tlm-scroll-thumb-hover: 96 94 90;
   --tlm-scroll-track: 24 23 22;
   /* Sketchbook accents — "the engineer's dark notebook". */
-  --sketch-accent: rgb(var(--tlm-gold));
-  --sketch-accent-soft: rgb(var(--tlm-gold) / 0.38);
-  --sketch-pencil: rgb(var(--tlm-gold) / 0.82);
-  --sketch-line: rgba(255, 255, 255, 0.07);
-  --sketch-ink: rgb(var(--tlm-fg-soft));
-  --sketch-hand: 'Caveat', 'Ink Free', 'Segoe Print', cursive;
 }
 
 /* Paper texture: grain drifting over the whole interface (does not harm readability) */
@@ -114,27 +87,12 @@
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
-/* Handwriting labels: notebook-note feel (slight slant, golden pencil) */
+/* Eski el yazısı sınıfı: sakin UI stiliyle eşdeğer — geriye dönük uyumluluk. */
 .hand {
-  font-family: var(--sketch-hand);
-  color: var(--sketch-pencil);
-  letter-spacing: 0.02em;
-}
-
-/* Hand-drawn border: classic "wobbly box" technique — a pen-traced feel */
-.sketch-border {
-  border: 1.5px solid var(--sketch-accent-soft);
-  border-radius: 12px 6px 14px 7px / 7px 13px 6px 12px;
-}
-
-/* Hand-drawn wavy underline (for headings) */
-.sketch-underline {
-  display: block;
-  width: 220px;
-  height: 8px;
-  margin: 4px auto 0;
-  pointer-events: none;
-  opacity: 0.65;
+  font-family: inherit;
+  color: rgb(var(--tlm-fg));
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 /* Native controls (select & option popup, scrollbars) follow the dark theme.
@@ -421,50 +379,28 @@ code, pre, .metrics-row, .model-badge, .header-path, .analytics-inner-content, .
 .command-bar-wrapper { width: 100%; max-width: 820px; margin: 0 auto; padding: 0 1rem 1rem 1rem; flex-shrink: 0; }
 
 /* ==========================================================================
-   4. Acanthus Analytics Panel (Version Glowing on the Palette)
+   4. Mesaj ölçüm satırı (token/maliyet) — süs yok, tek satır.
    ========================================================================== */
-.acanthus-ivy-container {
-  position: relative;
+.metrics-row {
   display: flex;
   align-items: center;
   justify-content: center;
   width: 100%;
   max-width: 660px;
-  margin: 0.55rem auto !important; /* sade: mesajdan önce ince bir ölçüm satırı */
-  padding: 0.4rem 1.25rem;
-  background-color: transparent !important;
-  z-index: 1;
+  margin: 0.55rem auto !important;
+  padding: 0.1rem 1.25rem;
 }
 
-.acanthus-ivy-container .ivy-edge {
-  position: absolute;
-  pointer-events: none;
-  z-index: 1;
-  background-image: url('/acanthus-frame.webp');
-  opacity: 0.75; 
-  transition: opacity 0.35s ease-in-out, filter 0.35s ease-in-out;
-}
-
-.acanthus-ivy-container:hover .ivy-edge {
-  opacity: 1; 
-  filter: brightness(1.4); 
-}
-
-.ivy-top { top: -2px; left: 1rem; right: 1rem; height: 10px; background-size: auto 10px; background-repeat: repeat-x; }
-.ivy-bottom { bottom: -2px; left: 1rem; right: 1rem; height: 10px; background-size: auto 10px; background-repeat: repeat-x; transform: rotate(180deg); }
-.ivy-left { top: 8px; bottom: 8px; left: 0; width: 1px; background: linear-gradient(to bottom, transparent, rgba(255, 255, 255, 0.05), transparent); }
-.ivy-right { top: 8px; bottom: 8px; right: 0; width: 1px; background: linear-gradient(to bottom, transparent, rgba(255, 255, 255, 0.05), transparent); }
 
 .analytics-inner-content { display: flex; align-items: center; gap: 1.5rem; position: relative; z-index: 2; font-size: 10.5px; }
-/* Column labels now look like notes penciled in at the edge of the notebook */
+/* Ölçüm etiketi: küçük, soluk, BÜYÜK harf — değerin yanında sakin durur. */
 .column-label {
-  font-family: var(--sketch-hand);
-  font-size: 11px;
-  color: var(--sketch-pencil);
-  letter-spacing: 0.04em;
-  margin-bottom: 2px;
-  transform: rotate(-1.2deg);
-  transform-origin: left bottom;
+  font-family: inherit;
+  font-size: 9.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgb(var(--tlm-fg-muted));
 }
 /* Tek satırlı ölçümde etiket değerin yanında durur: alt marj yok. */
 .column-label-inline {
@@ -780,9 +716,6 @@ html[data-theme='nord-red'] {
   --tlm-scroll-thumb: 90 74 70;
   --tlm-scroll-thumb-hover: 122 102 96;
   --tlm-scroll-track: 32 26 24;
-  /* sketchbook accents (gold pen) shift to warm copper */
-  --sketch-accent-soft: rgb(219 168 113 / 0.38);
-  --sketch-pencil: rgb(219 168 113 / 0.82);
 }
 
 /* --- generated hex-utility overrides (obsidian literal-hex utilities) --- */

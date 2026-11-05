@@ -25,6 +25,7 @@ import {
   RefreshCw,
   Sparkles,
   Plus,
+  Check,
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useToast } from './Toast';
@@ -1300,7 +1301,7 @@ export function SettingsModal({
                                 <span className="block truncate font-mono text-[10px] text-obsidian-muted/70">{preset.endpoint}</span>
                               </span>
                               {added && (
-                                <span className="flex-shrink-0 text-[10px] text-[#3AA99F]">✓</span>
+                                <Check size={12} className="flex-shrink-0 text-[#3AA99F]" />
                               )}
                             </button>
                           );

@@ -44,10 +44,7 @@ export function AuthScreen({ onLogin }: AuthScreenProps) {
 
         {/* Header */}
         <div className="flex flex-col gap-1 text-center">
-          <h1 className="hand text-[26px] leading-tight" style={{ color: 'rgb(var(--tlm-gold))' }}>Thalamus Studio</h1>
-          <svg viewBox="0 0 180 8" fill="none" aria-hidden="true" className="w-[180px] h-2 mx-auto opacity-60">
-            <path d="M2 5 C 26 2, 48 7, 74 4 S 128 2, 152 5 S 172 3, 178 4" stroke="#dcb67a" strokeWidth="1.6" strokeLinecap="round" />
-          </svg>
+          <h1 className="text-[18px] font-semibold tracking-tight text-obsidian-text">Thalamus Studio</h1>
           <p className="text-xs text-[#A8A49E] leading-relaxed mt-2">
             {t('auth.subtitle')}
           </p>

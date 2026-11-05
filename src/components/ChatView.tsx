@@ -1,5 +1,5 @@
 import { Fragment, memo, useEffect, useRef, useState, type RefObject } from 'react';
-import { Pencil } from 'lucide-react';
+import { Cog, Pencil } from 'lucide-react';
 import { AskQuestionCard } from './AskQuestionCard';
 import { MarkdownMessage } from './MarkdownMessage';
 import { StreamingMessage } from './StreamingMarkdown';
@@ -158,10 +158,7 @@ function ChatViewInner({
         showWelcome ? (
           <div className="flex flex-col items-center justify-center min-h-[400px] h-full max-w-3xl mx-auto px-4 py-8 select-none">
             <div className="text-center">
-              <h2 className="hand text-[26px] leading-tight mb-1" style={{ color: 'rgb(var(--tlm-gold))' }}>{t('chat.welcome')}</h2>
-              <svg className="sketch-underline" viewBox="0 0 220 8" fill="none" aria-hidden="true">
-                <path d="M2 5 C 30 2, 55 7, 85 4 S 150 2, 180 5 S 210 3, 218 4" stroke="#dcb67a" strokeWidth="1.6" strokeLinecap="round" />
-              </svg>
+              <h2 className="text-[17px] font-semibold tracking-tight text-obsidian-text mb-1">{t('chat.welcome')}</h2>
               <p className="text-xs text-[#A8A49E] max-w-md mx-auto leading-relaxed mt-4">
                 {t('chat.welcomeA')}
                 <button type="button" onClick={onStartChat} className="welcome-bridge">{t('chat.welcomeLinkChat')}</button>
@@ -176,10 +173,7 @@ function ChatViewInner({
              sakin başlık + tek cümle; boş tuval artık kasıtlı duruyor. */
           <div className="flex flex-col items-center justify-center min-h-[400px] h-full max-w-3xl mx-auto px-4 py-8 select-none">
             <div className="text-center">
-              <h2 className="hand text-[24px] leading-tight mb-1" style={{ color: 'rgb(var(--tlm-gold))' }}>{t('chat.emptyTitle')}</h2>
-              <svg className="sketch-underline" viewBox="0 0 220 8" fill="none" aria-hidden="true">
-                <path d="M2 5 C 30 2, 55 7, 85 4 S 150 2, 180 5 S 210 3, 218 4" stroke="#dcb67a" strokeWidth="1.6" strokeLinecap="round" />
-              </svg>
+              <h2 className="text-[16px] font-semibold tracking-tight text-obsidian-text mb-1">{t('chat.emptyTitle')}</h2>
               <p className="text-xs text-[#A8A49E] max-w-md mx-auto leading-relaxed mt-4">
                 {t('chat.emptyBody')}
               </p>
@@ -219,12 +213,7 @@ function ChatViewInner({
           <Fragment key={idx}>
 
             {msg.role === 'assistant' && msg.metrics && (
-              <div className="acanthus-ivy-container">
-                <div className="ivy-edge ivy-top" />
-                <div className="ivy-edge ivy-bottom" />
-                <div className="ivy-edge ivy-left" />
-                <div className="ivy-edge ivy-right" />
-
+              <div className="metrics-row">
                 <div className="analytics-inner-content">
                   {/* Tek satırlık ölçüm: etiket ve değer yan yana — her yanıtın
                       üstünde kutu içinde kutu gibi duran kart değildi amaç. */}
@@ -345,7 +334,7 @@ function ChatViewInner({
                           }`}
                           title={active ? `${name} çalışıyor…` : name}
                         >
-                          <span className={active ? 'animate-pulse' : ''}>⚙</span>
+                          <Cog size={10} className={active ? 'animate-pulse' : ''} />
                           {name}
                           {count > 1 && <span className="opacity-60">×{count}</span>}
                         </span>
