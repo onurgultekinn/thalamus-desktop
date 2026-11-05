@@ -113,7 +113,9 @@ jobs:
             exit 0
           }
           $rest = $lines[$start..($lines.Count - 1)]
-          $nextSection = ($rest | Select-String -Pattern "^## \[").LineNumber
+          # Yalnız İLK sonraki başlık: tarihte eski beta bölümü (## [0.1.0-beta])
+          # de var; hepsi seçilirse $nextSection diziye dönüşür ve aritmetik patlar.
+          $nextSection = ($rest | Select-String -Pattern "^## \[" | Select-Object -First 1).LineNumber
           $body = if ($nextSection) { $rest[0..($nextSection - 2)] } else { $rest }
           $note = @(
             '',
