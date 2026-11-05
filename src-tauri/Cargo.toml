@@ -42,7 +42,7 @@ rayon = "1"
 regex = "1"
 base64 = "0.22"
 # tiktoken'in cl100k deseni (lookahead'li) birebir ayni kullanilir.
-fancy-regex = "0.12"
+fancy-regex = "0.20"
 # tiktoken-rs'in rank tablosuyla ayni hasher (byte_pair_encode imzasi bunu ister).
 rustc-hash = "1"
 
