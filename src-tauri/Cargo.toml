@@ -33,7 +33,7 @@ tauri-plugin-log = "2"
 tauri-plugin-dialog = "~2.7.3"
 
 # Thalamus local compression engine (pure Rust — no external crate/model)
-tiktoken-rs = "0.5"
+tiktoken-rs = "0.12"
 
 # Segment analizini cekirdeklere dagitmak icin (kayipsiz: yalnizca zamanlama degisir)
 rayon = "1"
