@@ -40,7 +40,7 @@ rayon = "1"
 # Ince tokenizer katmani: lookahead'siz regex (tiktoken'in fancy_regex'ine gore
 # ~3x hizli tarama) + public byte_pair_encode. Cikti tiktoken ile birebir ayni.
 regex = "1"
-base64 = "0.22"
+base64 = "0.23"
 # tiktoken'in cl100k deseni (lookahead'li) birebir ayni kullanilir.
 fancy-regex = "0.12"
 # tiktoken-rs'in rank tablosuyla ayni hasher (byte_pair_encode imzasi bunu ister).
