@@ -37,13 +37,15 @@ jobs:
 
       # A tag that disagrees with package.json would publish installers whose
       # version does not match the release name. Compare only the numeric part
-      # (v0.1.0-beta -> 0.1.0).
+      # on BOTH sides (v0.2.0-beta.1 -> 0.2.0 vs 0.2.0-beta.1 -> 0.2.0); the
+      # prerelease label may differ, it only marks the GitHub release as
+      # pre-release.
       - name: Verify tag matches package.json
         shell: pwsh
         run: |
           $tag = "${{ github.ref_name }}"
           $tagVersion = ($tag -replace '^v', '') -replace '-.*$', ''
-          $pkgVersion = (Get-Content package.json | ConvertFrom-Json).version
+          $pkgVersion = ((Get-Content package.json | ConvertFrom-Json).version) -replace '-.*$', ''
           Write-Host "tag=$tag tagVersion=$tagVersion package.json=$pkgVersion"
           if ($tagVersion -ne $pkgVersion) {
             throw "Tag $tag (=$tagVersion) does not match package.json version $pkgVersion"
