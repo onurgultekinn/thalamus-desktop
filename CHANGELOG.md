@@ -69,6 +69,22 @@ against the current build; everything below is new work in this tag.
 - **Editor settings**: added word wrap (wired through both editor layers);
   removed the dead workspace-folder plumbing from Settings → General (folder
   selection lives in the projects view).
+- **Local engine failures now tell the truth.** The chat error note truncated
+  engine logs at 200 characters from the head, so a crash surfaced only an
+  irrelevant `FutureWarning` line while the actual `ImportError` stayed hidden.
+  Long technical details now keep both ends, and known crash patterns
+  (transformers ↔ huggingface-hub conflict, missing torch, CUDA OOM) get a
+  one-line fix hint. Verified against a real broken Python environment.
+- **The explorer no longer lies about being empty.** The first directory walk
+  ran one IPC round-trip per folder sequentially and the UI printed "This
+  folder is empty" while it was still loading. Walks are now parallel (the
+  initial load drops to near-instant) and an honest "Reading folder…" row
+  shows while loading; the empty message appears only after the load
+  completes.
+- **Release packaging**: pre-release tags (e.g. `v0.2.0-beta.1`) ship the NSIS
+  installer only — WiX MSI rejects non-numeric pre-release identifiers. MSI
+  remains for stable tags. The version gate also compares the numeric part on
+  both sides, so beta tags pass.
 
 ## [0.1.0] - 2026-11-04
 

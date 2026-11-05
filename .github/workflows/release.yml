@@ -62,8 +62,16 @@ jobs:
           cargo test --lib
           Pop-Location
 
-      - name: Build installers (NSIS + MSI)
-        run: npm run tauri:build
+      # WiX MSI alfasayısal ön-sürümü reddeder ("beta"): beta/rc etiketlerinde
+      # yalnız NSIS paketlenir; MSI yalnız kararlı sürüm etiketlerinde üretilir.
+      - name: Build installers
+        shell: pwsh
+        run: |
+          if ("${{ github.ref_name }}" -match '-') {
+            npm run tauri:build -- --bundles nsis
+          } else {
+            npm run tauri:build
+          }
 
       - name: Collect installers
         id: collect
