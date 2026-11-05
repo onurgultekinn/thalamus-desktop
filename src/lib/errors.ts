@@ -67,7 +67,19 @@ export function splitExplanation(message?: string): { cause?: string; rest?: str
 
 import { t, type TranslationKey } from './i18n';
 
-const trimDetail = (s: string, max = 200): string => s.replace(/\s+/g, ' ').trim().slice(0, max);
+/**
+ * Uzun teknik bloklarda BAŞI da SONU da koru: HTTP gövdesinde baş (status +
+ * sağlayıcı mesajı), motor günlüklerinde son satırlar (ImportError/traceback)
+ * gerçek nedeni taşır. 200 karakterlik tek yönlü kesme, yerel motor çökmesini
+ * ilk FutureWarning satırında boğup asıl hatayı gizliyordu.
+ */
+const trimDetail = (s: string, max = 560): string => {
+  const t = s.replace(/\s+/g, ' ').trim();
+  if (t.length <= max) return t;
+  const head = t.slice(0, 200);
+  const tail = t.slice(-(max - 204));
+  return `${head} … ${tail}`;
+};
 
 /**
  * Pulls the provider's short error message out of the HTTP payload. Bodies

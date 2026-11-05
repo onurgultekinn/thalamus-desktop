@@ -236,6 +236,23 @@ fn tail_log(path: &PathBuf) -> String {
     }
 }
 
+/// Motor günlüğündeki bilinen çökme desenlerine tek satırlık çözüm önerisi.
+/// Kullanıcı FutureWarning uyarısında boğulup asıl nedeni göremesin.
+fn engine_error_hint(tail: &str) -> &'static str {
+    let last = tail.rsplit('\n').take(6).collect::<Vec<_>>().join("\n");
+    if last.contains("huggingface-hub") && last.contains("is required") {
+        "\n\nÖneri: Python ortamında transformers ↔ huggingface-hub sürümleri çakışıyor.\nŞunu çalıştırın: pip install -U transformers  (veya: pip install \"huggingface-hub<1.0\")"
+    } else if last.contains("ModuleNotFoundError") && last.contains("torch") {
+        "\n\nÖneri: PyTorch kurulu değil.\nGPU için: pip install torch --index-url https://download.pytorch.org/whl/cu121"
+    } else if last.contains("ModuleNotFoundError") || last.contains("No module named") {
+        "\n\nÖneri: Motor bağımlılıkları eksik görünüyor.\nŞunu çalıştırın: pip install transformers accelerate"
+    } else if last.contains("CUDA out of memory") {
+        "\n\nÖneri: Ekran kartı belleği yetmedi — daha küçük bir model seçin veya ngl/ctx ayarlarını düşürün."
+    } else {
+        ""
+    }
+}
+
 #[derive(serde::Deserialize)]
 pub struct ServeRequest {
     /// Keşifteki kimlik: `ollama:ad:etiket`, `gguf:<yol>`, `hf:org/ad`.
@@ -374,20 +391,23 @@ async fn wait_ready(
             // Süreç ölmüşse boşuna beklemeyelim — gerçek hatayı logdan göster.
             if let Ok(Some(status)) = c.try_wait() {
                 let tail = tail_log(log);
+                let hint = engine_error_hint(&tail).to_string();
                 return Err(format!(
-                    "Motor erken kapandı ({}).{}\n{}",
+                    "Motor erken kapandı ({}).{}\n{}{}",
                     status,
                     if tail.is_empty() { "" } else { " Son log:" },
-                    tail
+                    tail,
+                    hint
                 ));
             }
         }
         if Instant::now() >= deadline {
             let tail = tail_log(log);
             return Err(format!(
-                "Motor {} sn içinde hazır olmadı.{}",
+                "Motor {} sn içinde hazır olmadı.{}{}",
                 timeout.as_secs(),
-                if tail.is_empty() { String::new() } else { format!(" Son log: {}", tail) }
+                if tail.is_empty() { String::new() } else { format!(" Son log: {}", tail) },
+                engine_error_hint(&tail)
             ));
         }
         tokio::time::sleep(Duration::from_millis(100)).await;

@@ -211,6 +211,9 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview, onCon
   // Klasör bağlı mı? Bağlı değilken zorlamalı klasör seçimi yerine karşılama
   // boş ekranı gösterilir (sohbet tarafındaki karşılama gibi).
   const [hasRoot, setHasRoot] = useState(() => !!getWorkspaceRoot());
+  /** İlk/taze ağaç yürmesi sürerken doğru: "Bu klasör boş" YALNIZ yükleme
+      bitince gösterilmeli — aksi halde yavaş ilk yükte gezgin boş görünür. */
+  const [treeLoading, setTreeLoading] = useState(true);
   const lineNumbersRef = useRef<HTMLDivElement>(null);
   const editorTextareaRef = useRef<HTMLTextAreaElement>(null);
   const editorHighlightRef = useRef<HTMLPreElement>(null);
@@ -242,9 +245,10 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview, onCon
         console.error('list_dir error:', err);
         return [];
       }
-      const nodes: FileNode[] = [];
-      for (const e of entries) {
-        if (e.is_dir && FILTERED_DIRS.includes(e.name)) continue;
+      // Klasör yürümeleri PARALEL: sıralı await onlarca dizinde ilk yükü
+      // saniyelerce uzatıyordu ve kullanıcı "gezgini boş" sanıyordu.
+      const nodes = await Promise.all(entries.map(async (e) => {
+        if (e.is_dir && FILTERED_DIRS.includes(e.name)) return null;
         const childPath = relPath ? `${relPath}/${e.name}` : e.name;
         const node: FileNode = {
           id: childPath,
@@ -258,18 +262,23 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview, onCon
         if (e.is_dir) {
           node.children = await walk(childPath, depth + 1);
         }
-        nodes.push(node);
-      }
-      return sortNodes(nodes);
+        return node;
+      }));
+      return sortNodes(nodes.filter((n): n is FileNode => n !== null));
     };
 
-    const tree = await walk('', 0);
-    setFileTree(tree);
-    syncOpenFolders(tree);
-    treeLoadedRef.current = true;
-    // Çağıranın taze ağacı hemen kullanabilmesi için (ajan koşusu yeni dosya
-    // ürettiğinde "editörde aç" yolunun ihtiyacı).
-    return tree;
+    setTreeLoading(true);
+    try {
+      const tree = await walk('', 0);
+      setFileTree(tree);
+      syncOpenFolders(tree);
+      treeLoadedRef.current = true;
+      // Çağıranın taze ağacı hemen kullanabilmesi için (ajan koşusu yeni dosya
+      // ürettiğinde "editörde aç" yolunun ihtiyacı).
+      return tree;
+    } finally {
+      setTreeLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -1587,7 +1596,13 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview, onCon
             )}
 
             {rootExpanded && treeRows}
-            {rootExpanded && fileTree.length === 0 && !treeSearch.trim() && !creationMode && (
+            {rootExpanded && treeLoading && fileTree.length === 0 && (
+              <div className="px-2 py-3 text-[10.5px] text-[#87857F] flex items-center gap-1.5 select-none">
+                <RefreshCw size={11} className="animate-spin flex-shrink-0" />
+                {t('ide.loadingTree')}
+              </div>
+            )}
+            {rootExpanded && !treeLoading && fileTree.length === 0 && !treeSearch.trim() && !creationMode && (
               <div className="px-2 py-3 flex flex-col items-start gap-2">
                 <p className="text-[10.5px] leading-relaxed text-[#87857F]">{t('ide.emptyWorkspace')}</p>
                 <button
