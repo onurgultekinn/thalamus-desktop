@@ -39,24 +39,6 @@ Everything runs on your machine. The backend listens on `127.0.0.1` only,
 provider requests are made by the Rust process rather than the webview, API
 keys live in the OS credential vault, and no telemetry is collected.
 
-## Screenshots
-
-<!--
-Screenshots belong in docs/assets/ and are not committed yet. Capture these at
-1600x1000 with the Dark (Obsidian) theme and no personal data in view, then
-replace each placeholder with an <img> tag:
-
-  1. chat.png            — a chat with the compression bar (tokens before/after)
-  2. compression.png      — the before/after diff panel for a large JSON prompt
-  3. project.png          — project/IDE view: explorer, editor, terminal
-  4. agent-company.png    — Agent Company plan + flow editor
-  5. pixel-office.png     — PixelOffice animation
-  6. nucleus.png          — Nucleus command surface
-  7. settings.png         — Settings → Providers (keys masked)
--->
-
-_Screenshots are being prepared — see [docs/assets/README.md](docs/assets/README.md)._
-
 ## Why
 
 Most of the cost of a large-model request comes from structure the model does

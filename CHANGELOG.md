@@ -10,6 +10,66 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **One-line Windows install.** `irm https://raw.githubusercontent.com/onurgultekinn/thalamus-desktop/master/install.ps1 | iex` fetches the latest release, verifies it against the release's `SHA256SUMS.txt`, and installs silently. It sidesteps the SmartScreen prompt and the script-execution policy because PowerShell downloads the file itself; hash verification is not skipped.
 
+## [0.2.0-beta.1] - 2026-11-05
+
+A first-tester feedback sweep (`hatalar.txt`, 30 items) ahead of the beta. Items
+already fixed in earlier commits (green scrollbars, inline-code color, chat-row
+actions, provider presets, theme swatches, model chip shortening) were verified
+against the current build; everything below is new work in this tag.
+
+### Fixed
+
+- **Chat follows the stream again.** Auto-scroll used a fixed 140 px
+  near-bottom threshold; the reasoning block expands ~220 px in one paint, so
+  the view stopped following for the rest of every stream. Replaced with a
+  sticky-pin state (release beyond 160 px, re-catch below 60 px) plus a
+  message-driven follow; sending a message always jumps to the bottom.
+- **Streaming caret artifacts.** The standalone caret bar under code blocks and
+  between paragraph freezes read as "bars all over the reply" — both are now a
+  small breathing dot; the inline text caret is unchanged.
+- **Tables inside fenced examples are left alone.** The single-line table
+  expander rewrote pipe rows even inside ``` fences; it is now fence-aware
+  (with regression tests for the exact reported case).
+- **Editor caret lands where you click.** The visible highlight layer carried
+  `-0.01em` letter-spacing from the global mono rule while the transparent
+  textarea did not, so the caret drifted per character. Both layers now share
+  identical metrics and ligatures-off.
+- **File search is fast again.** The tree JSX rebuilt on every editor keystroke
+  (a stale `fileContents` memo dependency) and every search keystroke; the
+  dependency is gone and search debounces at 140 ms like chat search.
+- **Collapsed sidebar icon told the truth.** The projects rail icon showed
+  "open folder" based on the active view, not whether a workspace was actually
+  connected.
+- **Processing loader alignment.** The label and the rotating word now share
+  exact 20 px box metrics instead of a padding nudge.
+
+### Changed
+
+- **One switchable right panel.** File preview and Nucleus share the projects
+  right column via tabs; Nucleus docks/undocks without losing its conversation
+  (single instance moved by portal). When the flow canvas grows past the
+  visible area (e.g. Nucleus closed), the content is brought back into view
+  without touching the user's zoom.
+- **Command palette grouped**: Commands / This chat / Chats; chat exports, copy
+  and stop moved under "This chat". `Alt N` / `Ctrl K` header hints use the
+  same kbd chip as the palette; the chat breadcrumb is dimmed to the muted
+  tone.
+- **Search chats panel** scrolls within the sidebar (max-height) instead of
+  stretching it, and the role badge is a tiny dot with the role in the tooltip.
+- **Chat message card slimmed**: the token/finance analytics card is a single
+  inline row instead of a framed box above every reply.
+- **Explorer**: the "+" dropdown became two direct icons (new file / new
+  folder); the create form is a single line with the target folder inline; the
+  context-menu file name uses the tree's mono font and wraps instead of
+  truncating to "…"; the workspace-root row is a sticky first row of the tree.
+- **Flow & Run**: Run sits to the right of Add agent with the same neutral
+  style; empty-state CTAs dropped the yellow fill; the run screen states in one
+  line what it does and its agent cards carry the same pixel faces as
+  flow/office; PixelOffice gained a role-color legend.
+- **Editor settings**: added word wrap (wired through both editor layers);
+  removed the dead workspace-folder plumbing from Settings → General (folder
+  selection lives in the projects view).
+
 ## [0.1.0] - 2026-11-04
 
 First tagged build. Every item below is grounded in a commit under this tag.
