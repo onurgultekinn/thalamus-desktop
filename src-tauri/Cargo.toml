@@ -30,7 +30,7 @@ tauri = { version = "2.11.3", features = [] }
 tauri-plugin-log = "2"
 # Native folder/file picker for the "open project" flow (src/components/Sidebar.tsx).
 # Minor version MUST match @tauri-apps/plugin-dialog in package.json (Tauri CLI enforces it).
-tauri-plugin-dialog = "~2.7.3"
+tauri-plugin-dialog = "~2.8.4"
 
 # Thalamus local compression engine (pure Rust — no external crate/model)
 tiktoken-rs = "0.5"
