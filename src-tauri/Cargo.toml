@@ -47,7 +47,7 @@ fancy-regex = "0.12"
 rustc-hash = "1"
 
 # Isletim sisteminin CSPRNG'si: yerel API oturum tokeni (backend/mod.rs).
-getrandom = "0.3"
+getrandom = "0.4"
 
 # HTTP backend — a local axum server for browser preview and desktop
 axum = "0.8"
