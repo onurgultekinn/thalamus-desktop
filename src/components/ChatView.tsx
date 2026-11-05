@@ -226,30 +226,30 @@ function ChatViewInner({
                 <div className="ivy-edge ivy-right" />
 
                 <div className="analytics-inner-content">
-                  <div className="flex flex-col">
-                    <div className="column-label">{t('chat.tokenSavings')}</div>
+                  {/* Tek satırlık ölçüm: etiket ve değer yan yana — her yanıtın
+                      üstünde kutu içinde kutu gibi duran kart değildi amaç. */}
+                  <div className="flex items-baseline gap-1.5">
+                    <span className="column-label column-label-inline">{t('chat.tokenSavings')}</span>
                     {msg.metrics.savingsPercentage > 0 ? (
-                      <div className="flex items-center">
+                      <>
                         <span className="analytics-text-green">{t('chat.reduced', { pct: msg.metrics.savingsPercentage })}</span>
                         <span className="analytics-tokens-note">
                           ({msg.metrics.originalTokens} → {msg.metrics.compressedTokens} tokens)
                         </span>
-                      </div>
+                      </>
                     ) : (
-                      <div className="flex items-center">
-                        <span className="analytics-tokens-note">{t('chat.savingsNone')}</span>
-                      </div>
+                      <span className="analytics-tokens-note">{t('chat.savingsNone')}</span>
                     )}
                   </div>
 
                   {onlinePricing && (
                     <>
                       <div className="inner-divider" />
-                      <div className="flex flex-col">
-                        <div className="column-label">{t('chat.financialSavings')}</div>
-                        <div className="analytics-text-gold shadow-amber-500/15">
+                      <div className="flex items-baseline gap-1.5">
+                        <span className="column-label column-label-inline">{t('chat.financialSavings')}</span>
+                        <span className="analytics-text-gold shadow-amber-500/15">
                           {msg.metrics.financialSavings}
-                        </div>
+                        </span>
                       </div>
                     </>
                   )}

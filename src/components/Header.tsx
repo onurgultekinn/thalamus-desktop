@@ -1,4 +1,5 @@
 import { t } from '../lib/i18n';
+import { Kbd } from './CommandPalette';
 
 interface HeaderProps {
   activePath?: string;
@@ -53,15 +54,8 @@ export function Header({
 
             return (
               <div key={index} className="flex items-center gap-2">
-                <span
-                  className={
-                    isRoot
-                      ? "text-obsidian-muted"
-                      : isLast
-                      ? "text-obsidian-soft font-medium"
-                      : "text-obsidian-muted"
-                  }
-                >
+                {/* Kök ve son segment aynı soluk tonda: ad yansın, yol sakin kalsın. */}
+                <span className="text-obsidian-muted">
                   {when ? (
                     <span className="flex items-center gap-1.5">
                       <span className="text-[10px] font-normal tabular-nums opacity-60">{when}</span>
@@ -92,9 +86,9 @@ export function Header({
               className="group flex items-center gap-1.5 text-[11px] text-obsidian-muted transition-colors hover:text-obsidian-soft cursor-pointer"
             >
               <span className="leading-none font-medium">Nucleus</span>
-              <span className="text-[10px] leading-none text-obsidian-muted group-hover:text-obsidian-soft transition-colors select-none">
-                Alt N
-              </span>
+              {/* Kısayol ipucu palettekilerle AYNI kbd rozetini taşır: iki ayrı
+                  font/satır hizası derdi biter. */}
+              <Kbd>Alt N</Kbd>
             </button>
           )}
           {onOpenPalette && (
@@ -105,9 +99,7 @@ export function Header({
               className="group flex items-center gap-1.5 text-[11px] text-obsidian-muted transition-colors hover:text-obsidian-soft cursor-pointer"
             >
               <span className="leading-none font-medium">{t('nav.search')}</span>
-              <span className="text-[10px] leading-none text-obsidian-muted group-hover:text-obsidian-soft transition-colors select-none">
-                Ctrl K
-              </span>
+              <Kbd>Ctrl K</Kbd>
             </button>
           )}
         </div>

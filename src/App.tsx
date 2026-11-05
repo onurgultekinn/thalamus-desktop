@@ -757,19 +757,40 @@ export default function App() {
     setChats(prev => prev.map(c => c.id === chatId ? { ...c, pinned } : c));
   }, []);
 
-// Optimized scroll: only in 'chat' view, with instant (auto) scrolling
-  // Otomatik scroll: nur yukarıda okurken her yeni mesaj kullanıcıyı alta
-  // fırlatmayı durdurur — yalnızca alt bölgeye (±140px) yakınsak kaydırırız.
+// Otomatik takip (yapışkan): kullanıcı en alttayken akış yeni satır
+  // getirdiğinde görünüm kendiliğinden izler; yukarı çıkıp okumaya
+  // başlamışsa dokunmayız. Sabit eşik (140px) düşünme bloğunun tek karede
+  // ~220px açılmasıyla kırılıyor ve akış geri kalanında takip ölüyordu —
+  // bunun yerine yapışma durumu tutarız: 160px üstüne fırlarsa bırak,
+  // 60px altına dönünce yeniden yakala.
+  const chatPinnedRef = useRef(true);
   useEffect(() => {
-    if (!chatEndRef.current || currentView !== 'chat') return;
-    const container = chatEndRef.current.closest('[data-chat-scroll]') as HTMLElement | null;
+    if (currentView !== 'chat') return;
+    const container = chatEndRef.current?.closest('[data-chat-scroll]') as HTMLElement | null;
+    chatPinnedRef.current = true; // sohbet/görünüm değişince yeniden yapış
     if (!container) {
-      chatEndRef.current.scrollIntoView({ behavior: 'auto' });
+      chatEndRef.current?.scrollIntoView({ behavior: 'auto' });
       return;
     }
-    const distFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
-    if (distFromBottom < 140) container.scrollTop = container.scrollHeight;
-  }, [messages, currentView]);
+    const onScroll = () => {
+      const dist = container.scrollHeight - container.scrollTop - container.clientHeight;
+      if (dist > 160) chatPinnedRef.current = false;
+      else if (dist < 60) chatPinnedRef.current = true;
+    };
+    container.addEventListener('scroll', onScroll, { passive: true });
+    return () => container.removeEventListener('scroll', onScroll);
+  }, [currentView, activeChatId, chatEndRef]);
+
+  // İçerik değiştiğinde (yeni mesaj, akış delta'sı, düşünme bloğunun
+  // büyümesi) yapışkansek en alta ilerle. Kendi mesajımız her koşulda en alta iner.
+  useEffect(() => {
+    if (currentView !== 'chat') return;
+    const container = chatEndRef.current?.closest('[data-chat-scroll]') as HTMLElement | null;
+    if (!container) return;
+    const last = messages[messages.length - 1];
+    if (last?.role === 'user') chatPinnedRef.current = true;
+    if (chatPinnedRef.current) container.scrollTop = container.scrollHeight;
+  }, [messages, currentView, activeChatId, chatEndRef]);
 
   const handleSendMessage = async (
     userText: string,
@@ -1545,22 +1566,26 @@ export default function App() {
     {
       id: 'palette:export-md',
       label: t('palette.exportMd'),
+      group: 'chatTools',
       run: () => handleExportChat(activeChatId, 'md'),
     },
     {
       id: 'palette:export-json',
       label: t('palette.exportJson'),
+      group: 'chatTools',
       run: () => handleExportChat(activeChatId, 'json'),
     },
     {
       id: 'palette:copy-chat',
       label: t('palette.copyChat'),
+      group: 'chatTools',
       run: handleCopyChat,
     },
     ...(loading
       ? [{
           id: 'palette:stop',
           label: t('palette.stop'),
+          group: 'chatTools' as const,
           run: handleStopRequest,
         }]
       : []),
@@ -1781,8 +1806,7 @@ export default function App() {
           try { savedTheme = localStorage.getItem('tlm_theme'); } catch {}
           applyTheme(savedTheme === 'nord-red' ? 'nord-red' : 'dark');
           // Sağlayıcı/model değişikliği 'thalamus_config_changed' ile çözülür.
-          // A workspace path may have been set/changed in General — surface it
-          // in the projects list and refresh the dashboard.
+          // Kayıtta bağlı klasör varsa proje listesi tazelenir.
           const savedRoot = getWorkspaceRoot();
           if (savedRoot) {
             rememberProject(savedRoot);

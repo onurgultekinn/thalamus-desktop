@@ -411,6 +411,16 @@ const ROLE_COLORS: Record<RoleKind, string> = {
   lead: '#b8483f',
 };
 
+/** Rol → i18n anahtarı (alt çubuktaki lejant için). */
+const ROLE_LABEL_KEY: Record<RoleKind, import('../lib/i18n').TranslationKey> = {
+  dev: 'office.roleDev',
+  design: 'office.roleDesign',
+  qa: 'office.roleQa',
+  ops: 'office.roleOps',
+  data: 'office.roleData',
+  lead: 'office.roleLead',
+};
+
 function roleFor(role: string): RoleKind {
   const r = (role || '').toLowerCase();
   if (/(design|ui|ux|brand|art|creative|tasarım|tasarim)/.test(r)) return 'design';
@@ -2709,6 +2719,11 @@ export function PixelOffice({ agents, selected, onSelect, onActivate }: Props) {
         const k = actKey(stateRef.current.get(a.id));
         return k !== 'work' && k !== 'seated';
       });
+  /* Rol lejantı: ofisteki RENKLERİN ne olduğu ilk bakışta belli olsun —
+     yalnız sahada bulunan roller gösterilir, boş rol lejantı doldurmaz. */
+  const legendKinds = new Set<RoleKind>();
+  for (const a of agents) legendKinds.add(roleFor(a.role));
+  const roleLegend = [...legendKinds].map((k) => ({ kind: k, label: t(ROLE_LABEL_KEY[k]) }));
   const status = !sim
     ? ''
     : sim.path.length > 0
@@ -2844,6 +2859,17 @@ export function PixelOffice({ agents, selected, onSelect, onActivate }: Props) {
           )}
           <span className="text-obsidian-muted">{actCounts.work + actCounts.seated} × {t('office.actWorking')}</span>
         </div>
+        {/* Rol lejantı: renk → rol. Ofisteki "bu renkli olan kim" sorusu biter. */}
+        {roleLegend.length > 0 && (
+          <div className="mt-1 flex shrink-0 items-center gap-2 border-r border-[#2A2825] px-1.5 text-[9px] leading-none">
+            {roleLegend.map((r) => (
+              <span key={r.kind} className="flex items-center gap-1" style={{ color: ROLE_COLORS[r.kind] }}>
+                <span className="h-1.5 w-1.5 rounded-full" style={{ background: ROLE_COLORS[r.kind] }} />
+                {r.label}
+              </span>
+            ))}
+          </div>
+        )}
         {activityOpen && chipAgents.length > 0 && (
           <div
             className="flex min-w-0 flex-1 flex-wrap items-center content-start gap-0.5 self-start overflow-y-auto py-0.5"

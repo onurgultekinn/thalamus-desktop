@@ -430,8 +430,8 @@ code, pre, .metrics-row, .model-badge, .header-path, .analytics-inner-content, .
   justify-content: center;
   width: 100%;
   max-width: 660px;
-  margin: 1.5rem auto !important; /* We open up the vertical spacing to prevent overlap */
-  padding: 1.15rem 1.5rem;
+  margin: 0.55rem auto !important; /* sade: mesajdan önce ince bir ölçüm satırı */
+  padding: 0.4rem 1.25rem;
   background-color: transparent !important;
   z-index: 1;
 }
@@ -465,6 +465,10 @@ code, pre, .metrics-row, .model-badge, .header-path, .analytics-inner-content, .
   margin-bottom: 2px;
   transform: rotate(-1.2deg);
   transform-origin: left bottom;
+}
+/* Tek satırlı ölçümde etiket değerin yanında durur: alt marj yok. */
+.column-label-inline {
+  margin-bottom: 0;
 }
 .analytics-text-green { color: rgb(var(--tlm-green)); font-weight: 600; }
 .analytics-tokens-note { font-family: 'Cormorant Garamond', serif; font-style: italic; color: rgb(var(--tlm-fg-muted)); font-size: 12px; margin-left: 0.3rem; }
@@ -659,18 +663,27 @@ code, pre, .metrics-row, .model-badge, .header-path, .analytics-inner-content, .
   height: 20px;
   display: flex;
   align-items: center;
+  /* Etiket ile dönen kelime arasındaki boşluk tek yerden: hizalama
+     padding hilesine değil kesin kutu metriklerine dayanır. */
+  gap: 6px;
 }
 
-/* "PROCESSING:" etiketi ile sağında dönen kelime aynı satır yüksekliğinde
-   hizalanır; aksi halde kelime birkaç px aşağı kayıyordu. */
+/* "PROCESSING:" etiketi ile sağında dönen kelime AYNI kutu metriklerini
+   paylaşır (20px kutu, 20px satır, ortalanmış) — aksi halde kelime birkaç
+   px aşağı/yukarı kayıyordu. */
 .custom-loader-container > span {
+  height: 20px;
   line-height: 20px;
+  display: flex;
+  align-items: center;
 }
 
 .custom-loader-words {
   overflow: hidden;
   position: relative;
-  height: 100%;
+  height: 20px;
+  display: flex;
+  align-items: center;
 }
 
 .custom-loader-words::after {
@@ -688,9 +701,8 @@ code, pre, .metrics-row, .model-badge, .header-path, .analytics-inner-content, .
 
 .custom-loader-word {
   display: block;
-  height: 100%;
+  height: 20px;
   line-height: 20px;
-  padding-left: 8px;
   color: rgb(var(--tlm-loader-word)); /* cyan-400 */
   animation: spin_4991 4s infinite;
 }
@@ -1216,27 +1228,31 @@ html[data-theme='nord-red'] .text-\[\#dcb67a\]\/80 { color: rgb(219 168 113 / 80
 
 /* Henüz görünür metin yokken (ilk parça beklenirken) aynı imleç.
    Block içinde tek başına durduğu için satır kutusuna hizalanır. */
-/* Son blok kod/çit ise ::after satır içine giremez; imleci kuyruk
-   sarmalayıcısının sonuna yerleştir (görünmez değil, alt satırda). */
+/* Son blok kod/çit ise ::after satır içine giremez; eskiden kuyruğun altına
+   BAĞIMSIZ DİK ÇİZGİ koyuyorduk — kod bloklarının altında başıboş çubuk
+   olarak görünüyordu. Artık küçük bir nokta: yer işareti var, çöp yok. */
 .tlm-stream-tail:has(> div > :last-child:is(pre, .code-block-wrapper))::after {
   content: '';
   display: block;
-  width: 2px;
-  height: 1.05em;
-  margin-top: 2px;
-  border-radius: 1px;
+  width: 5px;
+  height: 5px;
+  margin-top: 4px;
+  margin-left: 2px;
+  border-radius: 50%;
   background: rgb(var(--tlm-gold));
 }
 .tlm-stream-tail.is-idle:has(> div > :last-child:is(pre, .code-block-wrapper))::after {
   animation: tlm-caret-breathe 1.5s ease-in-out infinite;
 }
 
+/* Paragraf aralarında kuyruk boşaldığında da çubuk değil NOKTA göster:
+   dik çizgiler "yanıtın her yerinde çizgi var" izlenimi veriyordu. */
 .tlm-stream-dots {
   display: inline-block;
-  width: 2px;
-  height: 1.05em;
-  border-radius: 1px;
-  vertical-align: text-bottom;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  vertical-align: middle;
   background: rgb(var(--tlm-gold));
 }
 

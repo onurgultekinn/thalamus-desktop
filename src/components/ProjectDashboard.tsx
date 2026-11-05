@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   FileCode, 
   Folder, 
   FolderOpen,
   PanelLeft, 
   Terminal as TerminalIcon, 
-  Plus, 
-  FolderPlus, 
+  Plus,
+  FilePlus,
+  FolderPlus,
   ChevronDown,
   ChevronRight,
   ChevronUp,
@@ -124,7 +126,7 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview, onCon
   /** Ayarlarla canlı senkron: localStorage config'ini okur. */
   const readAppearance = () => {
     let fz = '13px', tab = 4;
-    let lines = true, autosave = false;
+    let lines = true, autosave = false, wrap = false;
     try {
       const configStr = localStorage.getItem('thalamus_config');
       if (configStr) {
@@ -134,10 +136,11 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview, onCon
           if (config.appearance.tabSize) tab = config.appearance.tabSize;
           if (typeof config.appearance.showLineNumbers === 'boolean') lines = config.appearance.showLineNumbers;
           if (typeof config.appearance.autosave === 'boolean') autosave = config.appearance.autosave;
+          if (typeof config.appearance.wordWrap === 'boolean') wrap = config.appearance.wordWrap;
         }
       }
     } catch {}
-    return { fontSize: fz, tabSize: tab, showLineNumbers: lines, autosave };
+    return { fontSize: fz, tabSize: tab, showLineNumbers: lines, autosave, wordWrap: wrap };
   };
 
   // Editör görünüm ayarları state'tedir; Settings kaydettiğinde
@@ -146,6 +149,7 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview, onCon
   const [tabSize, setTabSize] = useState<number>(() => readAppearance().tabSize);
   const [showLineNumbers, setShowLineNumbers] = useState<boolean>(() => readAppearance().showLineNumbers);
   const [autosave, setAutosave] = useState<boolean>(() => readAppearance().autosave);
+  const [wordWrap, setWordWrap] = useState<boolean>(() => readAppearance().wordWrap);
   useEffect(() => {
     const sync = () => {
       const a = readAppearance();
@@ -153,6 +157,7 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview, onCon
       setTabSize(a.tabSize);
       setShowLineNumbers(a.showLineNumbers);
       setAutosave(a.autosave);
+      setWordWrap(a.wordWrap);
     };
     window.addEventListener('thalamus_config_changed', sync);
     return () => window.removeEventListener('thalamus_config_changed', sync);
@@ -475,10 +480,10 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview, onCon
   useAutoMinWidth(termFloat.headerRef, termFloat.setMinWidth);
   useAutoMinWidth(nucleusFloat.headerRef, nucleusFloat.setMinWidth);
 
-  // Uygulama genelinden (Alt+N, başlık, komut paleti) yüzen Nucleus'u çağır.
+  // Uygulama genelinden (Alt+N, başlık, komut paleti) Nucleus'u çağır.
   useEffect(() => {
-    const open = () => setNucleusOpen(true);
-    const toggle = () => setNucleusOpen((v) => !v);
+    const open = () => { setNucleusOpen(true); setRightTab('nucleus'); };
+    const toggle = () => { setNucleusOpen((v) => !v); setRightTab('nucleus'); };
     window.addEventListener('tlm:nucleus-open', open);
     window.addEventListener('tlm:nucleus-toggle', toggle);
     return () => {
@@ -503,6 +508,19 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview, onCon
   const [copilotWidth, setCopilotWidth] = useState<number>(DEFAULT_COPILOT_WIDTH);
   const [isResizingCopilot, setIsResizingCopilot] = useState<boolean>(false);
 
+  /* Sağ sütun artık değişebilir bir host: önizleme VEYA sabitlenmiş Nucleus.
+     Nucleus tek kez mount edilir ve portal ile float frame / sağ sütun
+     arasında taşınır — dock/undock sohbeti sıfırlamaz. */
+  const [nucleusDocked, setNucleusDocked] = useState(false);
+  const [rightTab, setRightTab] = useState<'preview' | 'nucleus'>('preview');
+  const [nucleusDockHost, setNucleusDockHost] = useState<HTMLDivElement | null>(null);
+  const [nucleusFloatHost, setNucleusFloatHost] = useState<HTMLDivElement | null>(null);
+
+  // Önizleme açılınca sağ sütun önizlemeye döner; Nucleus çağrısında sekmeye.
+  useEffect(() => {
+    if (previewItem) setRightTab('preview');
+  }, [previewItem]);
+
   const [creationMode, setCreationMode] = useState<'file' | 'folder' | null>(null);
   const [newItemName, setNewItemName] = useState<string>('');
   // F5: gezgin arama filtresi (boşken tüm ağaç). Yazarken gecikmeli uygulanır.
@@ -510,8 +528,6 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview, onCon
   // F7b: oluşturmanın hedef klasörü ("" = kök) + sağ-tık menüsü durumu.
   const [creatingIn, setCreatingIn] = useState<string>('');
   const [ctxMenu, setCtxMenu] = useState<{ node: FileNode; x: number; y: number } | null>(null);
-  // Explorer "+" düğmesinin Dosya/Klasör menüsü.
-  const [newMenuOpen, setNewMenuOpen] = useState(false);
 
   // DRAG STATES
   const [draggedNode, setDraggedNode] = useState<FileNode | null>(null);
@@ -768,15 +784,7 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview, onCon
     return () => { window.removeEventListener('click', close); window.removeEventListener('keydown', onKey); };
   }, [ctxMenu]);
 
-  // "+" menüsü dışında tık/Esc kapatır.
-  useEffect(() => {
-    if (!newMenuOpen) return;
-    const close = () => setNewMenuOpen(false);
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setNewMenuOpen(false); };
-    window.addEventListener('mousedown', close);
-    window.addEventListener('keydown', onKey);
-    return () => { window.removeEventListener('mousedown', close); window.removeEventListener('keydown', onKey); };
-  }, [newMenuOpen]);
+  // "+" menüsü kalktı: yeni dosya/klasör artık doğrudan iki ayrı ikon.
 
   const handleMouseDown = (e: React.MouseEvent, node: FileNode) => {
     if (e.button !== 0) return;
@@ -1291,18 +1299,25 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview, onCon
     });
   };
 
-  // Arama hızı: filtre + satır üretimi her tuşta yeniden çalışmasın.
-  // useDeferredValue yazmayı anında gösterir, ağaç bir kare geriden gelir;
-  // useMemo yalnız ağaç/arama/sekme gerçekten değişince yeniden kurar.
-  const deferredTreeSearch = React.useDeferredValue(treeSearch);
+  // Arama hızı: iki dert iki çözüm.
+  // 1) Arama kutusunda her tuşta tüm ağaç filtrelenip kurulmasın: 140 ms
+  //    sessizlik bekle (sohbet aramasıyla aynı ritim). useDeferredValue tek
+  //    başına yeterli değildi — iş yine her tuşte çalışıyordu.
+  // 2) treeRows bağımlılığındaki fileContents kaldırıldı: satırlar dosya
+  //    içeriğini kullanmıyor; editörde yazarken ağaç yeniden kuruluyordu.
+  const [treeSearchDebounced, setTreeSearchDebounced] = useState(treeSearch);
+  useEffect(() => {
+    const id = window.setTimeout(() => setTreeSearchDebounced(treeSearch), 140);
+    return () => window.clearTimeout(id);
+  }, [treeSearch]);
   const visibleTree = React.useMemo(
-    () => filterTree(fileTree, deferredTreeSearch),
-    [fileTree, deferredTreeSearch]
+    () => filterTree(fileTree, treeSearchDebounced),
+    [fileTree, treeSearchDebounced]
   );
   const treeRows = React.useMemo(
     () => (rootExpanded ? renderTreeNodes(visibleTree) : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [rootExpanded, visibleTree, activeTab, fileContents, openTabs]
+    [rootExpanded, visibleTree, activeTab, openTabs]
   );
 
   // Klasör bağlı değilken: sohbet karşılamasıyla aynı dilde boş ekran —
@@ -1350,9 +1365,11 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview, onCon
             className="fixed z-50 w-[176px] bg-[#282726] border border-[#34332F] rounded-md shadow-2xl py-1 animate-in fade-in zoom-in-95 duration-100"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="px-2.5 py-1.5 text-[11px] font-sans text-[#A8A49E] truncate border-b border-[#34332F]/60 flex items-center gap-1.5">
-              {ctxMenu.node.isFolder ? <Folder size={11} className="flex-shrink-0 text-[#dcb67a]" /> : <FileCode size={11} className="flex-shrink-0 text-[#3AA99F]" />}
-              <span className="truncate font-medium text-[#CECDC3]">{ctxMenu.node.name}</span>
+            <div className="px-2.5 py-1.5 text-[11px] border-b border-[#34332F]/60 flex items-start gap-1.5">
+              {ctxMenu.node.isFolder ? <Folder size={11} className="flex-shrink-0 text-[#dcb67a] mt-px" /> : <FileCode size={11} className="flex-shrink-0 text-[#3AA99F] mt-px" />}
+              {/* Ad ağaçtakiyle AYNI fontta (mono); truncate "…" yerine en fazla
+                  iki satıra sarar — menüde başıboş üç nokta görünmez. */}
+              <span className="font-mono text-[#CECDC3] leading-snug line-clamp-2 break-all" title={ctxMenu.node.id}>{ctxMenu.node.name}</span>
             </div>
             <button
               type="button"
@@ -1462,39 +1479,24 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview, onCon
               >
                 <RefreshCw size={13} />
               </button>
-              {/* Tek "+" düğmesi: tıklayınca Dosya / Klasör'e ayrılır. */}
-              <div className="relative">
-                <button
-                  title={t('ide.newFileRoot')}
-                  type="button"
-                  onClick={() => setNewMenuOpen(v => !v)}
-                  className={`p-1 rounded cursor-pointer transition-colors ${
-                    newMenuOpen ? 'bg-[#282726] text-white' : 'hover:bg-[#282726] text-[#CECDC3] hover:text-white'
-                  }`}
-                >
-                  <Plus size={13} />
-                </button>
-                {newMenuOpen && (
-                  <div className="absolute right-0 top-full mt-1 z-40 w-[150px] rounded-md border border-[#34332F] bg-[#282726] shadow-2xl py-1 animate-in fade-in zoom-in-95 duration-100">
-                    <button
-                      type="button"
-                      onClick={() => { setNewMenuOpen(false); startCreate('file', ''); }}
-                      title={t('ide.newFileRoot')}
-                      className="w-full flex items-center gap-2 px-2.5 py-1.5 text-[11.5px] font-sans text-[#CECDC3] hover:bg-[#34332F] hover:text-white cursor-pointer transition-colors"
-                    >
-                      <FileCode size={12} className="flex-shrink-0 text-[#3AA99F]" /> {t('ide.newFileHere')}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { setNewMenuOpen(false); startCreate('folder', ''); }}
-                      title={t('ide.newFolderRoot')}
-                      className="w-full flex items-center gap-2 px-2.5 py-1.5 text-[11.5px] font-sans text-[#CECDC3] hover:bg-[#34332F] hover:text-white cursor-pointer transition-colors"
-                    >
-                      <FolderPlus size={12} className="flex-shrink-0 text-[#dcb67a]" /> {t('ide.newFolderHere')}
-                    </button>
-                  </div>
-                )}
-              </div>
+              {/* Yeni öğe: iki ayrı ikon — dosya ve klasör. Açılır menü
+                  yerine tek tıkla hedefe gider. */}
+              <button
+                title={t('ide.newFileRoot')}
+                type="button"
+                onClick={() => startCreate('file', '')}
+                className="p-1 hover:bg-[#282726] rounded cursor-pointer text-[#CECDC3] hover:text-white transition-colors"
+              >
+                <FilePlus size={13} />
+              </button>
+              <button
+                title={t('ide.newFolderRoot')}
+                type="button"
+                onClick={() => startCreate('folder', '')}
+                className="p-1 hover:bg-[#282726] rounded cursor-pointer text-[#CECDC3] hover:text-white transition-colors"
+              >
+                <FolderPlus size={13} />
+              </button>
             </div>
           </div>
 
@@ -1525,58 +1527,62 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview, onCon
             </div>
           </div>
 
-          <button
-            type="button"
-            data-root-zone="true"
-            onClick={() => setRootExpanded(v => !v)}
-            className="px-2 py-1.5 flex items-center gap-1 text-[11px] font-semibold border-b border-[#34332F] bg-[#282726] text-[#CECDC3] hover:bg-[#34332F] cursor-pointer transition-all select-none w-full text-left"
-            title={rootExpanded ? t('ide.collapseTree') : t('ide.expandTree')}
-          >
-            <ChevronDown size={14} className={`text-[#87857F] transition-transform duration-150 ${rootExpanded ? '' : 'rotate-180'}`} />
-            <span className="truncate">{workspaceName}</span>
-          </button>
-
           <div
             data-root-zone="true"
             className="p-1 flex flex-col gap-0.5 flex-1 overflow-y-auto pretty-scrollbar"
           >
+            {/* Kök satırı ağaçla birlikte kayar ama yapışkan: aramanın hemen
+                altından proje ağacı başlar, kök satırı ağacın parçasıdır. */}
+            <button
+              type="button"
+              data-root-zone="true"
+              onClick={() => setRootExpanded(v => !v)}
+              className="sticky top-0 z-10 px-2 py-1.5 flex items-center gap-1 text-[11px] font-semibold border-b border-[#34332F] bg-[#282726] text-[#CECDC3] hover:bg-[#34332F] cursor-pointer transition-all select-none w-full text-left"
+              title={rootExpanded ? t('ide.collapseTree') : t('ide.expandTree')}
+            >
+              <ChevronDown size={14} className={`text-[#87857F] transition-transform duration-150 ${rootExpanded ? '' : 'rotate-180'}`} />
+              <span className="truncate">{workspaceName}</span>
+            </button>
+
             {creationMode && (
-              <form onSubmit={handleCreateItem} className="mx-0.5 mb-1 rounded-md border border-[#dcb67a]/40 bg-[#100F0F] p-1.5 flex flex-col gap-1">
+              <form onSubmit={handleCreateItem} className="mx-0.5 mb-1 rounded-md border border-[#34332F] focus-within:border-[#4385BE]/60 bg-[#100F0F] px-1.5 py-1 flex flex-col gap-0.5 transition-colors">
+                {/* Tek satır: ikon + hedef klasör + ad + iptal. Alt çizgili
+                    iki katmanlı kart yerine VS Code'a yakın sakin bir satır. */}
                 <div className="flex items-center gap-1.5">
                   {creationMode === 'folder' ? (
-                    <Folder size={13} className="text-[#dcb67a] flex-shrink-0" />
+                    <Folder size={12} className="text-[#dcb67a] flex-shrink-0" />
                   ) : (
-                    <FileCode size={13} className="text-[#3AA99F] flex-shrink-0" />
+                    <FileCode size={12} className="text-[#3AA99F] flex-shrink-0" />
                   )}
                   {/* F7b: hedef klasör düz yazıyla görünür — "aktif sekmenin
                       klasörüne gizlice yaz" davranışı kalktı. */}
-                  <span className="truncate font-sans text-[10px] text-[#87857F]" title={creatingIn || 'workspace root'}>
-                    {creatingIn ? `${creatingIn.split('/').pop()}/` : './'}
+                  <span className="flex-shrink-0 font-mono text-[10.5px] text-[#575654]" title={creatingIn || 'workspace root'}>
+                    {creatingIn ? `${creatingIn.split('/').pop()}/` : ''}
                   </span>
+                  <input
+                    type="text"
+                    autoFocus
+                    value={newItemName}
+                    onChange={(e) => setNewItemName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') {
+                        setCreationMode(null);
+                        setNewItemName('');
+                      }
+                    }}
+                    placeholder={creationMode === 'folder' ? 'folder_name' : 'file.py'}
+                    className="flex-1 min-w-0 bg-transparent text-[#F2F0E5] font-mono text-[12px] py-0.5 outline-none placeholder:text-[#575654]"
+                  />
                   <button
                     type="button"
                     onClick={() => { setCreationMode(null); setNewItemName(''); }}
-                    className="ml-auto text-[#575654] hover:text-[#CECDC3] cursor-pointer flex-shrink-0"
+                    className="text-[#575654] hover:text-[#CECDC3] cursor-pointer flex-shrink-0"
                     title={t('common.cancel')}
                   >
                     <X size={11} />
                   </button>
                 </div>
-                <input
-                  type="text"
-                  autoFocus
-                  value={newItemName}
-                  onChange={(e) => setNewItemName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Escape') {
-                      setCreationMode(null);
-                      setNewItemName('');
-                    }
-                  }}
-                  placeholder={creationMode === 'folder' ? 'folder_name' : 'file.py'}
-                  className="w-full bg-transparent border-b border-[#dcb67a]/40 focus:border-[#dcb67a] text-[#F2F0E5] font-mono text-[12px] px-0.5 py-1 outline-none transition-colors placeholder:text-[#575654]"
-                />
-                <span className="text-[9.5px] text-[#575654]">{t('ide.createHint')}</span>
+                <span className="text-[9px] text-[#575654] pl-[18px]">{t('ide.createHint')}</span>
               </form>
             )}
 
@@ -1756,18 +1762,22 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview, onCon
               </div>
             )}
           <div className="relative flex-1 min-w-0">
-            {/* Colored layer — the visible text; the textarea on top is transparent. */}
+            {/* Colored layer — the visible text; the textarea on top is transparent.
+                İki katman da AYNI metrikleri taşımak zorunda: global kural `pre`'ye
+                -0.01em harf aralığı veriyor ama textarea almıyordu — her karakterde
+                birikip tıklanan yerle imleç kayıyordu. Ligatürler de iki katmanda
+                kapatılır (Prism span sınırları bağlamı değiştirmesin). */}
             <pre
               ref={editorHighlightRef}
               aria-hidden="true"
-              className="absolute inset-0 m-0 overflow-hidden whitespace-pre font-mono pointer-events-none select-none"
-              style={{ fontSize, lineHeight: 1.6, padding: '0 0 0 1rem', boxSizing: 'border-box', tabSize }}
+              className={`absolute inset-0 m-0 overflow-hidden font-mono pointer-events-none select-none ${wordWrap ? 'whitespace-pre-wrap' : 'whitespace-pre'}`}
+              style={{ fontSize, lineHeight: 1.6, padding: '0 0 0 1rem', boxSizing: 'border-box', tabSize, letterSpacing: '-0.01em', fontVariantLigatures: 'none' }}
             >
               {highlightEnabled ? (
                 <SyntaxHighlighter
                   language={editorLanguage}
                   style={vscDarkPlus as unknown as Record<string, React.CSSProperties>}
-                  customStyle={{ background: 'transparent', margin: 0, padding: 0, fontSize, lineHeight: 1.6, fontFamily: 'inherit', tabSize }}
+                  customStyle={{ background: 'transparent', margin: 0, padding: 0, fontSize, lineHeight: 1.6, fontFamily: 'inherit', tabSize, letterSpacing: 'inherit' }}
                   codeTagProps={{ style: { fontFamily: 'inherit', fontSize, lineHeight: 1.6 } }}
                   wrapLongLines={false}
                 >
@@ -1787,8 +1797,8 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview, onCon
               onClick={(e) => reportEditorContext(e.currentTarget)}
               onFocus={(e) => reportEditorContext(e.currentTarget)}
               onSelect={(e) => reportEditorContext(e.currentTarget)}
-              wrap="off"
-              style={{ fontSize, lineHeight: 1.6, padding: '0 0 0 1rem', boxSizing: 'border-box', tabSize, caretColor: 'rgb(var(--tlm-fg))', color: 'transparent' }}
+              wrap={wordWrap ? 'soft' : 'off'}
+              style={{ fontSize, lineHeight: 1.6, padding: '0 0 0 1rem', boxSizing: 'border-box', tabSize, letterSpacing: '-0.01em', fontVariantLigatures: 'none', caretColor: 'rgb(var(--tlm-fg))', color: 'transparent' }}
               className="absolute inset-0 bg-transparent font-mono outline-none border-none resize-none whitespace-pre overflow-auto pretty-scrollbar selection:bg-[#4385BE]/30"
               spellCheck={false}
             />
@@ -1907,9 +1917,9 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview, onCon
         )}
       </div>
 
-      {/* Sağ sütun yalnızca önizleme için açılır. Nucleus artık kalıcı bir
-          panel değil: çağrıldığında açılan yüzen pencere (Alt+N / başlık). */}
-      {previewItem && (
+      {/* Sağ sütun: değişebilir host. Önizleme varsa Dosya sekmesi, Nucleus
+          sabitlenmişse Nucleus sekmesi; ikisi de varsa sekme çubuğuyla seçilir. */}
+      {(previewItem || (nucleusDocked && nucleusOpen)) && (
         <div
           style={{ width: `${copilotWidth}px` }}
           className={`flex flex-col flex-shrink-0 relative select-none border-l border-[#282726] ${
@@ -1924,44 +1934,86 @@ export function ProjectDashboard({ activeTab, setActiveTab, onOpenPreview, onCon
           >
             <div className="w-[2px] h-full bg-transparent group-hover:bg-[#4385BE]" />
           </div>
-          <div className="flex-1 min-h-0">
-            <FilePreviewDrawer
-              item={previewItem}
-              onClose={() => onClosePreview?.()}
-              inline
-              contentWidth={copilotWidth - 8}
-            />
-          </div>
+
+          {/* Sekme çubuğu: yalnız sabitlenmiş Nucleus varken anlamlı. */}
+          {nucleusDocked && (
+            <div className="flex items-center gap-0.5 px-1.5 py-1 border-b border-[#282726] bg-[#1C1B1A] font-sans text-[11px] flex-shrink-0">
+              <button
+                type="button"
+                disabled={!previewItem}
+                onClick={() => setRightTab('preview')}
+                className={`px-2 py-0.5 rounded cursor-pointer transition-colors ${
+                  rightTab === 'preview' && previewItem
+                    ? 'bg-[#34332F] text-[#F2F0E5]'
+                    : previewItem ? 'text-[#87857F] hover:text-[#CECDC3]' : 'text-[#575654] cursor-not-allowed'
+                }`}
+              >
+                {t('ide.tabFile')}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setNucleusOpen(true); setRightTab('nucleus'); }}
+                className={`px-2 py-0.5 rounded cursor-pointer transition-colors ${
+                  rightTab === 'nucleus' && nucleusOpen
+                    ? 'bg-[#34332F] text-[#F2F0E5]'
+                    : 'text-[#87857F] hover:text-[#CECDC3]'
+                }`}
+              >
+                {t('nucleus.title')}
+              </button>
+            </div>
+          )}
+
+          {/* Önizleme gövdesi: sekme Nucleus'tayken gizlenir ama mount kalır. */}
+          {previewItem && (
+            <div className={`flex-1 min-h-0 ${rightTab === 'nucleus' && nucleusOpen ? 'hidden' : ''}`}>
+              <FilePreviewDrawer
+                item={previewItem}
+                onClose={() => onClosePreview?.()}
+                inline
+                contentWidth={copilotWidth - 8}
+              />
+            </div>
+          )}
+
+          {/* Nucleus'un dock hedefi: portal her zaman buraya taşınır. */}
+          <div ref={setNucleusDockHost} className="flex-1 min-h-0" />
         </div>
       )}
 
       {/* Yüzen Nucleus: kapanınca unmount edilmez; sohbet, undo ve bekleyen
-          düzenlemeler korunur. Konum/boyut hatırlanır. */}
+          düzenlemeler korunur. Konum/boyut hatırlanır. Sabitlenmişse gizlidir —
+          aynı örnek sağ sütundaki dock hedefine taşınır (sohbet sıfırlanmaz). */}
       <div
         ref={nucleusFloat.frameRef}
         style={nucleusFloat.style
-          ? { ...nucleusFloat.style, display: nucleusOpen ? 'flex' : 'none' }
+          ? { ...nucleusFloat.style, display: nucleusOpen && !nucleusDocked ? 'flex' : 'none' }
           : { display: 'none' }}
         className={`bg-[#100F0F] relative ${FLOATING_CHROME}`}
       >
-        <div style={nucleusFloat.contentStyle}>
-          <div className="flex-1 flex flex-col min-h-0">
-            <ThalamusCopilot
-              activeFile={activeTab}
-              activeFileCode={currentCode}
-              workspaceFiles={workspaceFiles}
-              onApplyCode={handleApplyCode}
-              onOpenTerminal={() => setIsTerminalOpen(true)}
-              onOpenPreview={onOpenPreview}
-              floating
-              onClose={() => setNucleusOpen(false)}
-              onHeaderPointerDown={nucleusFloat.onDragStart}
-              headerRef={nucleusFloat.headerRef}
-            />
-          </div>
-        </div>
+        <div ref={setNucleusFloatHost} style={nucleusFloat.contentStyle} className="flex-1 flex flex-col min-h-0" />
         <FloatResizeHandle onPointerDown={nucleusFloat.onResizeStart} />
       </div>
+
+      {/* Nucleus TEK örnek: portal, etkin hedefe (float frame ya da sağ sütun)
+          taşınır. Dock/undock yalnız hedef değiştirir, bileşen yeniden kurulmaz. */}
+      {(nucleusDocked ? nucleusDockHost : nucleusFloatHost) &&
+        createPortal(
+          <ThalamusCopilot
+            activeFile={activeTab}
+            activeFileCode={currentCode}
+            workspaceFiles={workspaceFiles}
+            onApplyCode={handleApplyCode}
+            onOpenTerminal={() => setIsTerminalOpen(true)}
+            onOpenPreview={onOpenPreview}
+            floating={!nucleusDocked}
+            onClose={() => setNucleusOpen(false)}
+            onToggleFloat={() => setNucleusDocked((v) => !v)}
+            onHeaderPointerDown={nucleusFloat.onDragStart}
+            headerRef={nucleusFloat.headerRef}
+          />,
+          (nucleusDocked ? nucleusDockHost : nucleusFloatHost) as HTMLElement
+        )}
 
     </div>
   );

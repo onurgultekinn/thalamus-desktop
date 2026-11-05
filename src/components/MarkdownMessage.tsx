@@ -42,7 +42,14 @@ const cacheKey = (lang: string, code: string) => `${lang}\u0000${code}`;
  */
 export function expandSingleLineTables(src: string): string {
   if (!src.includes('|')) return src;
+  let inFence = false;
   return src.split('\n').map((line) => {
+    // Kod çiti içindekiler ham kalsın: modelin gösterdiği örnek tek satırlık
+    // tablolar yeniden yazılmaz. Çiti tek satırda açıp kapayanlar da dokunulmaz.
+    const fenceCount = (line.match(/```/g) || []).length;
+    const wasInFence = inFence;
+    if (fenceCount % 2 === 1) inFence = !inFence;
+    if (wasInFence || fenceCount > 0) return line;
     if (!/^\s*\|/.test(line) || !/\|/.test(line)) return line;
     const tokens = line.split('|');
     // Baş/sondaki boş token'lar çizgilerin konumudur; hücreler aradakilerdir.

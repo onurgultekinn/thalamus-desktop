@@ -941,10 +941,22 @@ export function FlowEditorX6(props: FlowEditorX6Props) {
       graph.resize(rect.width, rect.height);
       const firstReveal = lastW === 0;
       lastW = rect.width;
-      if (!firstReveal) return;
+      if (firstReveal) {
+        if (propsRef.current.agents.length > 0) graph.zoomToFit({ padding: 32, maxScale: 1 });
+        return;
+      }
+      /* Kapsayıcı büyüdü ama içerik görünür alanın DIŞINDA kaldıysa
+         (ör. Nucleus kapatılınca flow büyür) zoom'u KORUYUP içeriği
+         görünür alana al: "flow boş kaldı" izlenimi kalmasın. */
       if (propsRef.current.agents.length === 0) return;
-      /* İlk görünürlükte beklemeden sığdır (flash olmasın). */
-      graph.zoomToFit({ padding: 32, maxScale: 1 });
+      try {
+        const bbox = graph.getContentArea();
+        const area = graph.getGraphArea();
+        const intersects =
+          bbox.x < area.x + area.width && area.x < bbox.x + bbox.width &&
+          bbox.y < area.y + area.height && area.y < bbox.y + bbox.height;
+        if (!intersects) graph.centerContent();
+      } catch { /* API yoksa dokunma */ }
     });
     ro.observe(container);
 
@@ -1193,7 +1205,8 @@ export function FlowEditorX6(props: FlowEditorX6Props) {
           <button
             type="button"
             onClick={props.onAdd}
-            className="flex items-center gap-1 rounded-md bg-[#dcb67a] px-2.5 py-1 text-[10.5px] font-medium text-[#141210] hover:bg-[#EBCB99] cursor-pointer"
+            /* Sarı dolgu yerine plan/flow araç çubuğuyla aynı nötr stil. */
+            className="flex items-center gap-1 rounded-[3px] border border-[#2A2825] bg-[#171614] px-2.5 py-1 text-[10.5px] text-[#A8A397] hover:text-[#E8E4DA] hover:bg-[#1D1B18] cursor-pointer"
           >
             <Plus size={11} /> {t('company.firstAgent')}
           </button>

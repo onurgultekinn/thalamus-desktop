@@ -31,14 +31,15 @@ import { useT } from '../lib/i18n';
     zaman her zaman okunur. Zaman okunamıyorsa yalnız ad çizilir. */
 function ChatTitleLabel({ id, title }: { id: string; title: string }) {
   const when = chatWhen(id);
-  if (!when) return <span className="tlm-fade-truncate block">{title}</span>;
+  if (!when) return <span className="tlm-fade-truncate block" title={title}>{title}</span>;
   return (
     <span className="flex min-w-0 items-center gap-[3px]">
       <span className="flex-shrink-0 text-[9.5px] tabular-nums opacity-60">{when}</span>
       <span aria-hidden="true" className="h-[8px] w-px flex-shrink-0 bg-white/12" />
       {/* flex-1: kutu satırın kalanına yayılır — maske sağ kenara taşınır.
-          Kısa adlar maske bölgesine ulaşmaz, yalnız sığmayanlar solar. */}
-      <span className="tlm-fade-truncate min-w-0 flex-1 text-[11.5px]">{title}</span>
+          Kısa adlar maske bölgesine ulaşmaz, yalnız sığmayanlar solar.
+          Kırpılan adın tamamı tooltip'te okunur. */}
+      <span className="tlm-fade-truncate min-w-0 flex-1 text-[11.5px]" title={title}>{title}</span>
     </span>
   );
 }
@@ -397,9 +398,10 @@ export function Sidebar({
               title={projectName}
               className="w-full flex justify-center p-1.5 rounded-md text-obsidian-muted hover:bg-obsidian-panel/30 hover:text-obsidian-text cursor-pointer transition-colors"
             >
-              {/* Kapalı kenar çubuğunda da doğru durum: proje gerçekten açıkken
-                  açık klasör, aksi halde kapalı klasör ikonu. */}
-              {currentView === 'project'
+              {/* Kapalı kenar çubuğunda da doğru durum: GÖRÜNÜM değil, gerçekten
+                  bağlı bir klasör var mı? Görünümü anahtar yapmak, sohbet
+                  görünümüne geçince de "açık klasör" ikonu bırakıyordu. */}
+              {activeRoot
                 ? <FolderOpen size={13} className="text-[#dcb67a]" />
                 : <Folder size={13} className="opacity-70" />}
             </button>
@@ -525,7 +527,7 @@ export function Sidebar({
           ))}
 
           {isOpen && !!chatQuery.trim() && (
-            <div className="flex flex-col gap-0.5 w-full">
+            <div className="flex flex-col gap-0.5 w-full min-h-0">
               <span className="px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-obsidian-muted/40">
                 {t('sidebar.searchResults', { n: searchHits.length })}
               </span>
@@ -535,30 +537,37 @@ export function Sidebar({
               {searchHits.length === 0 && chatQuery.trim().length >= 2 && (
                 <span className="px-2 py-1 text-[11px] text-obsidian-muted/60">{t('sidebar.noSearchResults')}</span>
               )}
-              {searchHits.map((hit) => (
-                <button
-                  key={`${hit.chatId}-${hit.messageIndex}`}
-                  type="button"
-                  onClick={() => {
-                    onSelectChat?.(hit.chatId);
-                    setChatQuery('');
-                  }}
-                  title={`${hit.chatTitle} · ${hit.snippet}`}
-                  className="w-full rounded-md px-2 py-1 text-left transition-colors hover:bg-obsidian-panel/40"
-                >
-                  <span className="flex items-center gap-1.5 min-w-0">
-                    <MessageSquare size={10} className="flex-shrink-0 text-[#dcb67a]/70" />
-                    <span className="truncate text-[11px] font-medium text-obsidian-soft">{hit.chatTitle}</span>
-                    {/* Rol rozeti okumaya karışmasın: minik ve soluk. */}
-                    <span className="ml-auto flex-shrink-0 rounded border border-white/[0.06] px-1 py-px text-[8px] uppercase tracking-wide text-obsidian-muted/40">
-                      {hit.role === 'user' ? t('sidebar.you') : t('chat.thalamus')}
+              {/* Sonuç listesi kendi içinde kayar: 40 isabet yan paneli
+                  şişirmesin, sohbet listesi görünür kalsın. */}
+              <div className="max-h-56 overflow-y-auto pretty-scrollbar flex flex-col gap-0.5 w-full pr-0.5">
+                {searchHits.map((hit) => (
+                  <button
+                    key={`${hit.chatId}-${hit.messageIndex}`}
+                    type="button"
+                    onClick={() => {
+                      onSelectChat?.(hit.chatId);
+                      setChatQuery('');
+                    }}
+                    title={`${hit.chatTitle} · ${hit.role === 'user' ? t('sidebar.you') : t('chat.thalamus')} · ${hit.snippet}`}
+                    className="w-full rounded-md px-2 py-1 text-left transition-colors hover:bg-obsidian-panel/40"
+                  >
+                    <span className="flex items-center gap-1.5 min-w-0">
+                      <MessageSquare size={10} className="flex-shrink-0 text-[#dcb67a]/70" />
+                      <span className="truncate text-[11px] font-medium text-obsidian-soft">{hit.chatTitle}</span>
+                      {/* Rol rozeti yazıyla değil minik noktayla: okumaya karışmaz. */}
+                      <span
+                        aria-hidden="true"
+                        className={`ml-auto h-1.5 w-1.5 flex-shrink-0 rounded-full ${
+                          hit.role === 'user' ? 'bg-obsidian-muted/50' : 'bg-[#dcb67a]/80'
+                        }`}
+                      />
                     </span>
-                  </span>
-                  <span className="mt-0.5 block truncate text-[10px] leading-snug text-obsidian-muted/70">
-                    {hit.snippet}
-                  </span>
-                </button>
-              ))}
+                    <span className="mt-0.5 block truncate text-[10px] leading-snug text-obsidian-muted/70">
+                      {hit.snippet}
+                    </span>
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 

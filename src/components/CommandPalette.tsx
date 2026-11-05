@@ -9,11 +9,13 @@ export interface PaletteAction {
   hint?: string;
   /** Aramada etiket dışında da eşleşsin (ör. "settings" → "Ayarlar"). */
   keywords?: string;
+  /** 'chatTools' → "Bu sohbet" bölümüne düşer; boşsa genel komutlar grubunda. */
+  group?: 'chatTools';
   run: () => void;
 }
 
-/** Alt bardaki ortak klavye rozeti. */
-function Kbd({ children }: { children: string }) {
+/** Alt bardaki ortak klavye rozeti. Header'daki kısayol ipuçları da bunu kullanır. */
+export function Kbd({ children }: { children: string }) {
   return (
     <span className="inline-flex min-w-[20px] items-center justify-center rounded border border-obsidian-raise bg-obsidian-bg px-1.5 py-0.5 font-mono text-[10px] leading-none text-[#A8A49E]">
       {children}
@@ -59,12 +61,15 @@ export function CommandPalette({
     [actions, needle]
   );
 
-  // Bölümler: sohbet eylemleri ("palette:chat:") ayrı grupta, komutlar üstte.
+  // Bölümler: sık kullanılan komutlar üstte, açık sohbetle ilgili işler
+  // (dışa aktar, kopyala, durdur) ortada, sohbetler en altta.
   const groups = useMemo(() => {
-    const commands = filtered.filter((a) => !a.id.startsWith('palette:chat:'));
     const chats = filtered.filter((a) => a.id.startsWith('palette:chat:'));
+    const tools = filtered.filter((a) => a.group === 'chatTools');
+    const commands = filtered.filter((a) => !a.id.startsWith('palette:chat:') && a.group !== 'chatTools');
     const out: { title: string; items: PaletteAction[] }[] = [];
     if (commands.length) out.push({ title: t('palette.groupCommands'), items: commands });
+    if (tools.length) out.push({ title: t('palette.groupThisChat'), items: tools });
     if (chats.length) out.push({ title: t('palette.groupChats'), items: chats });
     return out;
   }, [filtered, t]);
@@ -161,7 +166,7 @@ export function CommandPalette({
           ))}
         </div>
 
-        <div className="flex items-center gap-2 border-t border-[#282726] px-3.5 py-2 text-[10.5px] text-obsidian-muted">
+        <div className="flex items-center gap-2 border-t border-[#282726] px-3.5 py-2 text-[10px] text-obsidian-muted/80">
           <Kbd>↑↓</Kbd>
           <span>{t('palette.nav')}</span>
           <span className="mx-1 text-[#34332F]">·</span>

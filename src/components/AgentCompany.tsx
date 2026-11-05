@@ -1241,18 +1241,18 @@ export function AgentCompany({
               </button>
             </>
           )}
-          {/* Flow'da Run, Add agent'ın sağında aynı tasarımda durur (alt
-              köşedeki minik yeşil çip yerine). */}
-          {view === 'chart' && agents.length > 0 && (
-            <button type="button" onClick={() => setShowRun(true)} className={NEUTRAL} title={t('company.runHint')}>
-              <Play size={11} />
-              {t('company.run')}
-            </button>
-          )}
+          {/* Flow'da önce Add agent, Run onun SAĞINDA aynı tasarımda (birincil
+              eylem "eklemek"; koşmak hazırlıktan sonra gelir). */}
           {view !== 'office' && (
             <button type="button" onClick={() => addAgent(null, undefined, view === 'chart')} className={NEUTRAL}>
               <Plus size={12} />
               {t('company.add')}
+            </button>
+          )}
+          {view === 'chart' && agents.length > 0 && (
+            <button type="button" onClick={() => setShowRun(true)} className={NEUTRAL} title={t('company.runHint')}>
+              <Play size={11} />
+              {t('company.run')}
             </button>
           )}
         </div>
@@ -1270,7 +1270,8 @@ export function AgentCompany({
                 <button
                   type="button"
                   onClick={() => addAgent(null)}
-                  className={`${PRIMARY} h-7 px-2.5`}
+                  /* Sarı PRIMARY değil: araç çubuğuyla aynı sakin stil. */
+                  className={`${NEUTRAL} h-7 px-2.5`}
                 >
                   <Plus size={12} />
                   {t('company.firstAgent')}

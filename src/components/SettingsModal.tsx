@@ -397,12 +397,10 @@ export function SettingsModal({
   const [theme, setTheme] = useState<'dark' | 'nord-red'>('dark');
   const [editorLineNumbers, setEditorLineNumbers] = useState(true);
   const [editorAutosave, setEditorAutosave] = useState(false);
+  const [editorWordWrap, setEditorWordWrap] = useState(false);
 
   // General
   const [livePricing, setLivePricing] = useState(false);
-  const [workspaceRoot, setWorkspaceRoot] = useState('');
-  /** Son uygulanan kök: aynı yolu blur'da tekrar göndermeyi önler. */
-  const appliedWorkspaceRef = useRef('');
   const loadedProviderRef = useRef('');
   const loadedStartViewRef = useRef<'chat' | 'project'>('chat');
   const loadedProfileRef = useRef<{ name: string; avatar: string }>({ name: '', avatar: '' });
@@ -574,16 +572,8 @@ export function SettingsModal({
       if (cfg.appearance?.tabSize) setTabSize(String(cfg.appearance.tabSize));
       if (typeof cfg.appearance?.showLineNumbers === 'boolean') setEditorLineNumbers(cfg.appearance.showLineNumbers);
       if (typeof cfg.appearance?.autosave === 'boolean') setEditorAutosave(cfg.appearance.autosave);
-      if (typeof cfg.workspace_root === 'string') { setWorkspaceRoot(cfg.workspace_root); appliedWorkspaceRef.current = cfg.workspace_root; }
+      if (typeof cfg.appearance?.wordWrap === 'boolean') setEditorWordWrap(cfg.appearance.wordWrap);
     } catch {}
-
-    // Keep the workspace field in sync with the backend's actual root.
-    invoke<{ root: string; name: string; file_count: number }>('get_workspace_info')
-      .then((info) => {
-        if (cancelled) return;
-        if (info?.root) { setWorkspaceRoot(info.root); appliedWorkspaceRef.current = info.root; }
-      })
-      .catch(() => {});
 
     return () => { cancelled = true; };
   }, [isOpen]);
@@ -667,7 +657,6 @@ export function SettingsModal({
     startView !== loadedStartViewRef.current ||
     displayName !== loadedProfileRef.current.name ||
     avatar !== loadedProfileRef.current.avatar ||
-    workspaceRoot !== appliedWorkspaceRef.current ||
     Object.keys(keys).some((id) => (keys[id] || '').trim() !== (loadedKeysRef.current[id] || '').trim());
 
   const requestClose = useCallback(() => {
@@ -845,6 +834,7 @@ export function SettingsModal({
       onlinePricing: boolean;
       showLineNumbers: boolean;
       autosave: boolean;
+      wordWrap: boolean;
     }> = {}
   ) => {
     const cfg = {
@@ -853,6 +843,7 @@ export function SettingsModal({
         tabSize: Number(patch.tabSize ?? tabSize),
         showLineNumbers: patch.showLineNumbers ?? editorLineNumbers,
         autosave: patch.autosave ?? editorAutosave,
+        wordWrap: patch.wordWrap ?? editorWordWrap,
       },
       onlinePricing: patch.onlinePricing ?? livePricing,
       workspace_root: getWorkspaceRoot() ?? '',
@@ -924,29 +915,18 @@ export function SettingsModal({
     localStorage.setItem('tlm_theme', theme);
     localStorage.setItem('tlm_start_view', startView);
 
-    // Ayarlar: workspace yolu ÖNCE doğrulanır; bozuk yol hiçbir config'e
-    // yazılmaz (eski akış, hatadan sonra bozuk kaydis bırakıyordu).
-    let validatedRoot: string | null = null;
-    if (workspaceRoot.trim()) {
-      try {
-        const info = await invoke<{ root: string }>('set_workspace_root', { path: workspaceRoot.trim() });
-        if (info?.root) validatedRoot = info.root;
-      } catch (e) {
-        console.error('Could not set workspace root:', e);
-        const x = explainError(e, 'Workspace');
-        showToast(t('settings.workspaceError'), `${t('settings.workspaceErrorMsg', { path: workspaceRoot.trim() })} ${x.explanation}`, 'error', undefined, `[${x.code}] ${x.detail ?? String(e)}]`);
-      }
-    }
-
+    // Workspace kökü Ayarlar'dan YÖNETİLMEZ: klasör seçimi ProjectDashboard'da
+    // yapılır. Kayıtta yalnız var olan kök saklanır.
     const config = {
       appearance: {
         fontSize: `${fontSize}px`,
         tabSize: Number(tabSize),
         showLineNumbers: editorLineNumbers,
         autosave: editorAutosave,
+        wordWrap: editorWordWrap,
       },
       onlinePricing: livePricing,
-      workspace_root: validatedRoot ?? getWorkspaceRoot() ?? '',
+      workspace_root: getWorkspaceRoot() ?? '',
     };
     localStorage.setItem('thalamus_config', JSON.stringify(config));
 
@@ -968,7 +948,6 @@ export function SettingsModal({
     loadedProviderRef.current = activeProvider;
     loadedStartViewRef.current = startView;
     loadedProfileRef.current = { name: displayName.trim() || user?.name || '', avatar: avatar || '' };
-    appliedWorkspaceRef.current = validatedRoot ?? workspaceRoot;
     // Editor ayağı (ProjectDashboard) fontSize/tabSize'ı anında alabilsin diye
     // config değişti bilgisini yay (remount beklemeden uygulanır).
     window.dispatchEvent(new Event('thalamus_config_changed'));
@@ -1211,6 +1190,16 @@ export function SettingsModal({
                     <Switch
                       checked={editorAutosave}
                       onChange={(v) => { setEditorAutosave(v); persistConfig({ autosave: v }); }}
+                    />
+                  }
+                />
+                <Row
+                  label={t('settings.editorWordWrap')}
+                  hint={t('settings.editorWordWrapHint')}
+                  control={
+                    <Switch
+                      checked={editorWordWrap}
+                      onChange={(v) => { setEditorWordWrap(v); persistConfig({ wordWrap: v }); }}
                     />
                   }
                 />

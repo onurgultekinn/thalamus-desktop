@@ -4,6 +4,7 @@ import {
   Loader2, Play, RotateCcw, Settings2, Square, Wand2,
 } from 'lucide-react';
 import { useT } from '../lib/i18n';
+import { agentHeadDataUrl } from './PixelOffice';
 import { getActiveProvider } from '../services/aiClient';
 import { priceForModel, usePriceMap } from '../lib/pricing';
 import { computeLineDiff, diffStats } from '../lib/diff';
@@ -297,16 +298,26 @@ function AgentCard({
             : 'border-obsidian-border bg-obsidian-panel hover:border-obsidian-raise'
       }`}
     >
-      {/* Ad + durum */}
+      {/* Ad + durum: ajanın ofis yüzü (flow kartlarıyla aynı kimlik) + ad +
+          sağda durum noktası. */}
       <div className="flex items-center gap-1.5">
+        <img
+          src={agentHeadDataUrl(agent.id)}
+          alt=""
+          width={16}
+          height={16}
+          aria-hidden
+          className="shrink-0 rounded-sm"
+          style={{ imageRendering: 'pixelated' }}
+        />
+        <span className="min-w-0 flex-1 truncate text-[11.5px] font-medium text-obsidian-text">
+          {agent.label}
+        </span>
         <span
           className={`h-1.5 w-1.5 shrink-0 rounded-full ${isThinking ? 'animate-pulse' : ''}`}
           style={{ backgroundColor: color }}
           aria-hidden
         />
-        <span className="min-w-0 flex-1 truncate text-[11.5px] font-medium text-obsidian-text">
-          {agent.label}
-        </span>
         {isThinking && <Loader2 size={11} className="shrink-0 animate-spin text-[#dcb67a]" />}
         {isError && <AlertTriangle size={11} className="shrink-0 text-[#D14D41]" />}
       </div>
@@ -1152,6 +1163,12 @@ export function AgentMesh({
             </button>
           )}
         </div>
+
+        {/* Ne işe yaradığı tek satırda: ekranı ilk açan "bu ne?" diye
+            düşünmesin — görev → ajanlar → sonuç akışı özetlenir. */}
+        <p className="mt-1.5 mb-0 text-[11px] leading-snug text-obsidian-muted">
+          {t('run.explain')}
+        </p>
 
         {showSetup && (
           <div className="mt-2 flex flex-wrap items-center gap-3 rounded-lg border border-obsidian-border bg-obsidian-panel px-3 py-2 text-[11px]">
