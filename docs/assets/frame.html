@@ -60,7 +60,12 @@
     const img = q.get('img') || 'welcome.png';
     const label = q.get('label') || 'Thalamus Desktop';
     document.getElementById('shot').src = img;
-    document.getElementById('t').innerHTML = '<b>thalamus</b> ' + label;
+    const title = document.getElementById('t');
+    title.textContent = '';
+    const brand = document.createElement('b');
+    brand.textContent = 'thalamus';
+    title.appendChild(brand);
+    title.appendChild(document.createTextNode(' ' + label));
   </script>
 </body>
 </html>
